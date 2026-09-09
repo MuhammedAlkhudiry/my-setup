@@ -22,7 +22,8 @@ description: UX/UI discovery, implementation, options, and review.
 
 ## Design-system boundary
 
-- Follow the established design system. Before adding a component, token, pattern, or visual language, explain the unmet need and get approval.
+- Follow the established design system. Add components, tokens, or patterns needed for authorized work when they preserve its conventions. Ask only
+  when a change requires an unresolved product or design decision or expands the authorized scope. Reuse approval already given.
 - When the system cannot support needed behavior, propose a system-level extension instead of a poor interaction or one-off substitute.
 
 ## Review protocol

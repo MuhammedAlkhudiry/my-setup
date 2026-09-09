@@ -24,8 +24,10 @@ export const OPTIONAL_EXTERNAL_SKILL_NAMES = [
   "remotion-render",
 ] as const;
 
-// Remote skills intentionally track upstream branches so periodic refreshes update external
-// agent guidance without a separate lockfile workflow.
+// Remote skills intentionally track upstream branches: current guidance takes priority over
+// reproducible snapshots, especially when skills accompany CLIs that update independently.
+// Keep periodic upstream refreshes so installation does not preserve stale instructions;
+// do not introduce a lockfile that freezes this guidance.
 export const REMOTE_SKILL_SOURCES: RemoteSkillSource[] = [
   {
     repository: "https://github.com/expo/skills.git",

@@ -1,45 +1,55 @@
 #!/usr/bin/env bun
-
 import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { Database } from "bun:sqlite";
 
-type JsonObject = Record<string, unknown>;
-
-type SessionSummary = {
+type Obj = Record<string, unknown>;
+type Usage = { input: number; cached: number; output: number };
+type Call = { name: string; label: string; declared: number };
+type Command = {
+  command: string;
+  outputs: number;
+  bytes: number;
+  originalTokens: number;
+  truncated: number;
+  declared: number;
+};
+type Session = {
   file: string;
   id: string;
   cwd: string;
   bytes: number;
   lines: number;
+  parsed: number;
+  malformed: number;
+  unknown: number;
+  createdAt: number;
+  firstActivity: number;
+  lastActivity: number;
+  status: "created" | "resumed" | "unknown";
+  usageMode: "cumulative" | "last-only" | "none";
   tokenEvents: number;
-  compactions: number;
-  sessionMetaCount: number;
-  turnContextCount: number;
   firstInput: number;
   maxInput: number;
   totalInput: number;
   cachedInput: number;
   totalOutput: number;
+  compactions: number;
   baseInstructionBytes: number;
-  userInstructionBytes: number;
+  turnContextInstructionBytes: number;
+  injectedUserMessages: number;
+  injectedUserBytes: number;
+  humanRequests: number;
   firstUserMessage: string;
   imageMessages: number;
   imageBytes: number;
+  toolOutputs: number;
   execOutputs: number;
   largeExecOutputs: number;
   truncatedOutputs: number;
+  unmatchedToolOutputs: number;
 };
-
-type CommandSummary = {
-  command: string;
-  count: number;
-  bytes: number;
-  originalTokens: number;
-  truncated: number;
-};
-
-type TaskTreeSummary = {
+type Tree = {
   rootId: string;
   title: string;
   cwd: string;
@@ -49,570 +59,630 @@ type TaskTreeSummary = {
   totalInput: number;
   repeatedRootRequest: number;
   highStartupDescendants: number;
+  incomplete: boolean;
 };
 
 const home = process.env.HOME || "";
-const args = new Map<string, string>();
-
-if (process.argv.includes("--help") || process.argv.includes("-h")) {
+function die(message: string): never {
+  console.error(message);
+  process.exit(2);
+}
+function parseArgs(values: string[]): Map<string, string> {
+  const result = new Map<string, string>(),
+    flags = new Set(["help", "h", "json"]);
+  const options = new Set(["root", "days", "limit", "cwd", "since", "since-mtime", "state-db"]);
+  for (let i = 0; i < values.length; i++) {
+    const raw = values[i];
+    if (raw === "-h") {
+      result.set("h", "true");
+      continue;
+    }
+    if (!raw.startsWith("--")) die(`Unknown argument: ${raw}`);
+    const [key, inline] = raw.slice(2).split("=", 2);
+    if (flags.has(key)) {
+      if (inline !== undefined) die(`Option --${key} does not accept a value.`);
+      result.set(key, "true");
+      continue;
+    }
+    if (!options.has(key)) die(`Unknown option: --${key}`);
+    const value = inline ?? values[++i];
+    if (!value || value.startsWith("--")) die(`Option --${key} requires a value.`);
+    result.set(key, value);
+  }
+  return result;
+}
+const args = parseArgs(process.argv.slice(2));
+if (args.has("help") || args.has("h")) {
   console.log(`Usage:
   analyze-codex-sessions.ts [options]
 
 Options:
   --root <path>         Session root. Default: ~/.codex/sessions.
-  --days <number>       Lookback window when --since is absent. Default: 14.
+  --days <number>       Event-time lookback when --since is absent. Default: 14.
   --limit <number>      Maximum ranked items per section. Default: 12.
   --cwd <path>          Include only sessions for this working directory.
-  --since <date>        Include sessions modified on or after this date.
-  --since-mtime <time>  Include sessions modified after this epoch time.
-  --state-db <path>     Codex state database. Default: ~/.codex/state_5.sqlite.`);
+  --since <date>        Include activity at or after this event timestamp.
+  --since-mtime <time>  Diagnostic file prefilter using an epoch timestamp.
+  --state-db <path>     Codex state database. Default: ~/.codex/state_5.sqlite.
+  --json                Emit machine-readable output.`);
   process.exit(0);
 }
-
-for (let i = 2; i < process.argv.length; i++) {
-  const arg = process.argv[i];
-  if (!arg.startsWith("--")) continue;
-
-  const [key, inlineValue] = arg.slice(2).split("=", 2);
-  const value = inlineValue ?? process.argv[i + 1];
-  args.set(key, value);
-
-  if (!inlineValue) i++;
+function positive(value: string, option: string): number {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) die(`${option} must be a positive number.`);
+  return number;
 }
-
+function epoch(value: string, option: string): number {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) die(`${option} must be a valid epoch timestamp.`);
+  return number > 10_000_000_000 ? number : number * 1000;
+}
 const root = args.get("root") || join(home, ".codex", "sessions");
-const days = Number(args.get("days") || 14);
-const limit = Number(args.get("limit") || 12);
+const days = positive(args.get("days") || "14", "--days");
+const limit = positive(args.get("limit") || "12", "--limit");
+const since = args.has("since") ? Date.parse(args.get("since")!) : Date.now() - days * 86_400_000;
+if (!Number.isFinite(since)) die(`--since must be a valid date: ${args.get("since")}`);
+const sinceMtime = args.has("since-mtime")
+  ? epoch(args.get("since-mtime")!, "--since-mtime")
+  : undefined;
 const cwdFilter = args.get("cwd");
-const stateDbPath = args.get("state-db") || join(home, ".codex", "state_5.sqlite");
-const since = resolveSince();
+const stateDb = args.get("state-db") || join(home, ".codex", "state_5.sqlite");
 
-function resolveSince(): number {
-  const sinceMtime = args.get("since-mtime");
-  if (sinceMtime) {
-    const value = Number(sinceMtime);
-    if (!Number.isNaN(value)) {
-      return value > 10_000_000_000 ? value : value * 1000;
-    }
-  }
-
-  const sinceDate = args.get("since");
-  if (sinceDate) {
-    const value = Date.parse(sinceDate);
-    if (!Number.isNaN(value)) {
-      return value;
-    }
-  }
-
-  return Date.now() - days * 24 * 60 * 60 * 1000;
-}
+const object = (value: unknown): Obj =>
+  value && typeof value === "object" && !Array.isArray(value) ? (value as Obj) : {};
+const string = (value: unknown): string => (typeof value === "string" ? value : "");
+const number = (value: unknown): number => (typeof value === "number" ? value : 0);
+const bytes = (value: unknown): number =>
+  Buffer.byteLength(typeof value === "string" ? value : JSON.stringify(value ?? ""));
+const time = (value: unknown): number => {
+  const parsed = typeof value === "string" ? Date.parse(value) : NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+const getUsage = (value: unknown): Usage => {
+  const item = object(value);
+  return {
+    input: number(item.input_tokens),
+    cached: number(item.cached_input_tokens),
+    output: number(item.output_tokens),
+  };
+};
+const text = (value: unknown): string =>
+  typeof value === "string"
+    ? value
+    : Array.isArray(value)
+      ? value
+          .map((part) => string(object(part).text) || string(object(part).input_text))
+          .filter(Boolean)
+          .join("\n")
+          .trim()
+      : "";
+const short = (value: string, max = 72): string => {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
+};
+const normalizedPath = (value: string): string =>
+  resolve(value.startsWith("~/") ? join(home, value.slice(2)) : value).replace(/\/+$/, "");
 
 function walk(dir: string): string[] {
-  const files: string[] = [];
-
+  const found: string[] = [];
   for (const entry of readdirSync(dir)) {
-    const path = join(dir, entry);
-    const stat = statSync(path);
-
-    if (stat.isDirectory()) {
-      files.push(...walk(path));
-      continue;
-    }
-
-    if (entry.startsWith("rollout-") && entry.endsWith(".jsonl") && stat.mtimeMs >= since) {
-      files.push(path);
-    }
+    const path = join(dir, entry),
+      stat = statSync(path);
+    if (stat.isDirectory()) found.push(...walk(path));
+    else if (
+      entry.startsWith("rollout-") &&
+      entry.endsWith(".jsonl") &&
+      (sinceMtime === undefined || stat.mtimeMs >= sinceMtime)
+    )
+      found.push(path);
   }
-
-  return files.sort();
+  return found.sort();
 }
-
-function asObject(value: unknown): JsonObject {
-  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonObject) : {};
-}
-
-function asString(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function asNumber(value: unknown): number {
-  return typeof value === "number" ? value : 0;
-}
-
-function messageText(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (!Array.isArray(value)) return "";
-
-  return value
-    .map((item) => {
-      const content = asObject(item);
-      return asString(content.text) || asString(content.input_text);
-    })
-    .filter(Boolean)
-    .join("\n")
-    .trim();
-}
-
-function byteLength(value: string): number {
-  return Buffer.byteLength(value);
-}
-
-function approxTokens(bytes: number): number {
-  return Math.round(bytes / 4);
-}
-
-async function* readLines(file: string): AsyncGenerator<string> {
+async function* lines(file: string): AsyncGenerator<string> {
   const decoder = new TextDecoder();
   let pending = "";
-
   for await (const chunk of createReadStream(file)) {
     pending += decoder.decode(chunk, { stream: true });
-    let lineStart = 0;
-    let lineEnd = pending.indexOf("\n", lineStart);
-
-    while (lineEnd !== -1) {
-      yield pending.slice(lineStart, lineEnd);
-      lineStart = lineEnd + 1;
-      lineEnd = pending.indexOf("\n", lineStart);
+    let end = pending.indexOf("\n");
+    while (end >= 0) {
+      yield pending.slice(0, end);
+      pending = pending.slice(end + 1);
+      end = pending.indexOf("\n");
     }
-
-    pending = pending.slice(lineStart);
   }
-
   pending += decoder.decode();
   if (pending) yield pending;
 }
-
-function shortText(value: string, limit = 72): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized.length > limit ? `${normalized.slice(0, limit - 1)}…` : normalized;
-}
-
-function normalizePath(path: string): string {
-  const expandedPath = path.startsWith("~/") ? join(home, path.slice(2)) : path;
-  return resolve(expandedPath).replace(/\/+$/, "");
-}
-
-function matchesCwd(cwd: string): boolean {
-  if (!cwdFilter) {
-    return true;
-  }
-
-  const normalizedCwd = normalizePath(cwd);
-  const normalizedFilter = normalizePath(cwdFilter);
-  return normalizedCwd === normalizedFilter || normalizedCwd.startsWith(`${normalizedFilter}/`);
-}
-
-function addCommand(
-  commands: Map<string, CommandSummary>,
-  command: string,
-  bytes: number,
-  originalTokens: number,
-  truncated: boolean,
-): void {
-  const existing = commands.get(command) || {
-    command,
-    count: 0,
-    bytes: 0,
-    originalTokens: 0,
-    truncated: 0,
+const injectedBlocks =
+  /<(recommended_plugins|app-context|environment_context|skills_instructions|permissions instructions|apps_instructions|plugins_instructions)>[\s\S]*?<\/\1>/gi;
+function classify(message: string): { human: string; injected: boolean; injectedBytes: number } {
+  let human = message.replace(injectedBlocks, "").trim();
+  human = human
+    .replace(
+      /^# AGENTS\.md instructions for [^\n]+\n<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>\s*/i,
+      "",
+    )
+    .trim();
+  const injected = human !== message.trim();
+  return {
+    human,
+    injected,
+    injectedBytes: injected ? Math.max(0, bytes(message) - bytes(human)) : 0,
   };
-
-  existing.count++;
-  existing.bytes += bytes;
-  existing.originalTokens += originalTokens;
-  if (truncated) existing.truncated++;
-  commands.set(command, existing);
 }
-
-function shortCommand(argsJson: string): string {
-  try {
-    const parsed = JSON.parse(argsJson) as { cmd?: string };
-    const command = parsed.cmd || "(no command)";
-    return command.split(/\s+/).slice(0, 6).join(" ");
-  } catch {
-    return "(unparsed command)";
+function normalizeCall(payload: Obj): Call | undefined {
+  if (payload.type !== "function_call" && payload.type !== "custom_tool_call") return;
+  const name = string(payload.name),
+    source = string(payload.arguments) || string(payload.input);
+  const leaf = name.split(/[.:/]/).pop();
+  if (leaf === "exec_command") {
+    try {
+      return {
+        name,
+        label: short(string(object(JSON.parse(source)).cmd) || "(no command)"),
+        declared: 1,
+      };
+    } catch {
+      return { name, label: "(unparsed command)", declared: 1 };
+    }
   }
+  if (leaf === "exec") {
+    const declared = [...source.matchAll(/tools\.(?:[\w_]+\.)?exec_command\s*\(/g)].length;
+    return {
+      name,
+      label: `functions.exec wrapper (${declared || "unknown"} declared shell calls)`,
+      declared,
+    };
+  }
+  return { name, label: name || "(unnamed tool)", declared: 0 };
 }
-
-function printTable<T>(items: T[], columns: Array<[string, (item: T) => string | number]>): void {
-  const rows = items.map((item) => columns.map(([, get]) => String(get(item))));
-  const widths = columns.map(([header], index) =>
-    Math.max(header.length, ...rows.map((row) => row[index].length)),
+function outputText(value: unknown): string {
+  return typeof value === "string"
+    ? value
+    : Array.isArray(value)
+      ? value
+          .map((part) => string(object(part).text))
+          .filter(Boolean)
+          .join("\n")
+      : JSON.stringify(value ?? "");
+}
+function addCommand(map: Map<string, Command>, call: Call, output: unknown): void {
+  const rendered = outputText(output),
+    existing = map.get(call.label) || {
+      command: call.label,
+      outputs: 0,
+      bytes: 0,
+      originalTokens: 0,
+      truncated: 0,
+      declared: 0,
+    };
+  existing.outputs++;
+  existing.bytes += bytes(output);
+  existing.declared += call.declared;
+  existing.originalTokens += Number(
+    rendered.match(/(?:Original token count|original_token_count)["':\s]+(\d+)/i)?.[1] || 0,
   );
-
-  console.log(`| ${columns.map(([header], index) => header.padEnd(widths[index])).join(" | ")} |`);
+  existing.truncated += /tokens truncated|\btruncated\b/i.test(rendered) ? 1 : 0;
+  map.set(call.label, existing);
+}
+function table<T>(items: T[], columns: Array<[string, (item: T) => string | number]>): void {
+  const rows = items.map((item) => columns.map(([, get]) => String(get(item))));
+  const widths = columns.map(([header], i) =>
+    Math.max(header.length, ...rows.map((row) => row[i]?.length || 0)),
+  );
+  console.log(`| ${columns.map(([header], i) => header.padEnd(widths[i])).join(" | ")} |`);
   console.log(`| ${widths.map((width) => "-".repeat(width)).join(" | ")} |`);
+  for (const row of rows)
+    console.log(`| ${row.map((cell, i) => cell.padEnd(widths[i])).join(" | ")} |`);
+}
 
-  for (const row of rows) {
-    console.log(`| ${row.map((cell, index) => cell.padEnd(widths[index])).join(" | ")} |`);
+if (!existsSync(root)) die(`Codex sessions directory not found: ${root}`);
+const candidates = walk(root),
+  sessions: Session[] = [],
+  commands = new Map<string, Command>();
+for (const file of candidates) {
+  const summary: Session = {
+    file: relative(root, file),
+    id: "",
+    cwd: "",
+    bytes: 0,
+    lines: 0,
+    parsed: 0,
+    malformed: 0,
+    unknown: 0,
+    createdAt: 0,
+    firstActivity: 0,
+    lastActivity: 0,
+    status: "unknown",
+    usageMode: "none",
+    tokenEvents: 0,
+    firstInput: 0,
+    maxInput: 0,
+    totalInput: 0,
+    cachedInput: 0,
+    totalOutput: 0,
+    compactions: 0,
+    baseInstructionBytes: 0,
+    turnContextInstructionBytes: 0,
+    injectedUserMessages: 0,
+    injectedUserBytes: 0,
+    humanRequests: 0,
+    firstUserMessage: "",
+    imageMessages: 0,
+    imageBytes: 0,
+    toolOutputs: 0,
+    execOutputs: 0,
+    largeExecOutputs: 0,
+    truncatedOutputs: 0,
+    unmatchedToolOutputs: 0,
+  };
+  const calls = new Map<string, Call>(),
+    localCommands = new Map<string, Command>();
+  let active = false,
+    previousCumulative: Usage | undefined,
+    sawCumulative = false;
+  const cumulativeDelta: Usage = { input: 0, cached: 0, output: 0 };
+  const legacy: Usage = { input: 0, cached: 0, output: 0 };
+  for await (const line of lines(file)) {
+    if (!line) continue;
+    summary.lines++;
+    let event: Obj;
+    try {
+      const parsed: unknown = JSON.parse(line);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        summary.malformed++;
+        continue;
+      }
+      event = parsed as Obj;
+    } catch {
+      summary.malformed++;
+      continue;
+    }
+    summary.parsed++;
+    const type = string(event.type),
+      payload = object(event.payload),
+      at = time(event.timestamp) || time(payload.timestamp);
+    if (type === "session_meta") {
+      summary.id = string(payload.id) || string(payload.session_id) || summary.id;
+      summary.cwd = string(payload.cwd) || summary.cwd;
+      summary.createdAt ||= time(payload.timestamp) || at;
+      summary.baseInstructionBytes ||= bytes(string(object(payload.base_instructions).text));
+    }
+    if (
+      type === "response_item" &&
+      (payload.type === "function_call" || payload.type === "custom_tool_call")
+    ) {
+      const call = normalizeCall(payload),
+        id = string(payload.call_id) || string(payload.id);
+      if (call && id) calls.set(id, call);
+    }
+    if (type === "event_msg" && payload.type === "token_count" && at < since) {
+      const total = object(object(payload.info).total_token_usage);
+      if (Object.keys(total).length) previousCumulative = getUsage(total);
+    }
+    if (!at || at < since) continue;
+    active = true;
+    summary.firstActivity ||= at;
+    summary.lastActivity = Math.max(summary.lastActivity, at);
+    summary.bytes += bytes(line);
+    if (type === "turn_context") {
+      const instructions = string(payload.user_instructions);
+      if (instructions) summary.turnContextInstructionBytes += bytes(instructions);
+    } else if (type === "compacted") summary.compactions++;
+    else if (type === "event_msg" && payload.type === "token_count") {
+      const info = object(payload.info),
+        last = getUsage(info.last_token_usage),
+        total = object(info.total_token_usage);
+      summary.tokenEvents++;
+      if (summary.createdAt >= since) summary.firstInput ||= last.input;
+      summary.maxInput = Math.max(summary.maxInput, last.input);
+      if (Object.keys(total).length) {
+        sawCumulative = true;
+        const current = getUsage(total);
+        for (const key of ["input", "cached", "output"] as const) {
+          const prior = previousCumulative?.[key] ?? 0;
+          cumulativeDelta[key] += current[key] >= prior ? current[key] - prior : current[key];
+        }
+        previousCumulative = current;
+      } else {
+        summary.usageMode = "last-only";
+        legacy.input += last.input;
+        legacy.cached += last.cached;
+        legacy.output += last.output;
+      }
+    } else if (type === "response_item" && payload.type === "message" && payload.role === "user") {
+      const message = text(payload.content),
+        result = classify(message);
+      if (result.injected) {
+        summary.injectedUserMessages++;
+        summary.injectedUserBytes += result.injectedBytes;
+      }
+      if (result.human) {
+        summary.humanRequests++;
+        summary.firstUserMessage ||= result.human;
+      }
+      const imageParts = Array.isArray(payload.content)
+        ? payload.content.filter((part) => {
+            const item = object(part);
+            return (
+              item.type === "input_image" ||
+              /data:image/.test(string(item.image_url) || string(item.url))
+            );
+          })
+        : [];
+      if (imageParts.length) {
+        summary.imageMessages++;
+        summary.imageBytes += bytes(imageParts);
+      }
+    } else if (
+      type === "response_item" &&
+      (payload.type === "function_call" || payload.type === "custom_tool_call")
+    ) {
+      // Calls are indexed before the window check so an in-window output can match a prewindow call.
+    } else if (
+      type === "response_item" &&
+      (payload.type === "function_call_output" || payload.type === "custom_tool_call_output")
+    ) {
+      summary.toolOutputs++;
+      const call = calls.get(string(payload.call_id) || string(payload.id));
+      if (!call) {
+        summary.unmatchedToolOutputs++;
+        continue;
+      }
+      const leaf = call.name.split(/[.:/]/).pop();
+      if (leaf === "exec" || leaf === "exec_command") {
+        const rendered = outputText(payload.output);
+        summary.execOutputs++;
+        if (
+          Number(
+            rendered.match(/(?:Original token count|original_token_count)["':\s]+(\d+)/i)?.[1] || 0,
+          ) > 1000
+        )
+          summary.largeExecOutputs++;
+        if (/tokens truncated|\btruncated\b/i.test(rendered)) summary.truncatedOutputs++;
+        addCommand(localCommands, call, payload.output);
+      }
+    } else if (
+      !["session_meta", "turn_context", "compacted"].includes(type) &&
+      !(
+        (type === "event_msg" && payload.type === "token_count") ||
+        (type === "response_item" &&
+          [
+            "message",
+            "function_call",
+            "custom_tool_call",
+            "function_call_output",
+            "custom_tool_call_output",
+          ].includes(string(payload.type)))
+      )
+    )
+      summary.unknown++;
+  }
+  const filter =
+    cwdFilter &&
+    normalizedPath(summary.cwd) !== normalizedPath(cwdFilter) &&
+    !normalizedPath(summary.cwd).startsWith(`${normalizedPath(cwdFilter)}/`);
+  if (!active || filter) continue;
+  if (sawCumulative) {
+    summary.usageMode = "cumulative";
+    summary.totalInput = cumulativeDelta.input;
+    summary.cachedInput = cumulativeDelta.cached;
+    summary.totalOutput = cumulativeDelta.output;
+  } else
+    Object.assign(summary, {
+      totalInput: legacy.input,
+      cachedInput: legacy.cached,
+      totalOutput: legacy.output,
+    });
+  summary.status = !summary.createdAt
+    ? "unknown"
+    : summary.createdAt < since
+      ? "resumed"
+      : "created";
+  sessions.push(summary);
+  for (const item of localCommands.values()) {
+    const aggregate = commands.get(item.command) || {
+      ...item,
+      outputs: 0,
+      bytes: 0,
+      originalTokens: 0,
+      truncated: 0,
+      declared: 0,
+    };
+    aggregate.outputs += item.outputs;
+    aggregate.bytes += item.bytes;
+    aggregate.originalTokens += item.originalTokens;
+    aggregate.truncated += item.truncated;
+    aggregate.declared += item.declared;
+    commands.set(item.command, aggregate);
   }
 }
 
-function loadTaskTrees(sessions: SessionSummary[]): TaskTreeSummary[] {
-  if (!existsSync(stateDbPath) || sessions.length === 0) return [];
-
-  const database = new Database(stateDbPath, { readonly: true });
+function taskTrees(): Tree[] {
+  if (!existsSync(stateDb) || !sessions.length) return [];
+  const db = new Database(stateDb, { readonly: true });
   try {
-    const threads = database
+    const threads = db
       .query("SELECT id, title, cwd, first_user_message FROM threads")
       .all() as Array<{ id: string; title: string; cwd: string; first_user_message: string }>;
-    const edges = database
+    const edges = db
       .query("SELECT parent_thread_id, child_thread_id FROM thread_spawn_edges")
       .all() as Array<{ parent_thread_id: string; child_thread_id: string }>;
-    const threadById = new Map(threads.map((thread) => [thread.id, thread]));
-    const parentByChild = new Map(
-      edges.map(({ parent_thread_id, child_thread_id }) => [child_thread_id, parent_thread_id]),
-    );
-    const sessionById = new Map(
-      sessions.filter(({ id }) => id).map((session) => [session.id, session]),
-    );
+    const thread = new Map(threads.map((item) => [item.id, item])),
+      parent = new Map(edges.map((item) => [item.child_thread_id, item.parent_thread_id]));
+    const unique = new Map<string, Session>();
+    for (const session of sessions)
+      if (
+        session.id &&
+        (!unique.has(session.id) || session.lastActivity > unique.get(session.id)!.lastActivity)
+      )
+        unique.set(session.id, session);
     const groups = new Map<
       string,
-      Array<{ session: SessionSummary; depth: number; request: string }>
+      Array<{ session: Session; depth: number; request: string; incomplete: boolean }>
     >();
-
-    for (const session of sessionById.values()) {
-      let rootId = session.id;
-      let depth = 0;
+    for (const session of unique.values()) {
+      let rootId = session.id,
+        depth = 0;
       const visited = new Set<string>();
-
-      while (parentByChild.has(rootId) && !visited.has(rootId)) {
+      while (parent.has(rootId) && !visited.has(rootId)) {
         visited.add(rootId);
-        rootId = parentByChild.get(rootId) || rootId;
+        rootId = parent.get(rootId)!;
         depth++;
       }
-
-      const request = threadById.get(session.id)?.first_user_message || session.firstUserMessage;
-      const members = groups.get(rootId) || [];
-      members.push({ session, depth, request });
-      groups.set(rootId, members);
+      const item = {
+        session,
+        depth,
+        request: thread.get(session.id)?.first_user_message || session.firstUserMessage,
+        incomplete: !unique.has(rootId),
+      };
+      groups.set(rootId, [...(groups.get(rootId) || []), item]);
     }
-
-    return Array.from(groups.entries())
-      .map(([rootId, members]): TaskTreeSummary => {
-        const rootThread = threadById.get(rootId);
-        const rootRequest =
-          rootThread?.first_user_message || members.find(({ depth }) => depth === 0)?.request || "";
-        const descendants = members.filter(({ depth }) => depth > 0);
+    return [...groups.entries()]
+      .map(([rootId, members]) => {
+        const rootThread = thread.get(rootId),
+          rootRequest =
+            rootThread?.first_user_message ||
+            members.find((item) => item.depth === 0)?.request ||
+            "";
+        const descendants = members.filter((item) => item.depth > 0);
         return {
           rootId,
           title: rootThread?.title || rootRequest || rootId,
           cwd: rootThread?.cwd || members[0]?.session.cwd || "",
           sessions: members.length,
           descendants: descendants.length,
-          maxDepth: Math.max(...members.map(({ depth }) => depth)),
-          totalInput: members.reduce((sum, { session }) => sum + session.totalInput, 0),
-          repeatedRootRequest: descendants.filter(({ request }) => request === rootRequest).length,
-          highStartupDescendants: descendants.filter(({ session }) => session.firstInput >= 50_000)
+          maxDepth: Math.max(...members.map((item) => item.depth)),
+          totalInput: members.reduce((sum, item) => sum + item.session.totalInput, 0),
+          repeatedRootRequest: descendants.filter((item) => item.request === rootRequest).length,
+          highStartupDescendants: descendants.filter((item) => item.session.firstInput >= 50_000)
             .length,
+          incomplete: members.some((item) => item.incomplete),
         };
       })
-      .filter(({ descendants }) => descendants > 0)
+      .filter((item) => item.descendants > 0)
       .sort((a, b) => b.totalInput - a.totalInput);
   } finally {
-    database.close();
+    db.close();
   }
 }
-
-if (!existsSync(root)) {
-  console.error(`Codex sessions directory not found: ${root}`);
-  process.exit(1);
-}
-
-const files = walk(root);
-const commands = new Map<string, CommandSummary>();
-const sessions: SessionSummary[] = [];
-let totalLines = 0;
-let totalParsed = 0;
-
-for (const file of files) {
-  const summary: SessionSummary = {
-    file: relative(root, file),
-    id: "",
-    cwd: "",
-    bytes: 0,
-    lines: 0,
-    tokenEvents: 0,
-    compactions: 0,
-    sessionMetaCount: 0,
-    turnContextCount: 0,
-    firstInput: 0,
-    maxInput: 0,
-    totalInput: 0,
-    cachedInput: 0,
-    totalOutput: 0,
-    baseInstructionBytes: 0,
-    userInstructionBytes: 0,
-    firstUserMessage: "",
-    imageMessages: 0,
-    imageBytes: 0,
-    execOutputs: 0,
-    largeExecOutputs: 0,
-    truncatedOutputs: 0,
-  };
-  const calls = new Map<string, { name: string; command: string }>();
-  const sessionCommands = new Map<string, CommandSummary>();
-  let sessionParsed = 0;
-
-  for await (const line of readLines(file)) {
-    if (!line) continue;
-
-    summary.lines++;
-    summary.bytes += byteLength(line);
-
-    let event: JsonObject;
-    try {
-      event = JSON.parse(line) as JsonObject;
-    } catch {
-      continue;
-    }
-
-    sessionParsed++;
-    const type = asString(event.type);
-    const payload = asObject(event.payload);
-
-    if (type === "session_meta") {
-      summary.sessionMetaCount++;
-      summary.id = asString(asObject(payload).id) || summary.id;
-      summary.cwd = asString(payload.cwd) || summary.cwd;
-      if (!summary.baseInstructionBytes) {
-        summary.baseInstructionBytes = byteLength(
-          asString(asObject(payload.base_instructions).text),
-        );
-      }
-    }
-
-    if (type === "turn_context") {
-      summary.turnContextCount++;
-      if (!summary.userInstructionBytes) {
-        summary.userInstructionBytes = byteLength(asString(payload.user_instructions));
-      }
-    }
-
-    if (type === "compacted") {
-      summary.compactions++;
-    }
-
-    if (type === "event_msg" && payload.type === "token_count") {
-      const info = asObject(payload.info);
-      const lastUsage = asObject(info.last_token_usage);
-
-      const inputTokens = asNumber(lastUsage.input_tokens);
-      summary.tokenEvents++;
-      summary.totalInput += inputTokens;
-      summary.cachedInput += asNumber(lastUsage.cached_input_tokens);
-      summary.totalOutput += asNumber(lastUsage.output_tokens);
-      summary.maxInput = Math.max(summary.maxInput, inputTokens);
-      if (!summary.firstInput) summary.firstInput = inputTokens;
-    }
-
-    if (type === "response_item" && payload.type === "message" && payload.role === "user") {
-      if (!summary.firstUserMessage) {
-        summary.firstUserMessage = messageText(payload.content);
-      }
-      const content = JSON.stringify(payload.content || "");
-
-      if (content.includes("data:image")) {
-        summary.imageMessages++;
-        summary.imageBytes += byteLength(content);
-      }
-    }
-
-    if (type === "response_item" && payload.type === "function_call") {
-      const callId = asString(payload.call_id);
-      const name = asString(payload.name);
-      const command = name === "exec_command" ? shortCommand(asString(payload.arguments)) : name;
-
-      if (callId) calls.set(callId, { name, command });
-    }
-
-    if (type === "response_item" && payload.type === "function_call_output") {
-      const call = calls.get(asString(payload.call_id));
-      if (!call || call.name !== "exec_command") continue;
-
-      const output = asString(payload.output);
-      const bytes = byteLength(output);
-      const originalTokens = Number(output.match(/Original token count: (\d+)/)?.[1] || 0);
-      const truncated = output.includes("tokens truncated") || output.includes("truncated");
-
-      summary.execOutputs++;
-      if (originalTokens > 1000) summary.largeExecOutputs++;
-      if (truncated) summary.truncatedOutputs++;
-      addCommand(sessionCommands, call.command, bytes, originalTokens, truncated);
-    }
-  }
-
-  if (!matchesCwd(summary.cwd)) {
-    continue;
-  }
-
-  totalLines += summary.lines;
-  totalParsed += sessionParsed;
-  sessions.push(summary);
-  for (const command of sessionCommands.values()) {
-    const existing = commands.get(command.command) || {
-      command: command.command,
-      count: 0,
-      bytes: 0,
-      originalTokens: 0,
-      truncated: 0,
-    };
-    existing.count += command.count;
-    existing.bytes += command.bytes;
-    existing.originalTokens += command.originalTokens;
-    existing.truncated += command.truncated;
-    commands.set(command.command, existing);
-  }
-}
-
-const totalBytes = sessions.reduce((sum, session) => sum + session.bytes, 0);
-const totalInput = sessions.reduce((sum, session) => sum + session.totalInput, 0);
-const cachedInput = sessions.reduce((sum, session) => sum + session.cachedInput, 0);
-const compactions = sessions.reduce((sum, session) => sum + session.compactions, 0);
-const images = sessions.reduce((sum, session) => sum + session.imageMessages, 0);
-const imageBytes = sessions.reduce((sum, session) => sum + session.imageBytes, 0);
-const execOutputs = sessions.reduce((sum, session) => sum + session.execOutputs, 0);
-const largeExecOutputs = sessions.reduce((sum, session) => sum + session.largeExecOutputs, 0);
-const truncatedOutputs = sessions.reduce((sum, session) => sum + session.truncatedOutputs, 0);
-const firstInputs = sessions
-  .filter((session) => session.firstInput > 0)
-  .map((session) => session.firstInput);
-const averageFirstInput = firstInputs.length
-  ? Math.round(firstInputs.reduce((sum, value) => sum + value, 0) / firstInputs.length)
-  : 0;
-let taskTrees: TaskTreeSummary[] = [];
-let taskTreeError = "";
+let trees: Tree[] = [],
+  treeError = "";
 try {
-  taskTrees = loadTaskTrees(sessions);
+  trees = taskTrees();
 } catch (error) {
-  taskTreeError = error instanceof Error ? error.message : String(error);
+  treeError = error instanceof Error ? error.message : String(error);
+}
+const totals = {
+  candidateFiles: candidates.length,
+  sessions: sessions.length,
+  created: sessions.filter((item) => item.status === "created").length,
+  resumed: sessions.filter((item) => item.status === "resumed").length,
+  unknownStatus: sessions.filter((item) => item.status === "unknown").length,
+  bytes: sessions.reduce((sum, item) => sum + item.bytes, 0),
+  parsed: sessions.reduce((sum, item) => sum + item.parsed, 0),
+  malformed: sessions.reduce((sum, item) => sum + item.malformed, 0),
+  unknown: sessions.reduce((sum, item) => sum + item.unknown, 0),
+  input: sessions.reduce((sum, item) => sum + item.totalInput, 0),
+  cachedInput: sessions.reduce((sum, item) => sum + item.cachedInput, 0),
+  output: sessions.reduce((sum, item) => sum + item.totalOutput, 0),
+  toolOutputs: sessions.reduce((sum, item) => sum + item.toolOutputs, 0),
+  unmatchedToolOutputs: sessions.reduce((sum, item) => sum + item.unmatchedToolOutputs, 0),
+};
+const report = {
+  window: { since, sinceMtime: sinceMtime ?? null },
+  totals,
+  sessions,
+  commands: [...commands.values()],
+  taskTrees: trees,
+  taskTreeError: treeError,
+};
+if (args.has("json")) {
+  console.log(JSON.stringify(report, null, 2));
+  process.exit(0);
 }
 
-console.log(`# Codex Session Context Audit\n`);
+console.log("# Codex Session Context Audit\n");
+console.log(`Activity window: since ${new Date(since).toISOString()} (event timestamps)`);
+if (sinceMtime !== undefined)
+  console.log(`Diagnostic file prefilter: mtime since ${new Date(sinceMtime).toISOString()}`);
 console.log(
-  `Window: ${
-    args.has("since") || args.has("since-mtime")
-      ? `since ${new Date(since).toISOString()}`
-      : `last ${days} days`
-  }`,
+  `Sessions with activity: ${totals.sessions}/${totals.candidateFiles} candidates (${totals.created} created, ${totals.resumed} resumed, ${totals.unknownStatus} unknown)`,
 );
-if (cwdFilter) {
-  console.log(`CWD filter: ${normalizePath(cwdFilter).replace(home, "~")}`);
-}
-console.log(`Files: ${sessions.length}/${files.length}`);
-console.log(`Parsed events: ${totalParsed}/${totalLines}`);
-console.log(`Stored session text: ~${approxTokens(totalBytes).toLocaleString()} tokens`);
-console.log(`Average first request input: ${averageFirstInput.toLocaleString()} tokens`);
+console.log(`Serialized event bytes in window: ${totals.bytes.toLocaleString()}`);
 console.log(
-  `Input cache rate: ${totalInput ? Math.round((cachedInput / totalInput) * 1000) / 10 : 0}%`,
+  `Provider usage in window: ${totals.input.toLocaleString()} input, ${totals.cachedInput.toLocaleString()} cached input, ${totals.output.toLocaleString()} output`,
 );
-console.log(`Compactions: ${compactions}`);
 console.log(
-  `Exec outputs: ${execOutputs.toLocaleString()} (${largeExecOutputs.toLocaleString()} over 1k original tokens, ${truncatedOutputs.toLocaleString()} truncated)`,
+  `Coverage: ${totals.parsed.toLocaleString()} parsed, ${totals.malformed} malformed, ${totals.unknown} unknown, ${totals.unmatchedToolOutputs} unmatched tool outputs\n`,
 );
-console.log(`Image messages: ${images} (~${approxTokens(imageBytes).toLocaleString()} tokens)\n`);
-
-console.log(`## Largest Task Trees\n`);
-if (taskTrees.length > 0) {
-  printTable(taskTrees.slice(0, limit), [
-    ["input", (item) => item.totalInput.toLocaleString()],
-    ["sessions", (item) => item.sessions],
-    ["desc", (item) => item.descendants],
-    ["depth", (item) => item.maxDepth],
-    ["repeat request", (item) => item.repeatedRootRequest],
-    ["50k+ startup", (item) => item.highStartupDescendants],
-    ["cwd", (item) => item.cwd.replace(home, "~")],
-    ["root", (item) => shortText(item.title)],
+console.log("## Largest Task Trees\n");
+if (trees.length)
+  table(trees.slice(0, limit), [
+    ["input usage", (x) => x.totalInput.toLocaleString()],
+    ["observed sessions", (x) => x.sessions],
+    ["observed desc", (x) => x.descendants],
+    ["depth", (x) => x.maxDepth],
+    ["repeat request", (x) => x.repeatedRootRequest],
+    ["50k+ startup", (x) => x.highStartupDescendants],
+    ["root", (x) => short(x.title)],
   ]);
-} else if (taskTreeError) {
-  console.log(`Task-tree diagnostics unavailable: ${taskTreeError}`);
-} else {
-  console.log(`No multi-task trees detected in this window.`);
-}
-
-console.log(`\n## Largest Sessions\n`);
-printTable(
+else
+  console.log(
+    treeError
+      ? `Task-tree diagnostics unavailable: ${treeError}`
+      : "No multi-task trees detected in this window.",
+  );
+console.log("\n## Largest Sessions\n");
+table(
   sessions
     .slice()
     .sort((a, b) => b.bytes - a.bytes)
     .slice(0, limit),
   [
-    ["tokens", (item) => approxTokens(item.bytes).toLocaleString()],
-    ["max input", (item) => item.maxInput.toLocaleString()],
-    ["comp", (item) => item.compactions],
-    ["images", (item) => item.imageMessages],
-    ["large exec", (item) => item.largeExecOutputs],
-    ["cwd", (item) => item.cwd.replace(home, "~")],
-    ["file", (item) => item.file],
+    ["bytes", (x) => x.bytes.toLocaleString()],
+    ["input usage", (x) => x.totalInput.toLocaleString()],
+    ["usage", (x) => x.usageMode],
+    ["status", (x) => x.status],
+    ["first activity", (x) => new Date(x.firstActivity).toISOString()],
+    ["file", (x) => x.file],
   ],
 );
-
-console.log(`\n## Noisiest Commands\n`);
-printTable(
-  Array.from(commands.values())
-    .sort((a, b) => b.bytes - a.bytes)
-    .slice(0, limit),
-  [
-    ["tokens", (item) => approxTokens(item.bytes).toLocaleString()],
-    ["count", (item) => item.count],
-    ["orig tokens", (item) => item.originalTokens.toLocaleString()],
-    ["trunc", (item) => item.truncated],
-    ["command", (item) => item.command],
-  ],
-);
-
-console.log(`\n## Highest Startup Inputs\n`);
-printTable(
+console.log("\n## Noisiest Declared Shell Calls\n");
+table([...commands.values()].sort((a, b) => b.bytes - a.bytes).slice(0, limit), [
+  ["output bytes", (x) => x.bytes.toLocaleString()],
+  ["outputs", (x) => x.outputs],
+  ["declared calls", (x) => x.declared],
+  ["reported orig tokens", (x) => x.originalTokens.toLocaleString()],
+  ["trunc", (x) => x.truncated],
+  ["call", (x) => x.command],
+]);
+console.log("\n## Highest Startup Inputs\n");
+table(
   sessions
-    .filter((session) => session.firstInput)
+    .filter((x) => x.firstInput)
     .sort((a, b) => b.firstInput - a.firstInput)
     .slice(0, limit),
   [
-    ["first input", (item) => item.firstInput.toLocaleString()],
-    ["base", (item) => approxTokens(item.baseInstructionBytes).toLocaleString()],
-    ["project", (item) => approxTokens(item.userInstructionBytes).toLocaleString()],
-    ["request", (item) => approxTokens(byteLength(item.firstUserMessage)).toLocaleString()],
-    [
-      "runtime/history",
-      (item) =>
-        Math.max(
-          0,
-          item.firstInput -
-            approxTokens(item.baseInstructionBytes) -
-            approxTokens(item.userInstructionBytes) -
-            approxTokens(byteLength(item.firstUserMessage)),
-        ).toLocaleString(),
-    ],
-    ["cwd", (item) => item.cwd.replace(home, "~")],
-    ["file", (item) => item.file],
+    ["first input usage", (x) => x.firstInput.toLocaleString()],
+    ["base bytes", (x) => x.baseInstructionBytes.toLocaleString()],
+    ["turn-context bytes", (x) => x.turnContextInstructionBytes.toLocaleString()],
+    ["injected user bytes", (x) => x.injectedUserBytes.toLocaleString()],
+    ["human request", (x) => short(x.firstUserMessage)],
+    ["images", (x) => `${x.imageMessages}/${x.imageBytes.toLocaleString()} B`],
+    ["file", (x) => x.file],
   ],
 );
-
-console.log(`\n## Suggested Follow-Ups\n`);
-if (truncatedOutputs || largeExecOutputs) {
-  console.log(`- Replace broad shell exploration with narrower commands or purpose-built scripts.`);
-}
-if (images) {
-  console.log(
-    `- Prefer cropped screenshots, local image paths, or browser snapshots for visual QA.`,
-  );
-}
-if (averageFirstInput > 20_000) {
-  console.log(
-    `- Review always-loaded rules, enabled tools, MCPs, and skill descriptions for startup bloat.`,
-  );
-}
-if (taskTrees.some(({ highStartupDescendants }) => highStartupDescendants > 0)) {
-  console.log(
-    `- Give independent subagents no inherited turns and pass only the smallest explicit context needed.`,
-  );
-}
-if (compactions) {
-  console.log(
-    `- Split long investigations sooner and preserve durable findings in source docs or memory.`,
-  );
-}
-if (!truncatedOutputs && !largeExecOutputs && !images && !compactions) {
-  console.log(`- No major context waste pattern detected in this window.`);
-}
+console.log("\n## Limits\n");
+console.log(
+  "- Cumulative usage subtracts the last prewindow provider snapshot. Legacy last-only records are summed and may contain duplicates.",
+);
+console.log(
+  "- Task-tree rows include only sessions observed in the window. Known descendants without window activity are not represented.",
+);
+console.log(
+  "- Session totals can include duplicate rollout files for one session; task-tree totals select the newest active copy per session ID.",
+);
+console.log(
+  "- functions.exec source only reveals declared nested calls. It does not prove execution, and each wrapper output is counted once.",
+);

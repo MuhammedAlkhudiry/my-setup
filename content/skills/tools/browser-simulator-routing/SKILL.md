@@ -1,6 +1,6 @@
 ---
 name: browser-simulator-routing
-description: Browser and simulator routing for authenticated web UI, isolated automation, and reusable device flows.
+description: Browser and simulator routing for web UI and reusable device flows.
 ---
 
 # Routing
@@ -15,13 +15,9 @@ and crop it to the region under inspection before attaching it.
 
 ## Browser
 
-- When the task depends on existing user browser state, including a signed-in session, open tabs, or extensions, prefer `$chrome:control-chrome`. Use
-  `$playwriter` when the user requests it, it is already active for the task, or Chrome control remains unavailable after its setup recovery and the
-  user did not explicitly choose a browser. Read and follow the selected skill before acting.
-- When browser UI interaction does not depend on existing user state, use `playwright-cli`. This includes local web-app testing and authentication
-  created by the task inside an isolated Playwright profile. Read `playwright-cli --help`, then the narrowest relevant command help before acting.
-- If an isolated Playwright task reaches a login that requires the user's existing session, switch to the existing-state route. Do not switch when the
-  task or repository provides its own test authentication.
+- For browser UI interaction, including local web-app testing, prefer `$chrome:control-chrome`. Use `$playwriter` when the user requests it, it is
+  already active for the task, or Chrome control remains unavailable after its setup recovery and the user did not explicitly choose a browser.
+  Read and follow the selected skill before acting.
 - If the user explicitly chose an unavailable browser surface, follow its setup recovery and then report the blocker. Do not silently substitute
   another browser.
 

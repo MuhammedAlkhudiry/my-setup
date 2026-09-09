@@ -294,7 +294,6 @@ main() {
   check_link pk "$HOME/bin/pk" "$MY_SETUP_ROOT/shell/pk.zsh"
   check_link ads "$HOME/bin/ads" "$MY_SETUP_ROOT/shell/ads.zsh"
   check_link lanes "$HOME/bin/lanes" "$MY_SETUP_ROOT/shell/lanes.zsh"
-  check_link codex-usage "$HOME/bin/codex-usage" "$MY_SETUP_ROOT/shell/codex-usage.zsh"
   check_link claude-skills "$HOME/.claude/skills" "$HOME/.agents/skills"
 
   print_header "Managed skills"

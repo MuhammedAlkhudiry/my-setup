@@ -9,7 +9,7 @@ import { renderBaseRules, syncManagedSkillsAsync } from "./install";
 
 describe("renderBaseRules", () => {
   test("injects the configured active projects", () => {
-    const rendered = renderBaseRules("Before\n{{ACTIVE_PROJECTS}}\n{{CHEAP_DELEGATE}}\nAfter\n", [
+    const rendered = renderBaseRules("Before\n{{ACTIVE_PROJECTS}}\nAfter\n", [
       {
         id: "example",
         name: "Example",
@@ -26,24 +26,11 @@ describe("renderBaseRules", () => {
     expect(rendered).toContain("`/projects/example-project`");
     expect(rendered).toContain("task worktrees are harness-managed");
     expect(rendered).not.toContain("{{ACTIVE_PROJECTS}}");
-    expect(rendered).toContain("a Luna subagent");
-    expect(rendered).not.toContain("{{CHEAP_DELEGATE}}");
-  });
-
-  test("names the cheap delegate per agent", () => {
-    const template = "{{ACTIVE_PROJECTS}}\nDelegate to {{CHEAP_DELEGATE}}.\n";
-    expect(renderBaseRules(template, [], "claude")).toContain("Delegate to a Haiku subagent.");
-    expect(renderBaseRules(template, [], "opencode")).toContain(
-      "Delegate to the configured small model.",
-    );
   });
 
   test("fails when the base rules omit the injection point", () => {
     expect(() => renderBaseRules("No placeholder\n", [])).toThrow(
       "Base rules are missing {{ACTIVE_PROJECTS}}",
-    );
-    expect(() => renderBaseRules("{{ACTIVE_PROJECTS}}\n", [])).toThrow(
-      "Base rules are missing {{CHEAP_DELEGATE}}",
     );
   });
 });

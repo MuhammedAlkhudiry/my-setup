@@ -6,9 +6,12 @@ import { resolve } from "node:path";
 import {
   cleanLaravelS3Bucket,
   cleanLaravelS3Prefix,
+  deleteLaravelS3Bucket,
+  ensureLaravelS3Bucket,
   cleanTestingDatabases,
   ensureLaravelAppKey,
   setupDatabase,
+  verifyLaravelS3Bucket,
   verifyDatabase,
 } from "./resources";
 import type { ProjectEnvironmentContext } from "./types";
@@ -145,4 +148,45 @@ test("scopes full S3 cleanup to the configured lane bucket", () => {
   expect(command).toContain('$expectedBucket = "example-lane-3"');
   expect(command).toContain("does not belong to this lane");
   expect(command).toContain("$disk->allFiles()");
+});
+
+test("manages a private lane-owned S3 bucket through its Laravel disk", () => {
+  const root = mkdtempSync(resolve(tmpdir(), "project-environment-private-storage-"));
+  temporaryDirectories.push(root);
+  const log = resolve(root, "php.log");
+  const php = resolve(root, "php");
+  writeFileSync(php, `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\n`);
+  chmodSync(php, 0o755);
+  const context = {
+    root,
+    backendDir: root,
+    bucket: "example-lane-3",
+    phpCommand: php,
+    phpArgsPrefix: [],
+  } as unknown as ProjectEnvironmentContext;
+  const target = {
+    disk: "attachments",
+    bucket: "example-lane-3-private",
+  };
+
+  ensureLaravelS3Bucket(context, { ...target, publicRead: false });
+  verifyLaravelS3Bucket(context, { ...target, publicRead: false });
+  cleanLaravelS3Bucket(context, target);
+  deleteLaravelS3Bucket(context, target);
+
+  const commands = readFileSync(log, "utf8");
+  expect(commands).toContain('Storage::disk("attachments")');
+  expect(commands).toContain("config('filesystems.disks.attachments.bucket')");
+  expect(commands).toContain('$expectedBucket = "example-lane-3-private"');
+  expect(commands).toContain("deleteBucketPolicy");
+  expect(commands).toContain("Private S3 bucket [{$bucket}] has a bucket policy");
+  expect(commands).toContain("$client->deleteBucket(['Bucket' => $bucket])");
+});
+
+test("rejects an S3 bucket outside the lane namespace", () => {
+  const context = { bucket: "example-lane-3" } as ProjectEnvironmentContext;
+
+  expect(() =>
+    ensureLaravelS3Bucket(context, { disk: "attachments", bucket: "another-lane-private" }),
+  ).toThrow("is not owned by lane example-lane-3");
 });

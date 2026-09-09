@@ -4,20 +4,30 @@ import * as runtime from "../runtime";
 import type { ProjectEnvironmentAdapter, ProjectEnvironmentContext } from "../types";
 
 interface HariumContext extends ProjectEnvironmentContext {
+  attachmentsBucket: string;
   typesense: { url: string; apiKey: string };
 }
 
 const backendSecretKeys = ["MAIL_PASSWORD", "EXPO_ACCESS_TOKEN", "OPENAI_API_KEY"];
 
-const expoEnvironment = {
+const expoEnvironmentOptions = {
   apiUrlKeys: ["EXPO_PUBLIC_LOCAL_APP_URL", "EXPO_PUBLIC_APP_URL"],
   metroPortKeys: ["EXPO_DEV_SERVER_PORT"],
   simulatorNameKey: "EXPO_IOS_SIMULATOR",
 };
 
-function context(): HariumContext {
+function expoEnvironment(value: HariumContext) {
   return {
-    ...runtime.createProjectEnvironmentContext(getProjectEnvironmentDefinition("harium")),
+    ...expoEnvironmentOptions,
+    values: { EXPO_PUBLIC_ANDROID_APP_URL: `http://10.0.2.2:${19300 + value.laneNumber}` },
+  };
+}
+
+function context(): HariumContext {
+  const value = runtime.createProjectEnvironmentContext(getProjectEnvironmentDefinition("harium"));
+  return {
+    ...value,
+    attachmentsBucket: `${value.bucket}-private`,
     typesense: { url: "http://127.0.0.1:8108", apiKey: "LARAVEL-HERD" },
   };
 }
@@ -25,6 +35,7 @@ function context(): HariumContext {
 function backendEnvironmentValues(value: HariumContext): Record<string, string> {
   return {
     APP_ENV: "local",
+    SERVER_PORT: String(19300 + value.laneNumber),
     DB_CONNECTION: "mysql",
     SESSION_DRIVER: "file",
     SESSION_SECURE_COOKIE: "true",
@@ -42,6 +53,7 @@ function backendEnvironmentValues(value: HariumContext): Record<string, string> 
     AWS_DEFAULT_REGION: "us-east-1",
     AWS_THROW: "true",
     AWS_REPORT: "true",
+    AWS_ATTACHMENTS_BUCKET: value.attachmentsBucket,
     R2_ASSETS_URL: value.assetUrl!,
     MAIL_MAILER: "log",
     MAIL_FROM_ADDRESS: `${value.prefix}@harium.test`,
@@ -97,7 +109,7 @@ async function setup(): Promise<void> {
   runtime.trustMise(value);
   runtime.setupHerd(value);
   runtime.setupLaravelEnvironment(value, laravelEnvironment);
-  runtime.setupExpoEnvironment(value, expoEnvironment);
+  runtime.setupExpoEnvironment(value, expoEnvironment(value));
   runtime.setupDatabase(value);
   runtime.ensureComposerDependencies(value, {
     installArgs: ["install", "--no-interaction", "--prefer-dist"],
@@ -114,6 +126,11 @@ async function setup(): Promise<void> {
   runtime.artisan(value, "migrations", ["migrate", "--force"]);
   runtime.artisan(value, "cache", ["optimize:clear"]);
   runtime.ensureLaravelS3Bucket(value, { publicRead: true });
+  runtime.ensureLaravelS3Bucket(value, {
+    disk: "attachments",
+    bucket: value.attachmentsBucket,
+    publicRead: false,
+  });
   setupApplicationData(value);
   runtime.log("setup", `ready: ${value.appUrl}`);
 }
@@ -124,7 +141,7 @@ async function mobileDevelopment(): Promise<void> {
     label: "mobile Bun dependencies",
     directory: value.mobileDir,
   });
-  runtime.setupExpoEnvironment(value, expoEnvironment);
+  runtime.setupExpoEnvironment(value, expoEnvironment(value));
   runtime.setupSimulator(value);
   runtime.log("mobile", `Metro ${value.metroPort} | simulator ${value.simulatorName}`);
 }
@@ -133,8 +150,13 @@ async function verify(args: string[]): Promise<void> {
   const { value, laravelEnvironment } = operationContext();
   runtime.verifyLaneInfrastructure(value);
   runtime.verifyLaravelEnvironment(value, laravelEnvironment);
-  runtime.verifyExpoEnvironmentFile(value, expoEnvironment);
+  runtime.verifyExpoEnvironmentFile(value, expoEnvironment(value));
   runtime.verifyLaravelS3Bucket(value);
+  runtime.verifyLaravelS3Bucket(value, {
+    disk: "attachments",
+    bucket: value.attachmentsBucket,
+    publicRead: false,
+  });
   await runtime.verifyTypesense(value.typesense);
   const object = verifyApplicationData(value);
   await runtime.verifyFetch(value.appUrl, "Herd HTTPS site", {}, value.herdCertificateAuthority);
@@ -152,6 +174,10 @@ async function reset(): Promise<void> {
   runtime.setupDatabase(value);
   await runtime.deleteTypesenseCollections(value.typesense, `${value.prefix}_`);
   runtime.cleanLaravelS3Bucket(value);
+  runtime.cleanLaravelS3Bucket(value, {
+    disk: "attachments",
+    bucket: value.attachmentsBucket,
+  });
   runtime.artisan(value, "reset-database", ["migrate:fresh", "--seed", "--force"]);
   runtime.log("reset", `${value.lane} is reset`);
 }
@@ -159,6 +185,11 @@ async function reset(): Promise<void> {
 async function destroy(): Promise<void> {
   const value = context();
   runtime.deleteLaravelS3Bucket(value, { allowFailure: true });
+  runtime.deleteLaravelS3Bucket(value, {
+    disk: "attachments",
+    bucket: value.attachmentsBucket,
+    allowFailure: true,
+  });
   await runtime.deleteTypesenseCollections(value.typesense, `${value.prefix}_`, {
     allowFailure: true,
   });

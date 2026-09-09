@@ -53,12 +53,27 @@ export function reindexLaravelScoutModels(context: ProjectEnvironmentContext): v
   artisan(context, "search", ["tinker", "--execute", script]);
 }
 
-function laravelS3BucketPrelude(context: ProjectEnvironmentContext): string[] {
-  const expectedBucket = JSON.stringify(context.bucket);
+interface LaravelS3BucketTarget {
+  disk?: string;
+  bucket?: string;
+}
+
+function laravelS3BucketPrelude(
+  context: ProjectEnvironmentContext,
+  options: LaravelS3BucketTarget = {},
+): string[] {
+  const disk = options.disk ?? "s3";
+  const bucket = options.bucket ?? context.bucket;
+  if (!/^[a-zA-Z0-9_-]+$/.test(disk)) throw new Error(`Unsafe Laravel S3 disk: ${disk}`);
+  if (bucket !== context.bucket && !bucket.startsWith(`${context.bucket}-`)) {
+    throw new Error(`S3 bucket ${bucket} is not owned by lane ${context.bucket}`);
+  }
+  const encodedDisk = JSON.stringify(disk);
+  const expectedBucket = JSON.stringify(bucket);
   return [
-    "$disk = Storage::disk('s3');",
+    `$disk = Storage::disk(${encodedDisk});`,
     "$client = $disk->getClient();",
-    "$bucket = config('filesystems.disks.s3.bucket');",
+    `$bucket = config('filesystems.disks.${disk}.bucket');`,
     `$expectedBucket = ${expectedBucket};`,
     'if ($bucket !== $expectedBucket) { throw new RuntimeException("Configured S3 bucket [{$bucket}] does not belong to this lane."); }',
   ];
@@ -66,35 +81,50 @@ function laravelS3BucketPrelude(context: ProjectEnvironmentContext): string[] {
 
 export function ensureLaravelS3Bucket(
   context: ProjectEnvironmentContext,
-  options: { publicRead?: boolean } = {},
+  options: LaravelS3BucketTarget & { publicRead?: boolean } = {},
 ): void {
-  const policy = options.publicRead
-    ? "$client->putBucketPolicy(['Bucket' => $bucket, 'Policy' => json_encode(['Version' => '2012-10-17', 'Statement' => [['Effect' => 'Allow', 'Principal' => '*', 'Action' => ['s3:GetObject'], 'Resource' => [\"arn:aws:s3:::{$bucket}/*\"]]]], JSON_THROW_ON_ERROR)]);"
-    : "";
+  const policy =
+    options.publicRead === true
+      ? "$client->putBucketPolicy(['Bucket' => $bucket, 'Policy' => json_encode(['Version' => '2012-10-17', 'Statement' => [['Effect' => 'Allow', 'Principal' => '*', 'Action' => ['s3:GetObject'], 'Resource' => [\"arn:aws:s3:::{$bucket}/*\"]]]], JSON_THROW_ON_ERROR)]);"
+      : options.publicRead === false
+        ? "$client->deleteBucketPolicy(['Bucket' => $bucket]);"
+        : "";
   artisan(context, "storage", [
     "tinker",
     "--execute",
     [
-      ...laravelS3BucketPrelude(context),
+      ...laravelS3BucketPrelude(context, options),
       "try { $client->headBucket(['Bucket' => $bucket]); } catch (Throwable $exception) { $client->createBucket(['Bucket' => $bucket]); }",
       policy,
     ].join(" "),
   ]);
 }
 
-export function verifyLaravelS3Bucket(context: ProjectEnvironmentContext): void {
+export function verifyLaravelS3Bucket(
+  context: ProjectEnvironmentContext,
+  options: LaravelS3BucketTarget & { publicRead?: boolean } = {},
+): void {
+  const privacyCheck =
+    options.publicRead === false
+      ? "try { $client->getBucketPolicy(['Bucket' => $bucket]); throw new RuntimeException(\"Private S3 bucket [{$bucket}] has a bucket policy.\"); } catch (Aws\\S3\\Exception\\S3Exception $exception) { if ($exception->getAwsErrorCode() !== 'NoSuchBucketPolicy') { throw $exception; } }"
+      : "";
   artisan(context, "verify:storage", [
     "tinker",
     "--execute",
     [
-      ...laravelS3BucketPrelude(context),
+      ...laravelS3BucketPrelude(context, options),
       "$client->headBucket(['Bucket' => $bucket]);",
       "$client->listObjectsV2(['Bucket' => $bucket, 'MaxKeys' => 1]);",
+      privacyCheck,
     ].join(" "),
   ]);
 }
 
-export function cleanLaravelS3Prefix(context: ProjectEnvironmentContext, prefix: string): void {
+export function cleanLaravelS3Prefix(
+  context: ProjectEnvironmentContext,
+  prefix: string,
+  options: LaravelS3BucketTarget = {},
+): void {
   if (!prefix || !/^[a-zA-Z0-9_/-]+$/.test(prefix) || prefix.startsWith("/")) {
     throw new Error(`Unsafe S3 cleanup prefix: ${prefix}`);
   }
@@ -103,19 +133,22 @@ export function cleanLaravelS3Prefix(context: ProjectEnvironmentContext, prefix:
     "tinker",
     "--execute",
     [
-      ...laravelS3BucketPrelude(context),
+      ...laravelS3BucketPrelude(context, options),
       `$files = $disk->allFiles(${encodedPrefix});`,
       "foreach (array_chunk($files, 1000) as $chunk) { $disk->delete($chunk); }",
     ].join(" "),
   ]);
 }
 
-export function cleanLaravelS3Bucket(context: ProjectEnvironmentContext): void {
+export function cleanLaravelS3Bucket(
+  context: ProjectEnvironmentContext,
+  options: LaravelS3BucketTarget = {},
+): void {
   artisan(context, "clean:storage", [
     "tinker",
     "--execute",
     [
-      ...laravelS3BucketPrelude(context),
+      ...laravelS3BucketPrelude(context, options),
       "$files = $disk->allFiles();",
       "foreach (array_chunk($files, 1000) as $chunk) { $disk->delete($chunk); }",
     ].join(" "),
@@ -124,7 +157,7 @@ export function cleanLaravelS3Bucket(context: ProjectEnvironmentContext): void {
 
 export function deleteLaravelS3Bucket(
   context: ProjectEnvironmentContext,
-  options: { allowFailure?: boolean } = {},
+  options: LaravelS3BucketTarget & { allowFailure?: boolean } = {},
 ): void {
   run(
     context,
@@ -136,7 +169,7 @@ export function deleteLaravelS3Bucket(
       "tinker",
       "--execute",
       [
-        ...laravelS3BucketPrelude(context),
+        ...laravelS3BucketPrelude(context, options),
         "if ($client->doesBucketExistV2($bucket)) {",
         "foreach (array_chunk($disk->allFiles(), 1000) as $chunk) { $disk->delete($chunk); }",
         "$client->deleteBucket(['Bucket' => $bucket]);",

@@ -73,6 +73,12 @@ export const PROJECT_DEFINITIONS: ProjectDefinition[] = [
     },
     services: [
       {
+        id: "android-api",
+        name: "Android API",
+        directory: "harium",
+        runner: { type: "bun-script", script: "dev:android-api" },
+      },
+      {
         id: "frontend",
         name: "Frontend",
         directory: "harium",
@@ -92,7 +98,7 @@ export const PROJECT_DEFINITIONS: ProjectDefinition[] = [
       },
     ],
     simulatorSlimming: {
-      exceptCategories: ["icloud", "store", "connectivity"],
+      exceptCategories: ["icloud", "store", "connectivity", "photos"],
     },
     environment: {
       backendDirectory: "harium",

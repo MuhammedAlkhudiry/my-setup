@@ -109,31 +109,15 @@ const SHARED_BIN_COMMANDS = [
   { name: "pk", source: "pk.zsh" },
   { name: "ads", source: "ads.zsh" },
   { name: "lanes", source: "lanes.zsh" },
-  { name: "codex-usage", source: "codex-usage.zsh" },
 ];
-
-export type RulesAgent = "codex" | "opencode" | "claude";
-
-const CHEAP_DELEGATE_PLACEHOLDER = "{{CHEAP_DELEGATE}}";
-const CHEAP_DELEGATE_BY_AGENT: Record<RulesAgent, string> = {
-  codex: "a Luna subagent",
-  claude: "a Haiku subagent",
-  opencode: "the configured small model",
-};
 
 // =============================================================================
 // Individual Operations
 // =============================================================================
 
-export function renderBaseRules(
-  template: string,
-  projects = ACTIVE_PROJECTS,
-  agent: RulesAgent = "codex",
-): string {
-  for (const placeholder of [ACTIVE_PROJECTS_PLACEHOLDER, CHEAP_DELEGATE_PLACEHOLDER]) {
-    if (!template.includes(placeholder)) {
-      throw new Error(`Base rules are missing ${placeholder}`);
-    }
+export function renderBaseRules(template: string, projects = ACTIVE_PROJECTS): string {
+  if (!template.includes(ACTIVE_PROJECTS_PLACEHOLDER)) {
+    throw new Error(`Base rules are missing ${ACTIVE_PROJECTS_PLACEHOLDER}`);
   }
 
   const activeProjects = projects
@@ -143,9 +127,7 @@ export function renderBaseRules(
     )
     .join("\n");
 
-  return template
-    .replace(ACTIVE_PROJECTS_PLACEHOLDER, activeProjects)
-    .replace(CHEAP_DELEGATE_PLACEHOLDER, CHEAP_DELEGATE_BY_AGENT[agent]);
+  return template.replace(ACTIVE_PROJECTS_PLACEHOLDER, activeProjects);
 }
 
 function knownSkillNames(): Set<string> {
@@ -173,23 +155,23 @@ function readBaseRulesTemplate(): string {
   return template;
 }
 
-function copyRules(destination: string, agent: RulesAgent, label: string): void {
+function copyRules(destination: string, label: string): void {
   print.info(`Copying ${label} rules to ${destination}...`);
   ensureParentDirSync(destination);
-  writeFileSync(destination, renderBaseRules(readBaseRulesTemplate(), ACTIVE_PROJECTS, agent));
+  writeFileSync(destination, renderBaseRules(readBaseRulesTemplate()));
   print.success(`${label} rules copied`);
 }
 
 function copyOpencodeRules(): void {
-  copyRules(OPENCODE_PATHS.rules, "opencode", "OpenCode");
+  copyRules(OPENCODE_PATHS.rules, "OpenCode");
 }
 
 function copyCodexRules(): void {
-  copyRules(CODEX_PATHS.rules, "codex", "Codex");
+  copyRules(CODEX_PATHS.rules, "Codex");
 }
 
 function copyClaudeRules(): void {
-  copyRules(CLAUDE_PATHS.rules, "claude", "Claude Code");
+  copyRules(CLAUDE_PATHS.rules, "Claude Code");
 }
 
 function getManagedMcpServerNames(managedContent: string): Set<string> {
@@ -509,7 +491,7 @@ async function installShared(installWidgets: boolean): Promise<void> {
     // Preserve missing commands and user-owned files.
   }
 
-  for (const command of ["context-health", "hosts", "sentry-cli"]) {
+  for (const command of ["context-health", "hosts", "sentry-cli", "codex-usage"]) {
     const legacyCommand = join(SHARED_PATHS.binDir, command);
     try {
       const legacyTarget = await readlink(legacyCommand);

@@ -1,14 +1,11 @@
 ---
 name: how-to-answer-question
-description: Apply when user ask a question.
+description: Answer user questions with read-only investigation when needed.
 ---
 
-When the user asks a question, look into it if needed, answer, and stop. Do not make any changes. A question about a change does not give permission
-to make it.
+Apply the shared **QUESTION-ONLY** rule to determine what the user authorized.
 
 > “Can you change the button color?” → Do any read-only operations and answer directly.
-
-If the same message also gives a clear task, complete that task before answering the question. Do not do the work that the question only asks about.
 
 > “Remove the old implementation. How can we build the new one?” → Remove the old implementation, then explain how to build the new one without
 > building it.

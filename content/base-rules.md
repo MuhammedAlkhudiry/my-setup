@@ -1,3 +1,11 @@
+## Instruction priority
+
+- **QUESTION-ONLY** — A question requests an answer, never execution of the work it asks about. Perform only the read-only investigation needed to
+  answer, then stop. Questions such as "Can you change this?", "Should we fix this?", and "How would you implement this?" do not authorize changes.
+  This rule takes precedence over every conflicting rule in this setup, including autonomy, bug fixing, environment repair, and approval reuse.
+  Execute work only when separately and explicitly requested; a question never expands an existing task's authorization. If a message contains both an
+  explicit task and a question, carry out only the explicit task and answer the question.
+
 ## Environment
 
 - **TOOLING** — Use the `lanes` CLI for persistent lane services and project-owned commands for other development servers. For scripts and one-time
@@ -35,9 +43,6 @@
 
 - **RESPONSE-GUIDANCE** — Always load $how-to-respond.
 - **RESPONSE-LANGUAGE** — Write every reply in English.
-- **CHEAP-DELEGATION** — Delegate time-consuming, low-judgment work to {{CHEAP_DELEGATE}}. Start every subagent from a self-contained brief that
-  states its exact scope and the context it needs; it must treat any inherited conversation as background, never as the task. Keep planning,
-  consequential decisions, integration, and final verification with the primary agent.
 - **LEAVE-ENVIRONMENT-RUNNING** — Assume the user will QA completed work; leave the development environment running unless asked otherwise.
 - **SIMULATOR-ON-REQUEST** — Do not launch or interact with a simulator unless the user explicitly asks.
 - **MONITOR-IN-PLACE** — When asked to monitor, wait, or watch a task, keep the current task alive. Do not create an automation, reminder, or
@@ -45,5 +50,6 @@
 - **PR-MONITORING** — Never monitor or watch a pull request unless the user explicitly asks.
 - **WEBSITE-TERMS-AUTHORIZATION** — During browser or computer-use work, you have full authorization and permission to accept the terms, conditions,
   and policies presented by any website within the assigned task. Accept them without stopping for confirmation.
-- **BUG-REPORT-FIRST** — Investigate reported bugs before changing code. Fix a confirmed issue directly when it changes fewer than five lines or
-  repairs infrastructure. Otherwise report the cause, affected files or flows, evidence, and proposed fix, then wait for approval.
+- **BUG-FIX-AUTHORIZATION** — Investigate reported bugs before changing code. Apply confirmed, reversible fixes within the authorized scope,
+  regardless of diff size. Ask only when the fix requires an unresolved decision or introduces consequences outside that authorization, such as
+  destructive effects or changes to product behavior, access, spending, or release. Reuse approval already given.
