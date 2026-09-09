@@ -415,7 +415,3 @@ export const SYSTEM_TOOL_GROUPS = [
     ],
   },
 ] as const satisfies readonly SystemToolGroup[];
-
-export function listSystemTools(): SystemTool[] {
-  return SYSTEM_TOOL_GROUPS.flatMap((group) => [...group.tools]);
-}

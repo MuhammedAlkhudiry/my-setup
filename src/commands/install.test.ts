@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -87,5 +87,35 @@ describe("syncManagedSkillsAsync", () => {
       expect(existsSync(join(dest, "typescript", "empty-source-dir"))).toBe(false);
       expect(existsSync(join(dest, "typescript", "SKILL.md"))).toBe(true);
     });
+  });
+});
+
+test("skill reinstall replaces stale files, preserves custom skills, and omits symlinks", async () => {
+  await withTempDirs(async (src, dest) => {
+    writeSkill(src, "tools", "example");
+    const source = join(src, "tools/example");
+    mkdirSync(join(source, "references"));
+    writeFileSync(join(source, "references/current.md"), "current contents\n");
+    symlinkSync("references/current.md", join(source, "linked.md"));
+
+    const installed = join(dest, "example");
+    mkdirSync(join(installed, "references"), { recursive: true });
+    writeFileSync(join(installed, "SKILL.md"), "old skill\n");
+    writeFileSync(join(installed, "references/removed.md"), "stale contents\n");
+    writeFileSync(join(installed, "references/current.md"), "old contents\n");
+    mkdirSync(join(dest, "custom"));
+    writeFileSync(join(dest, "custom/SKILL.md"), "custom skill\n");
+
+    await syncManagedSkillsAsync({ src, dest, label: "test skills" });
+
+    expect(readFileSync(join(installed, "references/current.md"), "utf8")).toBe(
+      "current contents\n",
+    );
+    expect(readFileSync(join(installed, "SKILL.md"), "utf8")).toBe(
+      readFileSync(join(source, "SKILL.md"), "utf8"),
+    );
+    expect(existsSync(join(installed, "references/removed.md"))).toBe(false);
+    expect(existsSync(join(installed, "linked.md"))).toBe(false);
+    expect(readFileSync(join(dest, "custom/SKILL.md"), "utf8")).toBe("custom skill\n");
   });
 });

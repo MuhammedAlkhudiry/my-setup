@@ -377,7 +377,6 @@ export async function openLaneTarget(
     const port = laneServiceEnvironment(mobileDirectory).EXPO_DEV_SERVER_PORT;
     if (!port) throw new Error(`Managed mobile environment is missing for ${projectId}/${laneId}`);
     openExpoDevelopmentClient({
-      cwd: mobileDirectory,
       port,
       scheme: lane.project.mobile.developmentScheme,
       simulatorName,
@@ -388,17 +387,7 @@ export async function openLaneTarget(
     execFileSync("xcrun", ["simctl", "list", "-j", "devices"], {
       encoding: "utf8",
     }),
-  ) as {
-    devices: Record<
-      string,
-      Array<{
-        name: string;
-        udid?: string;
-        state?: string;
-        isAvailable?: boolean;
-      }>
-    >;
-  };
+  ) as Parameters<typeof findSimulator>[0];
   const simulator = findSimulator(document, simulatorName);
   if (!simulator?.udid) throw new Error(`Simulator ${simulatorName} is missing`);
   if (simulator.state !== "Booted") {
@@ -544,32 +533,32 @@ function serviceStatus(context: ServiceContext, snapshot = processSnapshot()): L
       uptime !== undefined &&
       uptime < 15,
     );
-    const staleInputs = serviceInputsChanged(context);
-    const readinessFailure = staleInputs
-      ? "Service inputs changed after launch; restart this lane service"
-      : launchStatus.pid
-        ? serviceReadinessFailure(context)
-        : undefined;
-    return {
+    let readinessFailure: string | undefined;
+    if (serviceInputsChanged(context)) {
+      readinessFailure = "Service inputs changed after launch; restart this lane service";
+    } else if (launchStatus.pid) {
+      readinessFailure = serviceReadinessFailure(context);
+    }
+
+    const status: LaneServiceStatus = {
       ...base,
-      state: crashLooping
-        ? "crash-looping"
-        : readinessFailure
-          ? "degraded"
-          : launchStatus.pid
-            ? "running"
-            : launchStatus.failed
-              ? "failed"
-              : "starting",
+      state: "starting",
       managed: true,
       ...(launchStatus.pid ? { pid: launchStatus.pid } : {}),
       ...(residentBytes > 0 ? { residentBytes } : {}),
-      ...(crashLooping
-        ? { detail: `Restarted ${launchStatus.runs} times; last exit ${launchStatus.exitCode}` }
-        : readinessFailure
-          ? { detail: readinessFailure }
-          : {}),
     };
+    if (crashLooping) {
+      status.state = "crash-looping";
+      status.detail = `Restarted ${launchStatus.runs} times; last exit ${launchStatus.exitCode}`;
+    } else if (readinessFailure) {
+      status.state = "degraded";
+      status.detail = readinessFailure;
+    } else if (launchStatus.pid) {
+      status.state = "running";
+    } else if (launchStatus.failed) {
+      status.state = "failed";
+    }
+    return status;
   }
   const external = matchingProcesses(context, snapshot.observed)[0];
   const residentBytes = external ? processTreeResidentBytes(external.pid, snapshot.memory) : 0;

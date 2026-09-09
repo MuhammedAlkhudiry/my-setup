@@ -10,7 +10,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-test("controls and reads logs for a launchd-backed lane service", () => {
+test("controls and reads logs for a launchd-backed lane service", async () => {
   const root = mkdtempSync(join(tmpdir(), "lanes-services-"));
   roots.push(root);
   const lanePath = join(root, "project-lane-1");
@@ -82,6 +82,16 @@ test("controls and reads logs for a launchd-backed lane service", () => {
     const startedService = JSON.parse(started.stdout.toString()).lanes[0].services[1];
     expect(startedService.state).toBe("running");
     expect(startedService.residentBytes).toBeGreaterThan(0);
+
+    // A running process may not have read its package script or emitted output yet.
+    const logDeadline = Date.now() + 5_000;
+    let initialLog = "";
+    do {
+      initialLog = await Bun.file(startedService.logPath).text();
+      if (initialLog.includes("service-ready:9123")) break;
+      await Bun.sleep(25);
+    } while (Date.now() < logDeadline);
+    expect(initialLog).toContain("service-ready:9123");
 
     const sourcePath = join(appPath, "src", "feature.ts");
     mkdirSync(join(appPath, "src"), { recursive: true });

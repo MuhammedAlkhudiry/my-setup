@@ -16,8 +16,8 @@ and crop it to the region under inspection before attaching it.
 ## Browser
 
 - For browser UI interaction, including local web-app testing, prefer `$chrome:control-chrome`. Use `$playwriter` when the user requests it, it is
-  already active for the task, or Chrome control remains unavailable after its setup recovery and the user did not explicitly choose a browser.
-  Read and follow the selected skill before acting.
+  already active for the task, or Chrome control remains unavailable after its setup recovery and the user did not explicitly choose a browser. Read
+  and follow the selected skill before acting.
 - If the user explicitly chose an unavailable browser surface, follow its setup recovery and then report the blocker. Do not silently substitute
   another browser.
 

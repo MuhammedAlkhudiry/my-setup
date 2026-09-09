@@ -1198,29 +1198,6 @@ function mergeNativeMetrics(metrics: NativeMetric[]): NativeMetric[] {
   return [...totals].map(([name, value]) => ({ name, value: round(value) }));
 }
 
-function dailyFromMetricArrays(
-  metrics: JsonObject,
-  range: { from: string; to: string },
-): DailyStats[] {
-  const conversionEntries = Object.entries(metrics).filter(([name]) =>
-    /conversion|purchase|signup|install/i.test(name),
-  );
-  return datesInRange(range).map((date, index) => ({
-    date,
-    impressions: numberValue((metrics.impressions as unknown[])?.[index]),
-    clicks: numberValue((metrics.clicks as unknown[])?.[index]),
-    spend: round(
-      numberValue((metrics.billed_charge_local_micro as unknown[])?.[index]) / 1_000_000,
-    ),
-    nativeConversions: conversionEntries
-      .map(([name, values]) => ({
-        name,
-        value: numberValue(Array.isArray(values) ? values[index] : 0),
-      }))
-      .filter(({ value }) => value !== 0),
-  }));
-}
-
 function reportingRange(period: AdsPeriod, timezone: string | null): { from: string; to: string } {
   const days = period === "7d" ? 7 : 30;
   const today = dateInTimezone(new Date(), timezone || "UTC");
@@ -1417,11 +1394,6 @@ function nativeMetrics(rows: JsonObject[], fields: Array<[string, string]>): Nat
 
 function sum(rows: JsonObject[], path: string): number {
   return rows.reduce((total, row) => total + numberAt(row, path), 0);
-}
-
-function sumArrayOrNumber(value: unknown): number {
-  if (Array.isArray(value)) return value.reduce((total, item) => total + numberValue(item), 0);
-  return numberValue(value);
 }
 
 function objectsAt(value: unknown, path: string): JsonObject[] {

@@ -12,7 +12,6 @@ import {
 } from "./environment";
 import { readEnv } from "./files";
 import { artisan, verifyDatabase, verifyHerd } from "./resources";
-import { verifySimulator } from "./simulator";
 import type { ExpoEnvironmentOptions, LaravelEnvironmentOptions } from "./environment";
 import type { ProjectEnvironmentContext } from "./types";
 
@@ -118,14 +117,6 @@ export function verifyViteHotOrigin(
 
 export function shouldVerifyLiveServices(environment: NodeJS.ProcessEnv = process.env): boolean {
   return environment.PROJECT_LANE_VERIFY_LIVE_SERVICES !== "0";
-}
-
-export function verifyExpoEnvironment(
-  context: ProjectEnvironmentContext,
-  options: ExpoEnvironmentOptions,
-): void {
-  verifyExpoEnvironmentFile(context, options);
-  verifySimulator(context);
 }
 
 export function verifyExpoEnvironmentFile(

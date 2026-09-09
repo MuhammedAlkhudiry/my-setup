@@ -4,20 +4,19 @@
  * Internal local installer used by `mise run install`.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import {
   readFile,
   writeFile,
   copyFile,
   chmod,
+  mkdir,
   rm,
   mkdtemp,
   symlink,
   readdir,
-  rename,
-  readlink,
 } from "fs/promises";
-import { join } from "path";
+import { dirname, join } from "path";
 import { tmpdir } from "os";
 import { execa } from "execa";
 import {
@@ -27,7 +26,7 @@ import {
   type RemoteSkillSource,
 } from "../../config/skills";
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
-import { CLAUDE_LEGACY_DIRECTORIES, createClaudeManagedSettings } from "../../config/claude";
+import { createClaudeManagedSettings } from "../../config/claude";
 import { CREDENTIALS_HOME_ENV, CREDENTIALS_ROOT } from "../../config/credentials";
 import { MCP_SERVERS } from "../../config/mcp";
 import { createOpencodeConfig } from "../../config/opencode";
@@ -37,17 +36,14 @@ import {
   codexManagedTopLevelValues,
   renderCodexMcpServersToml,
 } from "../lib/codex-config";
-import { ensureDir, ensureParentDirSync, copyDirAsync, ensureParentDir } from "../lib/fs";
+import { replaceDirectory, ensureParentDir } from "../lib/fs";
 import { createLanesConfig, readLanesConfig } from "../lib/lanes-config";
-import { migrateManagedCredentials } from "../lib/credentials";
+import { installMenuApps } from "../lib/menu-apps";
+import { secureManagedCredentials } from "../lib/credentials";
 import { colors, compactOutput, print, printBox, printSeparator } from "../lib/print";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
 import { discoverLocalSkills, findUnknownSkillReferences } from "../lib/skills";
 import { validateRemoteSkillSources } from "../lib/validation";
-import { installAdsMenu } from "../apps/ads-menu/install";
-import { installAIUsageMenu } from "../apps/ai-usage-menu/install";
-import { installLanesMenu } from "../apps/lanes-menu/install";
-import { installPlansMenu } from "../apps/plans-menu/install";
 
 // =============================================================================
 // Constants
@@ -89,7 +85,6 @@ const SHARED_PATHS = {
   binDir: join(HOME, "bin"),
   localBinDir: join(HOME, ".local/bin"),
   lanesConfig: join(CONFIG_HOME, "lanes/projects.json"),
-  lanesState: join(STATE_HOME, "lanes/state.json"),
 };
 
 const REMOTE_SKILLS_STATE_PATH = join(STATE_HOME, "my-setup/remote-skills.json");
@@ -101,14 +96,14 @@ const REQUIRED_SECRETS = ["POSTHOG_CLI_API_KEY", "HUGEICONS_TOKEN"] as const;
 const ACTIVE_PROJECTS_PLACEHOLDER = "{{ACTIVE_PROJECTS}}";
 
 const SHARED_BIN_COMMANDS = [
-  { name: "my-setup", source: "my-setup.zsh" },
-  { name: "system-tools", source: "system-tools.zsh" },
-  { name: "hugeicons", source: "hugeicons.zsh" },
-  { name: "doctor", source: "doctor.zsh" },
-  { name: "knowledge", source: "knowledge.zsh" },
-  { name: "pk", source: "pk.zsh" },
-  { name: "ads", source: "ads.zsh" },
-  { name: "lanes", source: "lanes.zsh" },
+  "my-setup",
+  "system-tools",
+  "hugeicons",
+  "doctor",
+  "knowledge",
+  "pk",
+  "ads",
+  "lanes",
 ];
 
 // =============================================================================
@@ -157,21 +152,9 @@ function readBaseRulesTemplate(): string {
 
 function copyRules(destination: string, label: string): void {
   print.info(`Copying ${label} rules to ${destination}...`);
-  ensureParentDirSync(destination);
+  mkdirSync(dirname(destination), { recursive: true });
   writeFileSync(destination, renderBaseRules(readBaseRulesTemplate()));
   print.success(`${label} rules copied`);
-}
-
-function copyOpencodeRules(): void {
-  copyRules(OPENCODE_PATHS.rules, "OpenCode");
-}
-
-function copyCodexRules(): void {
-  copyRules(CODEX_PATHS.rules, "Codex");
-}
-
-function copyClaudeRules(): void {
-  copyRules(CLAUDE_PATHS.rules, "Claude Code");
 }
 
 function getManagedMcpServerNames(managedContent: string): Set<string> {
@@ -250,15 +233,10 @@ async function installSharedSkills(): Promise<void> {
     label: "shared skills",
     remoteSkillSources,
   });
-  const skillLock = join(HOME, ".agents", ".skill-lock.json");
-  if (existsSync(skillLock)) {
-    await rm(skillLock, { force: true });
-    print.success(`Removed ${skillLock} left over from npx skills add`);
-  }
 }
 
 async function installOpencode(): Promise<void> {
-  copyOpencodeRules();
+  copyRules(OPENCODE_PATHS.rules, "OpenCode");
   await mergeOpencodeConfigAsync();
 }
 
@@ -302,7 +280,7 @@ async function mergeOpencodeConfigAsync(): Promise<void> {
 }
 
 async function installCodex(): Promise<void> {
-  copyCodexRules();
+  copyRules(CODEX_PATHS.rules, "Codex");
   await mergeCodexConfigAsync();
   await mergeCodexMcpConfigAsync();
   await writeCodexRules();
@@ -316,10 +294,9 @@ async function writeCodexRules(): Promise<void> {
 }
 
 async function installClaude(): Promise<void> {
-  copyClaudeRules();
+  copyRules(CLAUDE_PATHS.rules, "Claude Code");
   await installManagedSymlink(SHARED_PATHS.skills, CLAUDE_PATHS.skills, "Claude Code skills");
   await mergeClaudeSettingsAsync();
-  await removeClaudeLegacyDirectories();
   await installClaudeMcpServers();
 }
 
@@ -344,15 +321,6 @@ async function mergeClaudeSettingsAsync(): Promise<void> {
   };
   await writeFile(CLAUDE_PATHS.settings, JSON.stringify(merged, null, 2) + "\n");
   print.success("Claude Code settings merged");
-}
-
-async function removeClaudeLegacyDirectories(): Promise<void> {
-  for (const directory of CLAUDE_LEGACY_DIRECTORIES) {
-    const path = join(HOME, directory);
-    if (!existsSync(path)) continue;
-    await rm(path, { recursive: true, force: true });
-    print.success(`Removed unmanaged ${path}`);
-  }
 }
 
 async function installClaudeMcpServers(): Promise<void> {
@@ -480,50 +448,21 @@ async function installShared(installWidgets: boolean): Promise<void> {
     print.error("zsh-custom.zsh not found");
   }
 
-  const legacyPlanCommand = join(SHARED_PATHS.binDir, "plan");
-  try {
-    const legacyPlanTarget = await readlink(legacyPlanCommand);
-    if (legacyPlanTarget === join(ROOT_DIR, "shell", "plan.zsh")) {
-      await rm(legacyPlanCommand, { force: true });
-      print.success(`Removed legacy plan command; use lanes plans`);
-    }
-  } catch {
-    // Preserve missing commands and user-owned files.
-  }
-
-  for (const command of ["context-health", "hosts", "sentry-cli", "codex-usage"]) {
-    const legacyCommand = join(SHARED_PATHS.binDir, command);
-    try {
-      const legacyTarget = await readlink(legacyCommand);
-      if (legacyTarget === join(ROOT_DIR, "shell", `${command}.zsh`)) {
-        await rm(legacyCommand, { force: true });
-        print.success(`Removed retired ${command} command`);
-      }
-    } catch {
-      // Preserve missing commands and user-owned files.
-    }
-  }
-
   for (const command of SHARED_BIN_COMMANDS) {
-    const sourcePath = join(ROOT_DIR, "shell", command.source);
-    const destinationPath = join(SHARED_PATHS.binDir, command.name);
+    const sourcePath = join(ROOT_DIR, "shell", `${command}.zsh`);
+    const destinationPath = join(SHARED_PATHS.binDir, command);
 
     if (!existsSync(sourcePath)) {
-      print.error(`${command.source} not found`);
+      print.error(`${command}.zsh not found`);
       continue;
     }
 
-    await installManagedSymlink(sourcePath, destinationPath, `${command.name} command`);
+    await installManagedSymlink(sourcePath, destinationPath, `${command} command`);
     await chmod(sourcePath, 0o755);
   }
 
   if (installWidgets) {
-    await Promise.all([
-      installLanesMenu(),
-      installPlansMenu(),
-      installAdsMenu(),
-      installAIUsageMenu(),
-    ]);
+    await installMenuApps();
   }
 
   print.info(`Ensuring local command paths are in PATH via ${SHARED_PATHS.zshenv}...`);
@@ -570,13 +509,6 @@ async function installShared(installWidgets: boolean): Promise<void> {
 }
 
 async function installLanesConfig(): Promise<void> {
-  const legacyStatePath = join(STATE_HOME, "my-setup/active-project-lanes.json");
-  if (existsSync(legacyStatePath) && !existsSync(SHARED_PATHS.lanesState)) {
-    await ensureParentDir(SHARED_PATHS.lanesState);
-    await rename(legacyStatePath, SHARED_PATHS.lanesState);
-    print.success(`Migrated lanes state to ${SHARED_PATHS.lanesState}`);
-  }
-
   await ensureParentDir(SHARED_PATHS.lanesConfig);
   if (existsSync(SHARED_PATHS.lanesConfig)) readLanesConfig(SHARED_PATHS.lanesConfig);
   await writeFile(
@@ -603,13 +535,7 @@ async function installLocalSecrets(): Promise<void> {
     process.exit(1);
   }
 
-  const migration = await migrateManagedCredentials({ home: HOME });
-  for (const path of migration.moved) {
-    print.success(`Migrated credential file to ${path}`);
-  }
-  for (const path of migration.updated) {
-    print.success(`Updated credential paths in ${path}`);
-  }
+  await secureManagedCredentials(HOME);
 
   if (!existsSync(SHARED_PATHS.secrets)) {
     print.info(`Creating local secrets file at ${SHARED_PATHS.secrets}...`);
@@ -753,7 +679,7 @@ export async function syncManagedSkillsAsync(options: ManagedSkillSyncOptions): 
     );
   }
 
-  await ensureDir(dest);
+  await mkdir(dest, { recursive: true });
   const invalidSkillCount = await pruneInvalidInstalledSkillDirs(dest);
   if (invalidSkillCount > 0) {
     print.warning(
@@ -797,10 +723,7 @@ export async function syncManagedSkillsAsync(options: ManagedSkillSyncOptions): 
   }
 
   for (const skill of skills) {
-    await copyDirAsync({
-      src: skill.dir,
-      dest: join(dest, skill.name),
-    });
+    await replaceDirectory(skill.dir, join(dest, skill.name));
   }
 
   if (remoteSkillSources.length > 0) {
@@ -881,16 +804,10 @@ async function installRemoteSkill(
     throw new Error(`Remote skill ${skill.name} is missing SKILL.md at ${skill.sourcePath}`);
   }
 
-  await copyDirAsync({
-    src: skillSrc,
-    dest: join(dest, skill.name),
-  });
-  await normalizeRemoteSkillName(join(dest, skill.name, "SKILL.md"), skill.name);
-}
-
-async function normalizeRemoteSkillName(skillPath: string, skillName: string): Promise<void> {
+  await replaceDirectory(skillSrc, join(dest, skill.name));
+  const skillPath = join(dest, skill.name, "SKILL.md");
   const content = await readFile(skillPath, "utf-8");
-  await writeFile(skillPath, content.replace(/^name:\s*.+$/m, `name: ${skillName}`));
+  await writeFile(skillPath, content.replace(/^name:\s*.+$/m, `name: ${skill.name}`));
 }
 
 // =============================================================================
@@ -924,9 +841,7 @@ export async function install(options: { widgets?: boolean } = {}): Promise<void
     console.log(`    Zsh:      ${SHARED_PATHS.zsh}`);
     console.log(`    Zshenv:   ${SHARED_PATHS.zshenv}`);
     console.log(`    Secrets:  ${SHARED_PATHS.secrets}`);
-    console.log(
-      `    Bin:      ${SHARED_PATHS.binDir} (${SHARED_BIN_COMMANDS.map((command) => command.name).join(", ")})`,
-    );
+    console.log(`    Bin:      ${SHARED_PATHS.binDir} (${SHARED_BIN_COMMANDS.join(", ")})`);
     printSeparator();
     console.log();
   }

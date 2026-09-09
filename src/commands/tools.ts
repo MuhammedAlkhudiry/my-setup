@@ -37,10 +37,6 @@ async function commandOutput(
   }
 }
 
-async function commandPath(command: string): Promise<string | undefined> {
-  return commandOutput("zsh", ["-lc", `command -v ${command}`]);
-}
-
 async function homebrewLatest(formula: string): Promise<string | undefined> {
   try {
     const result = await execa("brew", ["info", "--json=v2", formula], {
@@ -67,7 +63,10 @@ async function latestVersion(tool: SystemTool): Promise<string | undefined> {
 }
 
 async function toolStatus(tool: SystemTool): Promise<ToolStatus> {
-  const [path, latest] = await Promise.all([commandPath(tool.name), latestVersion(tool)]);
+  const [path, latest] = await Promise.all([
+    commandOutput("zsh", ["-lc", `command -v ${tool.name}`]),
+    latestVersion(tool),
+  ]);
   if (!path) {
     return { tool, latest };
   }
@@ -82,10 +81,6 @@ async function toolStatus(tool: SystemTool): Promise<ToolStatus> {
   }
 
   return { tool, path, latest, versionError: "version unavailable" };
-}
-
-async function groupStatuses(tools: readonly SystemTool[]): Promise<ToolStatus[]> {
-  return Promise.all(tools.map((tool) => toolStatus(tool)));
 }
 
 function statusLabel(status: ToolStatus): string {
@@ -121,22 +116,15 @@ function currentText(status: ToolStatus): string {
   return "missing";
 }
 
-function latestText(status: ToolStatus): string {
-  if (status.latest) {
-    return status.latest;
-  }
-  return "unknown";
-}
-
 export async function toolsStatus(): Promise<void> {
   for (const group of SYSTEM_TOOL_GROUPS) {
     console.log(`\n## ${group.title}`);
-    const statuses = await groupStatuses(group.tools);
+    const statuses = await Promise.all(group.tools.map(toolStatus));
 
     for (const status of statuses) {
       const location = status.path ? ` ${status.path}` : "";
       console.log(
-        `[${statusLabel(status)}] ${status.tool.name.padEnd(13)} current: ${currentText(status)} | latest: ${latestText(status)}${location}`,
+        `[${statusLabel(status)}] ${status.tool.name.padEnd(13)} current: ${currentText(status)} | latest: ${status.latest || "unknown"}${location}`,
       );
     }
   }
@@ -148,13 +136,13 @@ export async function toolsUpdatePlan(): Promise<void> {
 
   for (const group of SYSTEM_TOOL_GROUPS) {
     console.log(`\n## ${group.title}`);
-    const statuses = await groupStatuses(group.tools);
+    const statuses = await Promise.all(group.tools.map(toolStatus));
 
     for (const status of statuses) {
       console.log(`\n${status.tool.name}`);
       console.log(`  status: ${statusLabel(status)}`);
       console.log(`  current: ${currentText(status)}`);
-      console.log(`  latest: ${latestText(status)}`);
+      console.log(`  latest: ${status.latest || "unknown"}`);
       if (status.path) {
         console.log(`  path: ${status.path}`);
       }

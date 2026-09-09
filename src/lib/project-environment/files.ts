@@ -1,15 +1,9 @@
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
 import { log, run } from "./command";
 import type { MarkedInstall, ProjectEnvironmentContext } from "./types";
-
-export function copyIfMissing(source: string, destination: string): void {
-  if (existsSync(destination)) return;
-  mkdirSync(dirname(destination), { recursive: true });
-  copyFileSync(source, destination);
-}
 
 export function readEnv(path: string): Record<string, string> {
   if (!existsSync(path)) return {};

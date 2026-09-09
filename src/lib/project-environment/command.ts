@@ -6,12 +6,6 @@ export function log(step: string, message: string): void {
   console.log(`[project-lane:${step}] ${message}`);
 }
 
-export function logContext(values: Record<string, string | undefined>): void {
-  for (const [key, value] of Object.entries(values)) {
-    if (value !== undefined) log("context", `${key}=${value}`);
-  }
-}
-
 function quote(value: string): string {
   return /^[A-Za-z0-9_./:=@%+-]+$/.test(value) ? value : `'${value.replace(/'/g, `'"'"'`)}'`;
 }

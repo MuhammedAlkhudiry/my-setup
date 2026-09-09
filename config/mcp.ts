@@ -3,15 +3,13 @@
  * Single source of truth for MCP entries used during config generation.
  */
 
-export interface LocalMcpServer {
+interface McpServer {
   type: "local";
   command: [string, ...string[]];
   enabledTools: readonly string[];
   startupTimeoutSec: number;
   toolTimeoutSec: number;
 }
-
-export type McpServer = LocalMcpServer;
 
 export const MCP_SERVERS: Record<string, McpServer> = {
   maestro: {

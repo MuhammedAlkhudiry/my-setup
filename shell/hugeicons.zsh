@@ -16,21 +16,17 @@ const STATIC_PACKAGE = "@hugeicons/static";
 const CORE_PACKAGE = "@hugeicons/core-free-icons";
 const CACHE_ROOT = join(process.env.XDG_CACHE_HOME ?? join(process.env.HOME ?? "", ".cache"), "hugeicons");
 const CURRENT_LINK = join(CACHE_ROOT, "current");
-const LEGACY_ICONS_DIR = join(CACHE_ROOT, "icons");
-const LEGACY_EXPORTS_FILE = join(CACHE_ROOT, "exports.txt");
-const LEGACY_READY_FILE = join(CACHE_ROOT, "ready.txt");
-let activeCacheRoot = CURRENT_LINK;
 
 function iconsDir(): string {
-  return join(activeCacheRoot, "icons");
+  return join(CURRENT_LINK, "icons");
 }
 
 function exportsFile(): string {
-  return join(activeCacheRoot, "exports.txt");
+  return join(CURRENT_LINK, "exports.txt");
 }
 
 function versionFile(): string {
-  return join(activeCacheRoot, "version.txt");
+  return join(CURRENT_LINK, "version.txt");
 }
 
 async function hasCompleteCache(root: string): Promise<boolean> {
@@ -154,7 +150,6 @@ async function updateCache(manifest: CacheManifest, staticTarball: string, coreT
     try {
       await rename(nextLink, CURRENT_LINK);
       published = true;
-      activeCacheRoot = CURRENT_LINK;
     } finally {
       await rm(nextLink, { force: true });
     }
@@ -169,7 +164,6 @@ async function updateCache(manifest: CacheManifest, staticTarball: string, coreT
 
 async function ensureCache(): Promise<void> {
   let cachedManifest: CacheManifest | null = null;
-  activeCacheRoot = CURRENT_LINK;
   if (await pathExists(versionFile())) {
     try {
       cachedManifest = JSON.parse(await readFile(versionFile(), "utf8")) as CacheManifest;
@@ -212,15 +206,6 @@ async function ensureCache(): Promise<void> {
     return;
   } catch (error) {
     if (await hasCompleteCache(CURRENT_LINK)) {
-      return;
-    }
-    // Preserve offline use of caches created before generations were added.
-    if (
-      (await pathExists(LEGACY_ICONS_DIR)) &&
-      (await pathExists(LEGACY_EXPORTS_FILE)) &&
-      (await pathExists(LEGACY_READY_FILE))
-    ) {
-      activeCacheRoot = CACHE_ROOT;
       return;
     }
     fatal(`Failed to refresh Hugeicons cache: ${(error as Error).message}`);

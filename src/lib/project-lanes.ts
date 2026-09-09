@@ -189,10 +189,6 @@ export function summarizeLaneError(error: string): string {
 function readRegistry(): Registry {
   if (!existsSync(LANES_STATE_PATH)) return { version: 2, projects: {} };
   const value: unknown = JSON.parse(readFileSync(LANES_STATE_PATH, "utf8"));
-  const current = registrySchema.safeParse(value);
-  if (current.success) return current.data;
-  const legacy = z.object({ version: z.literal(1), projects: z.record(z.string(), z.unknown()) });
-  if (legacy.safeParse(value).success) return { version: 2, projects: {} };
   return registrySchema.parse(value);
 }
 

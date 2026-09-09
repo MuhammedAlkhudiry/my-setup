@@ -27,26 +27,16 @@ test("creates a static project catalog without task environments", () => {
   expect(createLanesConfig([project])).toEqual({ version: 5, projects: [project] });
 });
 
-test("migrates the old clone catalog to a canonical project root", () => {
+test("reads the current catalog and rejects unsupported versions", () => {
   const root = mkdtempSync(join(tmpdir(), "lanes-config-"));
   const path = join(root, "projects.json");
   try {
-    writeFileSync(
-      path,
-      JSON.stringify({
-        version: 4,
-        projects: [
-          {
-            ...project,
-            canonicalRoot: undefined,
-            lanePathPattern: "/projects/project-lane-{number}",
-            lanes: [{ number: 1, path: "/projects/project-lane-1" }],
-          },
-        ],
-      }),
-    );
-
+    writeFileSync(path, JSON.stringify({ version: 5, projects: [project] }));
     expect(readLanesConfig(path)).toEqual({ version: 5, projects: [project] });
+    for (const version of [3, 4, 6]) {
+      writeFileSync(path, JSON.stringify({ version, projects: [project] }));
+      expect(() => readLanesConfig(path)).toThrow();
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

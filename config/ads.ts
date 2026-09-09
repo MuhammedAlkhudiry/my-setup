@@ -24,8 +24,8 @@ export type AdsProjectDefinition = {
   >;
 };
 
-export const ADS_PROJECTS: readonly AdsProjectDefinition[] = [
-  ...ACTIVE_PROJECTS.map(({ id, name }) => ({
+export const ADS_PROJECTS: readonly AdsProjectDefinition[] = ACTIVE_PROJECTS.map(
+  ({ id, name }) => ({
     id,
     name,
     classification: "project" as const,
@@ -59,5 +59,5 @@ export const ADS_PROJECTS: readonly AdsProjectDefinition[] = [
             },
           }
         : {},
-  })),
-];
+  }),
+);

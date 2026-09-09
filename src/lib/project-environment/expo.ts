@@ -1,21 +1,13 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { findSimulator } from "./simulator";
 
 export interface ExpoDevelopmentClientOptions {
-  cwd: string;
   port: string;
   scheme: string;
   simulatorName: string;
-}
-
-export interface ExpoDevelopmentClientEnvironmentOptions {
-  cwd: string;
-  scheme: string;
-  simulatorNameVariable: string;
-  portVariable?: string;
 }
 
 export function developmentClientUrl(scheme: string, port: string): string {
@@ -69,59 +61,6 @@ export function openExpoDevelopmentClient(options: ExpoDevelopmentClientOptions)
     { stdio: "pipe" },
   );
   console.log(`Opened Metro ${options.port} on ${options.simulatorName}`);
-}
-
-export async function startExpoDevelopmentClient(
-  options: ExpoDevelopmentClientOptions,
-): Promise<void> {
-  const expo = spawn("bunx", ["expo", "start", "--port", options.port], {
-    cwd: options.cwd,
-    env: process.env,
-    stdio: "inherit",
-  });
-  const completion = new Promise<number>((resolve, reject) => {
-    expo.once("error", reject);
-    expo.once("exit", (code) => resolve(code ?? 1));
-  });
-  const stopExpo = (signal: NodeJS.Signals) => expo.kill(signal);
-  process.once("SIGINT", () => stopExpo("SIGINT"));
-  process.once("SIGTERM", () => stopExpo("SIGTERM"));
-
-  try {
-    await Promise.race([
-      verifyExpoDevelopmentServer(options.port),
-      completion.then((code) => {
-        throw new Error(`Expo exited before Metro became ready (code ${code})`);
-      }),
-    ]);
-    try {
-      openExpoDevelopmentClient(options);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn(`Metro is running, but the assigned simulator could not be opened: ${message}`);
-    }
-    process.exitCode = await completion;
-  } catch (error) {
-    if (expo.exitCode === null) expo.kill("SIGTERM");
-    throw error;
-  }
-}
-
-export async function startExpoDevelopmentClientFromEnvironment(
-  options: ExpoDevelopmentClientEnvironmentOptions,
-): Promise<void> {
-  const portVariable = options.portVariable ?? "EXPO_DEV_SERVER_PORT";
-  const port = process.env[portVariable];
-  const simulatorName = process.env[options.simulatorNameVariable];
-  if (!port || !simulatorName) {
-    throw new Error(`${portVariable} and ${options.simulatorNameVariable} are required`);
-  }
-  await startExpoDevelopmentClient({
-    cwd: options.cwd,
-    port,
-    simulatorName,
-    scheme: options.scheme,
-  });
 }
 
 export function verifyExpoDevelopmentClientFreshness(options: {

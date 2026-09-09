@@ -1,22 +1,22 @@
 import { CODEX_CONFIG } from "../../config/codex";
 import { MCP_SERVERS } from "../../config/mcp";
 
-function toTomlString(value: string): string {
-  return JSON.stringify(value);
-}
-
 export function renderCodexMcpServersToml(): string {
-  const lines = ["# Managed by my-setup. Do not edit by hand.", "# Source of truth: config/mcp.ts", ""];
+  const lines = [
+    "# Managed by my-setup. Do not edit by hand.",
+    "# Source of truth: config/mcp.ts",
+    "",
+  ];
   for (const serverName of Object.keys(MCP_SERVERS).sort()) {
     const server = MCP_SERVERS[serverName];
     const [command, ...args] = server.command;
     lines.push(
       `[mcp_servers.${serverName}]`,
-      `command = ${toTomlString(command)}`,
-      `args = [${args.map(toTomlString).join(", ")}]`,
+      `command = ${JSON.stringify(command)}`,
+      `args = [${args.map((arg) => JSON.stringify(arg)).join(", ")}]`,
       `startup_timeout_sec = ${server.startupTimeoutSec}`,
       `tool_timeout_sec = ${server.toolTimeoutSec}`,
-      `enabled_tools = [${server.enabledTools.map(toTomlString).join(", ")}]`,
+      `enabled_tools = [${server.enabledTools.map((tool) => JSON.stringify(tool)).join(", ")}]`,
       "",
     );
   }

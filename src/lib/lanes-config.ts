@@ -1,5 +1,4 @@
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { readFileSync } from "node:fs";
 
 import { z } from "zod";
 
@@ -39,23 +38,6 @@ const projectFields = {
 
 export const activeProjectSchema = z.object(projectFields).superRefine(validateProject);
 
-const legacyProjectSchema = z.object({
-  id: z.string().min(1),
-  name: z.string().min(1),
-  remoteUrl: z.string().url(),
-  baseBranch: z.string().min(1),
-  lanePathPattern: z.string().includes("{number}").optional(),
-  lanes: z.array(z.object({ number: z.number().int().positive(), path: z.string().min(1) })),
-  environmentVariable: z.string().min(1),
-  services: z.array(laneServiceSchema).min(1),
-  mobile: mobileDevelopmentSchema.optional(),
-  simulatorSlimming: simulatorSlimmingProfileSchema.optional(),
-  pullRequest: z.object({ model: z.string().min(1) }).optional(),
-});
-const legacyLanesConfigSchema = z.object({
-  version: z.union([z.literal(3), z.literal(4)]),
-  projects: z.array(legacyProjectSchema),
-});
 const lanesConfigSchema = z.object({
   version: z.literal(5),
   projects: z.array(activeProjectSchema),
@@ -105,35 +87,7 @@ export function createLanesConfig(projects: ActiveProject[]): LanesConfig {
 
 export function readLanesConfig(path: string): LanesConfig {
   const value: unknown = JSON.parse(readFileSync(path, "utf8"));
-  const current = lanesConfigSchema.safeParse(value);
-  if (current.success) return current.data;
-
-  const legacy = legacyLanesConfigSchema.parse(value);
-  return lanesConfigSchema.parse({
-    version: 5,
-    projects: legacy.projects.map((project) => ({
-      id: project.id,
-      name: project.name,
-      remoteUrl: project.remoteUrl,
-      baseBranch: project.baseBranch,
-      canonicalRoot: join(
-        dirname(project.lanePathPattern ?? project.lanes[0]?.path ?? "."),
-        basename(new URL(project.remoteUrl).pathname, ".git"),
-      ),
-      environmentVariable: project.environmentVariable,
-      services: project.services,
-      mobile: project.mobile,
-      simulatorSlimming: project.simulatorSlimming,
-    })),
-  });
-}
-
-export function writeLanesConfig(path: string, config: LanesConfig): void {
-  const value = lanesConfigSchema.parse(config);
-  mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const temporaryPath = `${path}.${process.pid}.tmp`;
-  writeFileSync(temporaryPath, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-  renameSync(temporaryPath, path);
+  return lanesConfigSchema.parse(value);
 }
 
 function validateProject(
