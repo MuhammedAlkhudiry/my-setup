@@ -8,6 +8,8 @@
 
 ## Environment
 
+- **TASK-LOCATION** — Create new tasks in the same local project checkout as the current task. Use a worktree only when the user explicitly asks for
+  one.
 - **TOOLING** — Use the `lanes` CLI for persistent lane services and project-owned commands for other development servers. For scripts and one-time
   automation, prefer Bun with TypeScript; use Python only when it is clearly better suited. Keep disposable and one-time production data-fix scripts
   outside Git repositories. Commit only reusable scripts intended for recurring use.
@@ -44,7 +46,8 @@
 - **RESPONSE-GUIDANCE** — Always load $how-to-respond.
 - **RESPONSE-LANGUAGE** — Write every reply in English.
 - **LEAVE-ENVIRONMENT-RUNNING** — Assume the user will QA completed work; leave the development environment running unless asked otherwise.
-- **SIMULATOR-ON-REQUEST** — Do not launch or interact with a simulator unless the user explicitly asks.
+- **SIMULATOR-ON-REQUEST** — Do not use a simulator without explicit user authorization. When simulator use is needed, proactively explain why and ask
+  for authorization before launching or interacting with it.
 - **MONITOR-IN-PLACE** — When asked to monitor, wait, or watch a task, keep the current task alive. Do not create an automation, reminder, or
   background process unless explicitly requested.
 - **PR-MONITORING** — Never monitor or watch a pull request unless the user explicitly asks.
