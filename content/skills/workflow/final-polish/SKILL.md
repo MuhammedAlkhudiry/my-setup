@@ -1,20 +1,20 @@
 ---
 name: final-polish
-description: Post-implementation hardening before human review.
+description: Check and improve completed work before human review.
 ---
 
 ## Workflow
 
-1. Review the diff for scope creep, churn, unjustified tests, missing coverage, regressions, and crossed producer-consumer contracts. Fix or report
-   contract units that are `breaking`, `unsafe`, `stale`, or `ambiguous`.
+1. Review the diff for unnecessary changes, test quality, regressions, and mismatches between connected components. Fix or report behavior that is
+   broken, unsafe, outdated, or unclear.
 2. Run $simplify in a subagent started from a self-contained brief with the exact scope, evaluating each pass before the next. Run $test-writing to
    audit coverage and close approved worthwhile gaps. These passes may edit.
-3. Run these exact-target, read-only reviews in parallel, each in a subagent started from its own self-contained brief:
+3. Run these read-only reviews of the same scope in parallel, each in a subagent started from its own self-contained brief:
    - $code-review as a Standards review.
    - $refactor-opportunities.
    - $ux-ui when the diff affects an interface; inspect the rendered result or report `BLOCKED`. Report unavailable passes instead of simulating them.
-4. Run $verification as the final fix loop. Fix task-related failures and report each check as `PASS`, `FAIL`, or `BLOCKED`.
-5. Run a final read-only reviewer gate in a subagent started from a self-contained brief. The main agent owns synthesis and final reporting.
+4. Use $verification to check the final result. Fix failures caused by the task and report each check as `PASS`, `FAIL`, or `BLOCKED`.
+5. Run one final read-only review in a subagent with a self-contained brief. The main agent combines the findings and writes the final report.
 
 ## Rules
 
@@ -53,7 +53,7 @@ description: Post-implementation hardening before human review.
 
 <or "No findings", "Skipped", or "Blocked: <reason>">
 
-## Final reviewer gate
+## Final review
 
 <use the $code-review finding format, or "Clear">
 

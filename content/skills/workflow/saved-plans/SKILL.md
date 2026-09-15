@@ -1,11 +1,11 @@
 ---
 name: saved-plans
-description: Saved-plan persistence and lifecycle management for code and non-code tasks.
+description: Save and manage plans for code and non-code tasks.
 ---
 
-When the user explicitly asks to persist or manage a plan, use the established writable plan store available in the environment and preserve the
-supplied content. When `lanes` is available, run `lanes plans --help` and follow its contract. Otherwise use the connected repository's existing plan
-location. When no writable plan store exists, return the complete plan and state that it was not persisted.
+When the user asks to save or manage a plan, use the existing writable plan store and preserve the supplied content. When `lanes` is available, run
+`lanes plans --help` and follow its help. Otherwise use the connected repository's existing plan location. When no writable plan store exists, return
+the complete plan and state that it was not saved.
 
 ## Saved Plan Status
 

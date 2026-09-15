@@ -58,6 +58,28 @@ export const ADS_PROJECTS: readonly AdsProjectDefinition[] = ACTIVE_PROJECTS.map
               campaignIds: ["1873239047268401"],
             },
           }
-        : {},
+        : id === "harium"
+          ? {
+              google: {
+                accountIds: ["1169446096"],
+              },
+              meta: { accountIds: ["3535706293261316"] },
+              tiktok: { accountIds: ["7684018356730658837"] },
+              apple: {
+                accountIds: ["22534290"],
+                access: {
+                  state: "browser" as const,
+                  account: {
+                    id: "22534290",
+                    name: "Muhammed Alkhudiry",
+                    currency: "USD",
+                    timezone: "Asia/Riyadh",
+                  },
+                  message:
+                    "Harium App Store ID 6752504683 is selectable in the shared company Apple Ads account; API access is intentionally not configured.",
+                },
+              },
+            }
+          : {},
   }),
 );

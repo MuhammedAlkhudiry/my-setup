@@ -5,5 +5,5 @@
 
 export const MODELS = {
   smart: "opencode-go/glm-5.3-flash",
-  fast: "opencode-go/deepseek-v4-flash",
+  fast: "opencode-go/deepseek-v4.1-flash",
 } as const;

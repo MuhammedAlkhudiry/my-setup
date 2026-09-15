@@ -1,56 +1,46 @@
 ---
 name: ux-ui
-description: UX/UI discovery, implementation, options, and review.
+description: UX/UI design, implementation, review, and visual options.
 ---
-
-## Routing
-
-- For a new interface, redesign, or meaningful flow change, inspect the existing experience and use $interview for material product or design
-  decisions that evidence cannot resolve.
-- For a review, audit, or small scoped change, inspect the existing interface and proceed directly.
-- Use $workshop when abstract product framing or strategic options remain unresolved.
 
 ## Design workflow
 
-1. Inspect the user's job, complete journey, platform conventions, design system, realistic content, and relevant states.
-2. When options are requested, make them meaningfully different in workflow, hierarchy, density, states, responsiveness, or interaction; cosmetic
-   variations do not count. Keep content and states consistent so the experience is comparable, then recommend one direction with its trade-offs.
-3. Settle the UX before refining UI styling and polish unless new evidence changes an earlier decision. Implement the requested or selected direction
-   only when an editable site, artifact, or code environment is available; otherwise deliver the requested review, design direction, mockup, or
-   implementation brief without claiming the product changed.
-4. After each material revision, summarize the change and any remaining decision.
+- Inspect the user's goal, complete journey, platform conventions, design system, realistic content, and relevant states.
+- Follow the established design system, theme, and visual character. Add components, tokens, or patterns for authorized work when they preserve those
+  conventions.
+- Favor calm, rich, professional, distinctive minimalism: clear hierarchy, balanced spacing, restrained color, and subtle depth.
+- Make the next useful action clear at each stage of the journey. For example, offer resource creation in an empty state and contextual editing in a
+  resource list.
 
-## Design-system boundary
+## Requested options
 
-- Follow the established design system. Add components, tokens, or patterns needed for authorized work when they preserve its conventions. Ask only
-  when a change requires an unresolved product or design decision or expands the authorized scope. Reuse approval already given.
-- When the system cannot support needed behavior, propose a system-level extension instead of a poor interaction or one-off substitute.
+- By default, create five substantially different options plus at least one extra option labeled **Wild**. Use the wild option to explore beyond the
+  brief's design constraints and avoid settling for minor variations of the current approach.
+- Present options in a new HTML preview or visualization by default. If the user requests options inside the app or website, present them there. In
+  either format, include an option switcher.
+- Loop animated previews when repetition helps compare the options.
+- When the user selects an option without requesting implementation, acknowledge the selection and ask whether to integrate it.
+- When the user selects multiple options or parts of different options, revise the design to combine the selected elements.
+- Keep the HTML file minimal, focusing only on options.
+- When user ask for changes, prefer creating new html over editting last one.
 
-## Review protocol
+## Design checks
 
-Report concrete issues in descending user impact:
+After each design revision, inspect the rendered result and address each applicable item below. In the final response, summarize completed checks with
+a green verification emoji. Identify any checks that could not be completed.
 
-1. Blocked, unsafe, destructive, or unrecoverable flows
-2. Missing states, broken responsiveness, or inaccessible interaction
-3. Unclear hierarchy, navigation, wording, or action priority
-4. Missing, delayed, misleading, or excessive feedback
-5. Inconsistent visual or interaction language
-6. Polish opportunities that improve trust, personality, or delight
+- Correct inconsistent spacing, gaps, padding, and margins.
+- Check text contrast against each background and correct poor contrast.
+- Clarify hierarchy and group related information and controls. Break up dense, undifferentiated content.
+- Separate distinct areas with sections or containers where useful, without excessive nesting or visual boundaries.
+- Refine visual appeal with purposeful icons, restrained color, and subtle, smooth microanimations. Keep these touches proportionate.
+- Check every UI element against the design system and correct inconsistencies.
+- Check responsive layouts across relevant viewport sizes. Correct overflow, clipping, and controls or content that become difficult to use.
+- Check loading, error, and recovery states. Make progress clear and provide a useful retry or recovery action when a flow fails.
+- Check no word wrapping in buttons/labels.
 
-For each issue, identify the affected user goal, current behavior, recommended behavior, and reason. Distinguish evidence, inference, and aesthetic
-preference.
+## Animation
 
-## Completion standard
-
-After implementation, inspect the rendered UX and UI and improve it until optimal. Do not call implemented work complete until the primary task,
-relevant failure and recovery paths, accessibility behavior, realistic content, and relevant viewport and input modes work as one coherent experience.
-For advisory work, complete the requested review, option set, mockup, or implementation brief and identify any behavior that still needs validation in
-a rendered product.
-
-## User preferences
-
-- Begin with the user's job and complete journey. Prefer one clear primary path, immediate common actions, and progressively disclosed capability.
-- Favor calm, rich, professional, distinctive minimalism: hierarchy, balanced spacing, restrained color, and subtle depth instead of visual excess.
-- Keep controls contextual and interactions consistent; make motion smooth, symmetric, and purposeful. Iterate from rendered evidence and finish an
-  approved direction faithfully.
-- Prefer icons paired with text labels.
+- Include subtle micro-animations by default where they support the interaction. Keep them unobtrusive.
+- Avoid distracting bounce, exaggerated motion, and flashy effects.
+- Follow existing animation tokens.

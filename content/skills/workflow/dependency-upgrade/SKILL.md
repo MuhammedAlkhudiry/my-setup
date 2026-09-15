@@ -5,11 +5,11 @@ description: Dependency upgrades, freshness audits, and unused-package cleanup.
 
 ## Workflow
 
-1. Define the exact dependency scope and create the durable report before changing versions.
-2. Establish the package manager, workspace and runtime boundaries, official project checks, and every in-scope dependency from manifests and
-   lockfiles.
-3. Use current package-manager help, manifests, lockfiles, runtime metadata, vendor release notes, upgrade guides, and advisories as sources of truth.
-   Load $laravel or $react when applicable.
+1. Decide which dependencies the task covers and create a saved report before changing versions.
+2. Identify the package manager, relevant workspaces and runtimes, and project checks. List every in-scope dependency from manifests and lockfiles.
+3. Use current package-manager help, project dependency files, and official compatibility and release guidance as sources of truth. Load
+   $laravel or
+   $react when applicable.
 4. Upgrade with the project's package manager and apply straightforward compatibility fixes. Ask before broad migrations, architecture changes,
    many-file rewrites, unclear behavior changes, native rebuilds, or test-suite rewrites.
 5. Verify risky batches and the final state. Finish only when every in-scope dependency is upgraded, removed, intentionally skipped, or blocked with a
@@ -17,16 +17,15 @@ description: Dependency upgrades, freshness audits, and unused-package cleanup.
 
 ## Unused packages
 
-- Require evidence from manifests, imports, configuration, scripts, providers, tests, build tooling, and runtime integration before declaring a
-  package unused.
-- Remove only clearly unused packages. Ask before removing anything with unclear dynamic, framework, plugin, or production-only usage.
+- Check how the project uses a package, including indirect and runtime use, before declaring it unused.
+- Remove only clearly unused packages. Ask before removing a package whose use is unclear.
 - Record removed, retained, and unclear candidates with evidence.
 
 ## Patching
 
 - Do not permanently modify vendor files, installed dependencies, generated package output, or lockfile internals.
-- Remove diagnostic patches before finishing. If an upgrade requires a patch, fork, alias, Composer patch, `patch-package`, or monkey patch, skip it
-  and request approval with cleaner alternatives.
+- Remove diagnostic patches before finishing. If an upgrade requires a custom patch, fork, alias, or runtime workaround, skip it and request approval
+  with cleaner alternatives.
 
 ## Report
 

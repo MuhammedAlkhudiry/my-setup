@@ -3,7 +3,7 @@ name: service-access
 description: Configured service access and credential repair.
 ---
 
-Load only the matching provider reference. If none exists, stop using this router.
+Read only the reference for the requested provider. If none matches, this skill does not cover that provider.
 
 ## References
 
@@ -14,10 +14,10 @@ Load only the matching provider reference. If none exists, stop using this route
 
 ## Workflow
 
-1. Discover connected apps, native authentication, authorized runtimes, and `$SERVICE_CREDENTIALS_HOME` before requesting credentials.
-2. Follow the provider reference and prove access with its smallest read-only check.
+1. Check existing connections, sign-ins, runtime access, and `$SERVICE_CREDENTIALS_HOME` before requesting credentials.
+2. Follow the provider reference and verify access with its smallest read-only check.
 3. Repair missing access, pausing only for OAuth, 2FA, new permissions, or credentials the user must create.
-4. Keep provider-native authentication in its native store. Store agent-managed credentials under `$SERVICE_CREDENTIALS_HOME/<provider>/` with
+4. Keep each provider’s own sign-in data in its normal location. Store agent-managed credentials under `$SERVICE_CREDENTIALS_HOME/<provider>/` with
    directories at mode 700 and files at mode 600.
 
-Report the selected route, readiness, and credential location without exposing values.
+Report how access works, whether it is ready, and where credentials are stored without exposing their values.

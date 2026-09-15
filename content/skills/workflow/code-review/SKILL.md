@@ -1,28 +1,28 @@
 ---
 name: code-review
-description: Code review of a diff, branch, PR, commit range, or working tree against standards and agreed requirements.
+description: Review code changes against project standards and agreed requirements.
 ---
 
-Review along two independent axes:
+Review two areas separately:
 
-- `Standards`: defects, maintainability risks, hidden coupling, misleading structure, and documented convention violations.
-- `Spec`: missing, partial, incorrect, ambiguous, or unrequested behavior relative to the agreed requirements.
+- `Standards`: correctness, maintainability, and documented project conventions.
+- `Spec`: whether the behavior matches the agreed requirements.
 
 ## Workflow
 
-1. Use the fixed point named by the user. Otherwise infer the base branch or use the current staged and unstaged diff; ask only when the review
-   surface cannot be determined safely.
-2. Resolve the comparison and confirm it has a non-empty diff. Use `git diff <fixed-point>...HEAD` for branch-style comparisons.
-3. Resolve the spec from the user's request or linked issue, PRD, plan, PR, or project documentation. If none exists, skip that axis and report
+1. Use the comparison point named by the user. Otherwise determine the base branch or use the current staged and unstaged changes. Ask only when the
+   review scope is unclear.
+2. Confirm which changes are being compared and that there are changes to review. Use `git diff <fixed-point>...HEAD` for branch-style comparisons.
+3. Find the agreed requirements in the user's request or supporting documents. If none exist, skip that part of the review and report
    `No spec available`.
 4. Read applicable repository instructions and conventions, then review Standards and Spec independently. Documented project standards override
    general judgment; do not report issues already enforced by tooling unless the change bypasses that tooling.
-5. Ground every finding in a concrete file or hunk. Keep the axes separate and report counts and the worst finding for each.
+5. Tie every finding to a specific file or changed lines. Report the finding count and most serious issue for each area.
 
 ## Finding format
 
 Severity: `CRITICAL` is exploitable, destructive, or release-blocking; `HIGH` is serious; `MEDIUM` is contained; `LOW` is minor. Every finding must
-name the problem, location, concrete impact, and actionable fix:
+name the problem, location, actual impact, and a specific fix:
 
 ```md
 - **<CRITICAL | HIGH | MEDIUM | LOW>: <problem>** (`<file>:<line>`)

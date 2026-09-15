@@ -55,12 +55,21 @@ describe("ads CLI contract inputs", () => {
   });
 
   test("represents browser-only project access accurately", async () => {
-    const apple = await adsStatus({ platform: "apple", project: "awraq", refresh: true });
+    const [awraqApple, hariumApple] = await Promise.all([
+      adsStatus({ platform: "apple", project: "awraq", refresh: true }),
+      adsStatus({ platform: "apple", project: "harium", refresh: true }),
+    ]);
 
-    expect(apple.platforms[0]).toMatchObject({
+    expect(awraqApple.platforms[0]).toMatchObject({
       state: "browser",
       configured: false,
       account: { id: "22534290" },
+    });
+    expect(hariumApple.platforms[0]).toMatchObject({
+      state: "browser",
+      configured: false,
+      account: { id: "22534290" },
+      message: expect.stringContaining("Harium App Store ID 6752504683"),
     });
   });
 });

@@ -5,23 +5,23 @@ description: Idea stress-testing, brainstorming, and option comparison.
 
 ## Workflow
 
-1. Research the product, codebase, documentation, and prior art before reacting.
+1. Review the relevant evidence and existing approaches before reacting.
 2. Treat the user's statements as claims to examine and assume they are partial to the idea, not neutral. Ask only questions that could change
    direction; when questions are needed, respond with only those questions.
-3. Use $interview when the workshop exposes multiple dependent, high-impact unknowns that require sustained user input, then resume with its confirmed
-   synthesis.
+3. Use $interview when the workshop exposes several important unknowns that need a connected series of questions, then resume with its confirmed
+   summary.
 4. Use options when requested or when meaningfully different paths are available.
-5. Take a position. Say when an idea is over-scoped, under-evidenced, structurally awkward, or solves the wrong problem.
-6. Judge ideas by the user value and complete journey they create, not feature count or technical possibility. Prefer one coherent product model that
-   preserves worthwhile capability, and identify how its effectiveness can be observed after release.
+5. Take a position. Explain when an idea is too broad, lacks evidence, adds unnecessary complexity, or solves the wrong problem.
+6. Judge ideas by the user value and complete journey they create, not feature count or technical possibility. Prefer a consistent product approach
+   that preserves useful behavior. Say how to judge its success after release.
 
 ## Response
 
-Lead with the position and up to three decisive observations in concise prose. State the recommendation and its main trade-off. Ask one question only
-when its answer could change the direction.
+Lead with the position and up to three key observations in concise prose. State the recommendation and its main trade-off. Ask one question only when
+its answer could change the direction.
 
-Present distinct options only when requested or when meaningfully different paths exist. Keep each option to one line and use the requested count, 2-3
-tactical options, or this ladder for open-ended decisions:
+Present distinct options only when requested or when meaningfully different paths exist. Keep each option to one line and use the requested count, 2–3
+practical options, or this ladder for open-ended decisions:
 
 - 🛡️ **Smallest Safe Move:** lowest-risk useful action.
 - ⚖️ **Balanced Bet:** meaningful improvement with contained cost.

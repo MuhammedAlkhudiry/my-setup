@@ -1,6 +1,6 @@
 ---
 name: personal-knowledge
-description: Use for retrieving, validating, creating, indexing, or maintaining the owner's personal knowledge.
+description: Find and maintain the owner's personal knowledge.
 ---
 
 ## Source routing
@@ -12,10 +12,8 @@ description: Use for retrieving, validating, creating, indexing, or maintaining 
 
 ## Workflow
 
-1. Search narrowly for the requested person, preference, decision, event, responsibility, tool, or context. Treat retrieved notes as claims to
-   validate against newer or more authoritative entries.
-2. Answer from the strongest matching evidence. State when the knowledge source is unavailable, ambiguous, stale, or silent rather than filling gaps
-   from general assumptions.
-3. Create or update knowledge only when the user asks. Preserve the repository's canonical structure, terminology, links, and indexing contract.
+1. Search specifically for the requested information. Treat retrieved notes as claims to validate against newer or more authoritative entries.
+2. Answer from the strongest matching evidence. State when the source cannot support an answer rather than filling gaps with assumptions.
+3. Create or update knowledge only when the user asks. Follow the repository's structure and rules for writing and indexing notes.
 4. Use a connected write tool only when it exposes the required repository operation. Otherwise return the exact proposed change and state that it was
-   not persisted.
+   not saved.

@@ -3,15 +3,15 @@ name: implementation-walkthrough
 description: Gentle walkthroughs of implemented work.
 ---
 
-## Durable State
+## Saved progress
 
-1. Resolve the canonical repo root and current branch or PR identity.
-2. Under `${XDG_STATE_HOME:-~/.local/state}/implementation-walkthroughs/`, derive a deterministic safe filename from the repo root and PR number,
+1. Find the canonical repository root and current branch or PR.
+2. Under `${XDG_STATE_HOME:-~/.local/state}/implementation-walkthroughs/`, derive a safe, repeatable filename from the repository root and PR number,
    falling back to the branch name.
 3. Before analysis or writes, resume that file or create it automatically.
-4. Reconcile changes in place and mark only affected parts stale; change never justifies new state.
+4. Update the same file when the implementation changes. Mark only affected parts stale.
 
-Persist this shape, omitting `pr` when no PR exists, and reconstruct broader context from the repository on resume:
+Save this structure, omitting `pr` when no PR exists, and reconstruct broader context from the repository on resume:
 
 ```json
 {
@@ -31,11 +31,10 @@ Persist this shape, omitting `pr` when no PR exists, and reconstruct broader con
 
 ## Prepare Quietly
 
-1. Reconstruct purpose, flows, impact, risks, dependencies, and non-scope from state, branch or PR context, diffs, commits, changed files, migrations,
-   config, docs, tests, and notes.
-2. Split work into coherent behaviors or implementation slices.
-3. Environment work is preparation, never a part. Verify a responding target URL in Chrome for web, or the built and launched target screen on a
-   device for mobile. Keep preparation invisible unless it needs the user's attention.
+1. Use saved progress and repository evidence to understand what changed, why, and what the walkthrough should cover.
+2. Split the work into parts that each explain one behavior or related change.
+3. Prepare the environment before the walkthrough; do not make setup a walkthrough part. Verify a responding target URL in Chrome for web, or the
+   built and launched target screen on a device for mobile. Keep preparation invisible unless it needs the user's attention.
 
 ## Walkthrough Loop
 
@@ -44,10 +43,10 @@ Persist this shape, omitting `pr` when no PR exists, and reconstruct broader con
    state, and navigation the URL cannot encode. Never tell the user to open or visit a named page without linking directly to it.
 3. Present only the current part. Treat "done" or equivalent confirmation as completion and immediately present the next part in the same turn. After
    the final part, report walkthrough completion.
-4. After each walkthrough turn, persist the cursor and each part's `pending`, `completed`, `skipped`, or `stale` status.
+4. After each walkthrough turn, save the current position and each part's `pending`, `completed`, `skipped`, or `stale` status.
 5. When the user requests a change, pause the walkthrough and handle the work normally, regardless of size. After the fix, treat "done" or equivalent
    acceptance as completion of the current part and resume with the next part immediately. An explicit request for the next part also resumes the
-   walkthrough. Reconcile affected parts before resuming.
+   walkthrough. Update affected parts before resuming.
 
 ## Final-answer shape
 
