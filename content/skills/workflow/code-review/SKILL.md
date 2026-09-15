@@ -3,43 +3,15 @@ name: code-review
 description: Review code changes against project standards and agreed requirements.
 ---
 
-Review two areas separately:
+Review these areas:
 
-- `Standards`: correctness, maintainability, and documented project conventions.
-- `Spec`: whether the behavior matches the agreed requirements.
-
-## Workflow
-
-1. Use the comparison point named by the user. Otherwise determine the base branch or use the current staged and unstaged changes. Ask only when the
-   review scope is unclear.
-2. Confirm which changes are being compared and that there are changes to review. Use `git diff <fixed-point>...HEAD` for branch-style comparisons.
-3. Find the agreed requirements in the user's request or supporting documents. If none exist, skip that part of the review and report
-   `No spec available`.
-4. Read applicable repository instructions and conventions, then review Standards and Spec independently. Documented project standards override
-   general judgment; do not report issues already enforced by tooling unless the change bypasses that tooling.
-5. Tie every finding to a specific file or changed lines. Report the finding count and most serious issue for each area.
-
-## Finding format
-
-Severity: `CRITICAL` is exploitable, destructive, or release-blocking; `HIGH` is serious; `MEDIUM` is contained; `LOW` is minor. Every finding must
-name the problem, location, actual impact, and a specific fix:
-
-```md
-- **<CRITICAL | HIGH | MEDIUM | LOW>: <problem>** (`<file>:<line>`)
-  - **Impact:** <impact>
-  - **Fix:** <fix>
-```
-
-## Output
-
-```md
-## Standards
-
-<findings in the required format, or "No findings">
-
-## Spec
-
-<findings in the required format, "No findings", or "No spec available">
-
-Summary: Standards <count>; Spec <count>. Worst Standards issue: <item or none>. Worst Spec issue: <item or none>.
-```
+- **Standards:** Check correctness and handling of reasonable edge cases.
+- **Requirements:** Check that behavior matches the agreed requirements.
+- **Completeness:** Identify unfinished work, unusable tests, and shortcuts that make incomplete work appear finished.
+- **Performance:** Identify unnecessary work, excessive resource use, and slowdowns caused by the changes.
+- **Security:** Check for exposed data and unauthorized access or actions.
+- **Backward compatibility:** Check whether existing clients, integrations, and stored data still work with the changes.
+- **Complexity:** Use $simplify to identify unnecessary complexity. Consider major simplifications or a full rewrite when they preserve functionality
+  and produce a simpler result.
+- **Implementation:** Assess whether the chosen approach is the best fit for the requirements and project. Recommend a better approach when the
+  benefits justify the change.

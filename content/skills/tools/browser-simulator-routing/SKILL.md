@@ -22,6 +22,8 @@ attaching it.
 
 ## Simulator
 
+- Use the iOS simulator unless the work is Android-specific. Use an Android emulator only for Android-specific work.
+- Always run simulators and emulators with their graphical window visible. Never run them headless.
 - Use Maestro MCP when the user requests Maestro, an existing Maestro flow must be run or maintained, or the result must be reusable automation stored
   with the project. Use the MCP's live tools and documentation as the authority for supported actions and flow syntax.
 - Use $agent-device for exploratory or one-off device interaction and for platforms outside the selected Maestro workflow. Read and follow the skill

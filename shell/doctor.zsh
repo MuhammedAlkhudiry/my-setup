@@ -257,6 +257,7 @@ main() {
   check_tool phpstorm optional "Used by the synced zsh config as the editor command."
   check_tool herd optional "Used by Laravel aliases in the synced zsh config."
   check_tool opencode optional "Used by the ai/opencode launcher and OpenCode workflows."
+  check_tool codex optional "Used by Codex workflows and as a configured agent target."
   check_tool claude optional "Used by Claude Code workflows and as a configured agent target."
   check_tool playwright-cli required "Default browser automation CLI when existing user browser state is not required."
   check_tool playwriter required "Controls signed-in Chrome tabs through the Playwriter extension."

@@ -141,6 +141,20 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
+        name: "codex",
+        level: "optional",
+        why: "Used by Codex workflows and as a configured agent target.",
+        versionArgs: ["--version"],
+        latest: {
+          type: "command",
+          command: "brew",
+          args: ["info", "--cask", "codex"],
+        },
+        update: {
+          commands: ["brew upgrade --cask codex"],
+        },
+      },
+      {
         name: "claude",
         level: "optional",
         why: "Used by Claude Code workflows and as a configured agent target.",

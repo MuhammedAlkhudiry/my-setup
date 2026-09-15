@@ -1,4 +1,6 @@
 import { getProjectEnvironmentDefinition } from "../../../../config/active-projects";
+import { readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 import * as runtime from "../runtime";
 import type { ProjectEnvironmentAdapter, ProjectEnvironmentContext } from "../types";
@@ -104,10 +106,39 @@ function operationContext(): {
   };
 }
 
+function setupInboxUploadLimit(value: HariumContext): void {
+  // Herd executes its shared router, so the application's public/.user.ini is not read.
+  // Set PHP limits only on this lane's virtual host, never in the global PHP configuration.
+  const nginxFile = join(
+    dirname(dirname(value.herdCertificate)),
+    "Nginx",
+    new URL(value.appUrl).hostname,
+  );
+  const contents = readFileSync(nginxFile, "utf8");
+  const directive =
+    '        fastcgi_param PHP_VALUE "upload_max_filesize=25M\\npost_max_size=32M";';
+  if (contents.includes(directive)) return;
+  if (contents.includes("fastcgi_param PHP_VALUE")) {
+    throw new Error(
+      `Review the existing PHP_VALUE directive in ${nginxFile} before configuring Inbox uploads`,
+    );
+  }
+  const next = contents.replaceAll(
+    "        include fastcgi_params;",
+    `        include fastcgi_params;\n${directive}`,
+  );
+  if (next === contents) throw new Error(`Missing FastCGI configuration in ${nginxFile}`);
+  writeFileSync(nginxFile, next);
+  runtime.run(value, "inbox-upload-limit", value.herdCommand, ["restart", "nginx"], {
+    cwd: value.backendDir,
+  });
+}
+
 async function setup(): Promise<void> {
   const { value, laravelEnvironment } = operationContext();
   runtime.trustMise(value);
   runtime.setupHerd(value);
+  setupInboxUploadLimit(value);
   runtime.setupLaravelEnvironment(value, laravelEnvironment);
   runtime.setupExpoEnvironment(value, expoEnvironment(value));
   runtime.setupDatabase(value);
