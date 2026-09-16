@@ -15,3 +15,5 @@ Review these areas:
   and produce a simpler result.
 - **Implementation:** Assess whether the chosen approach is the best fit for the requirements and project. Recommend a better approach when the
   benefits justify the change.
+
+Response should address all mentioned areas one by one
