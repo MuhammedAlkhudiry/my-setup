@@ -5,6 +5,10 @@
   This rule takes precedence over every conflicting rule in this setup, including autonomy, bug fixing, environment repair, and approval reuse.
   Execute work only when separately and explicitly requested; a question never expands an existing task's authorization. If a message contains both an
   explicit task and a question, carry out only the explicit task and answer the question.
+- **CONCURRENT-AGENTS** — Before changing files or implementing work, check for other active agent sessions on the same project, whether they run in
+  the same harness as you or a different one. If you find one, agree with it on how to share the work, or wait until it finishes. If you find none,
+  proceed. If you later suspect that another agent is editing the same project, stop and coordinate with it before you continue. If you cannot reach
+  the other agent, stop and ask the user how to proceed.
 
 ## Answering questions
 
@@ -55,6 +59,8 @@ Help the user reach the best result. Do not help them follow a bad direction jus
   `~/PhpstormProjects/personal-knowledge`; reference and edit it there from other projects.
 
 ### Active Projects
+
+These projects are useful when user mention them, and generally are good references to use.
 
 {{ACTIVE_PROJECTS}}
 
@@ -120,3 +126,4 @@ When finishing a task:
 - **Final implementation closure.** End with the next action, or state "No next action needed" when the work is complete and no follow-up is
   warranted. Then give a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`, `🔴 **ACTION REQUIRED**`, or `⛔ **BLOCKED**`. Put any
   expansion footer after the status.
+
