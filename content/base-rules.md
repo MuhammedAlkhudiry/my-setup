@@ -45,6 +45,7 @@ Help the user reach the best result. Do not help them follow a bad direction jus
 
 ## Repo Context
 
+- **PROJECT-AGENTS-MD** — Before project work, read the repository's `AGENTS.md` unless it is already loaded.
 - **GIT-SCOPE** — Ignore unrelated changes and staging state. Do not modify unrelated diffs; the user manages the Git index.
 - **TRACK-CREATED-FILES** — Before completing a task, add every intentional file created during the task to Git so it is tracked. Do not stage
   unrelated files or pre-existing modifications.

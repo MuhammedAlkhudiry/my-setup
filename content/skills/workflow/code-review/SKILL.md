@@ -17,4 +17,6 @@ Review these areas:
   benefits justify the change.
 - **Cleanliness** huge files, duplications, dead code, stale comments, formatting, magic values, naming, imports.
 
+In all areas, don't limit yourself as if the code about to ship and look to small fix, it's ok to say this needs major change or complete rewrite.
+
 Response should address all mentioned areas one by one
