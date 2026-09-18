@@ -353,6 +353,7 @@ const subcommandBinaries = new Set([
   "yarn",
 ]);
 const commandPrefixes = new Set(["command", "env", "exec", "nice", "nohup", "sudo", "time"]);
+const navigationCommands = new Set(["cd", "pushd", "popd", "set", "true", "source", "."]);
 // Inline scripts passed to a shell keep their own line structure, so reject tokens that
 // are script syntax rather than a program name.
 const scriptNoise = new Set([
@@ -397,10 +398,13 @@ function commandStatements(raw: string): string[] {
     .flatMap((line) => line.split(/&&|\|\||;/))
     .map((part) => part.split("|")[0].trim())
     .filter(Boolean);
-  return parts
+  const labels = parts
     .map((part) => commandLabel(part))
     .filter(Boolean)
     .slice(0, 16);
+  // A leading directory change is never the command that produced the output.
+  const meaningful = labels.filter((label) => !navigationCommands.has(label));
+  return meaningful.length ? meaningful : labels;
 }
 const commandField = /(?:"cmd"|'cmd'|\bcmd)\s*:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g;
 function wrapperCommands(source: string): string[] {
@@ -831,7 +835,7 @@ if (harnesses.has("codex"))
 
 function claudeToolLabel(name: string, input: Obj): string {
   if (name === "Bash" || name === "BashOutput") {
-    const label = commandLabel(string(input.command));
+    const label = commandStatements(string(input.command))[0] || "";
     return label ? `Bash ${label}` : "Bash";
   }
   if (["Read", "Write", "Edit", "NotebookEdit"].includes(name)) {
