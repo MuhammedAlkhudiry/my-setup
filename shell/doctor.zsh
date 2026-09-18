@@ -293,7 +293,7 @@ main() {
   check_link knowledge "$HOME/bin/knowledge" "$MY_SETUP_ROOT/shell/knowledge.zsh"
   check_link pk "$HOME/bin/pk" "$MY_SETUP_ROOT/shell/pk.zsh"
   check_link ads "$HOME/bin/ads" "$MY_SETUP_ROOT/shell/ads.zsh"
-  check_link lanes "$HOME/bin/lanes" "$MY_SETUP_ROOT/shell/lanes.zsh"
+  check_link plans "$HOME/bin/plans" "$MY_SETUP_ROOT/shell/plans.zsh"
   check_link claude-skills "$HOME/.claude/skills" "$HOME/.agents/skills"
 
   print_header "Managed skills"
