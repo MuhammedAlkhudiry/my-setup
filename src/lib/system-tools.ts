@@ -227,7 +227,7 @@ export const SYSTEM_TOOL_GROUPS = [
         },
         update: {
           commands: ["brew upgrade mobai-app/tap/simslim"],
-          note: "Install with brew install mobai-app/tap/simslim. Persistent lanes require SimSlim 0.4.0 or newer.",
+          note: "Install with brew install mobai-app/tap/simslim.",
         },
       },
       {

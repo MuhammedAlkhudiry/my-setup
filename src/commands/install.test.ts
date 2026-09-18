@@ -16,8 +16,6 @@ describe("renderBaseRules", () => {
         remoteUrl: "https://github.com/example/project.git",
         baseBranch: "main",
         canonicalRoot: "/projects/example-project",
-        environmentVariable: "EXAMPLE_LANE_ROOT",
-        services: [],
       },
     ]);
 

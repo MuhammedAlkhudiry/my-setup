@@ -35,11 +35,9 @@ Help the user reach the best result. Do not help them follow a bad direction jus
 
 - **TASK-LOCATION** — Create new tasks in the same local project checkout as the current task. Use a worktree only when the user explicitly asks for
   one.
-- **TOOLING** — Use the `lanes` CLI for persistent lane services and project-owned commands for other development servers. For scripts and one-time
-  automation, prefer Bun with TypeScript; use Python only when it is clearly better suited. Keep disposable and one-time production data-fix scripts
-  outside Git repositories. Commit only reusable scripts intended for recurring use.
-- **LANES-RUNTIME** — At task start inside a harness-managed worktree, use $project-lanes to provision or repair its lane before project work, and
-  destroy the lane before the worktree is deleted.
+- **TOOLING** — Run development servers through the project's own commands, such as `mise run dev`. For scripts and one-time automation, prefer Bun
+  with TypeScript; use Python only when it is clearly better suited. Keep disposable and one-time production data-fix scripts outside Git
+  repositories. Commit only reusable scripts intended for recurring use.
 - **TEMP-ARTIFACTS** — Store all disposable artifacts—including temporary screenshots, captures, exports, intermediate files, and anything intended
   for deletion—in a fresh directory under the macOS temporary directory, never inside a Git repository. Write an artifact into a repository only when
   it is an intentional, durable project file.

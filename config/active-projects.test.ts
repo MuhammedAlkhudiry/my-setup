@@ -1,39 +1,19 @@
 import { expect, test } from "bun:test";
 
-import {
-  ACTIVE_PROJECTS,
-  getProjectEnvironmentDefinition,
-  PROJECT_DEFINITIONS,
-} from "./active-projects";
-import { PROJECT_ENVIRONMENT_OPERATIONS } from "../src/lib/project-environment/types";
+import { ACTIVE_PROJECTS, getActiveProject } from "./active-projects";
 
-test("derives lane catalog and environment metadata from one project registry", () => {
-  expect(ACTIVE_PROJECTS.map(({ id }) => id)).toEqual(PROJECT_DEFINITIONS.map(({ id }) => id));
+test("declares a unique id, remote, and canonical clone for every active project", () => {
+  const ids = ACTIVE_PROJECTS.map(({ id }) => id);
+  expect(new Set(ids).size).toBe(ids.length);
 
-  const awraq = ACTIVE_PROJECTS.find(({ id }) => id === "awraq")!;
-  const environment = getProjectEnvironmentDefinition("awraq");
-  expect(environment).toMatchObject({
-    id: awraq.id,
-    name: awraq.name,
-    rootEnvironmentVariable: awraq.environmentVariable,
-    mobileDirectory: awraq.mobile?.directory,
-    backendDirectory: awraq.services.find(({ id }) => id === "frontend")?.directory,
-  });
+  for (const project of ACTIVE_PROJECTS) {
+    expect(project.remoteUrl).toMatch(/^https:\/\/github\.com\/.+\.git$/);
+    expect(project.canonicalRoot.startsWith("/")).toBe(true);
+    expect(project.baseBranch.length).toBeGreaterThan(0);
+  }
 });
 
-test("registers an exhaustive environment adapter for every active project", async () => {
-  for (const project of PROJECT_DEFINITIONS) {
-    const { adapter } = await project.loadEnvironmentAdapter();
-    expect(Object.keys(adapter.operations).sort()).toEqual(
-      [...PROJECT_ENVIRONMENT_OPERATIONS].sort(),
-    );
-  }
-
-  expect((await PROJECT_DEFINITIONS[0]!.loadEnvironmentAdapter()).adapter.databaseRoles).toEqual([
-    "agent",
-    "mutation",
-  ]);
-  expect((await PROJECT_DEFINITIONS[1]!.loadEnvironmentAdapter()).adapter.databaseRoles).toEqual(
-    [],
-  );
+test("looks a project up by id and rejects unknown ids", () => {
+  expect(getActiveProject("awraq").name).toBe("Awraq");
+  expect(() => getActiveProject("missing")).toThrow("No active project named missing");
 });

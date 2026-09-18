@@ -37,7 +37,6 @@ import {
   renderCodexMcpServersToml,
 } from "../lib/codex-config";
 import { replaceDirectory, ensureParentDir } from "../lib/fs";
-import { createLanesConfig, readLanesConfig } from "../lib/lanes-config";
 import { secureManagedCredentials } from "../lib/credentials";
 import { colors, compactOutput, print, printBox, printSeparator } from "../lib/print";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
@@ -50,7 +49,6 @@ import { validateRemoteSkillSources } from "../lib/validation";
 
 const HOME = process.env.HOME || "";
 const ROOT_DIR = join(import.meta.dir, "..", "..");
-const CONFIG_HOME = process.env.XDG_CONFIG_HOME || join(HOME, ".config");
 const STATE_HOME = process.env.XDG_STATE_HOME || join(HOME, ".local/state");
 
 // =============================================================================
@@ -83,7 +81,6 @@ const SHARED_PATHS = {
   secrets: join(HOME, CREDENTIALS_ROOT, "secrets.zsh"),
   binDir: join(HOME, "bin"),
   localBinDir: join(HOME, ".local/bin"),
-  lanesConfig: join(CONFIG_HOME, "lanes/projects.json"),
 };
 
 const REMOTE_SKILLS_STATE_PATH = join(STATE_HOME, "my-setup/remote-skills.json");
@@ -102,7 +99,6 @@ const SHARED_BIN_COMMANDS = [
   "knowledge",
   "pk",
   "ads",
-  "lanes",
   "plans",
 ];
 
@@ -439,7 +435,6 @@ async function mergeCodexMcpConfigAsync(): Promise<void> {
 
 async function installShared(): Promise<void> {
   await installLocalSecrets();
-  await installLanesConfig();
 
   const zshSource = join(ROOT_DIR, "shell", "zsh-custom.zsh");
   if (existsSync(zshSource)) {
@@ -502,17 +497,6 @@ async function installShared(): Promise<void> {
   } else {
     print.success("Managed shell environment entries already present in .zshenv");
   }
-}
-
-async function installLanesConfig(): Promise<void> {
-  await ensureParentDir(SHARED_PATHS.lanesConfig);
-  if (existsSync(SHARED_PATHS.lanesConfig)) readLanesConfig(SHARED_PATHS.lanesConfig);
-  await writeFile(
-    SHARED_PATHS.lanesConfig,
-    `${JSON.stringify(createLanesConfig(ACTIVE_PROJECTS), null, 2)}\n`,
-    { mode: 0o600 },
-  );
-  print.success(`Installed lanes config to ${SHARED_PATHS.lanesConfig}`);
 }
 
 async function installManagedSymlink(src: string, dest: string, label: string): Promise<void> {

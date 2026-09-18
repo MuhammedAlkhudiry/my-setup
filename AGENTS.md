@@ -14,15 +14,13 @@
 - `src/commands/install.ts` — Local installer that renders and syncs rules, config, permissions, skills, shell helpers, secrets, and shared bin
   commands.
 - `src/commands/doctor-checks.ts` — Local hygiene checks run by `doctor`; extend it when the installer starts owning a new local surface.
-- `src/commands/lanes-cli.ts`, `src/lib/project-lanes.ts`, and `src/lib/lane-services.ts` — Standalone `lanes` command, canonical/task runtime
-  registry, and service control plane.
 - `src/commands/plans-cli.ts` and `src/commands/plans.ts` — Standalone `plans` command and saved-plan storage.
 - `shell/zsh-custom.zsh` and `shell/doctor.zsh` — Synced shell config and local tool health checks.
 - `src/lib/system-tools.ts` — System-tool inventory, ownership, update commands, and notes; keep it aligned with `doctor`.
 - `config/active-projects.ts` — Active project defaults and canonical clone roots (see ACTIVE-PROJECTS).
 
-- **ACTIVE-PROJECTS** — Active project defaults are declared in `config/active-projects.ts` and installed into the standalone local `lanes` catalog at
-  `~/.config/lanes/projects.json`; disposable task environment registrations live in external state, not the project catalog.
+- **ACTIVE-PROJECTS** — Active project defaults are declared in `config/active-projects.ts` and rendered into the installed rules. Each project owns
+  its own development services through its own commands; this repo holds no runtime environment state.
 - **MAIN-ONLY** — Work directly on `main`; do not create branches unless explicitly requested.
 - **INSTALL** — Use `mise run install` as the only supported local sync/install command after changing content/config/generator behavior. Agents
   should use `mise run install -- --compact` so successful runs emit only the final result while warnings and failures remain visible.
@@ -46,8 +44,6 @@
   skills must be declared in `config/skills.ts` for this repo's source/import logic.
 - **MY-SETUP-CLI** — `my-setup` only provides `install` and built-in help. Use `doctor` for setup health checks and `system-tools status` or
   `system-tools update-plan` for external CLI maintenance.
-- **LANES-CLI** — Use the standalone `lanes` command for runtime environment maintenance and service control; read the narrowest live help for the
-  task.
 - **PLANS-CLI** — Use the standalone `plans` command for saved plans; read its live help for the task.
 - **KNOWLEDGE-CLI** — Use the standalone `knowledge` command for project knowledge packs; read its live help for the task.
 - **WORDING-QUALITY** — Preserve user intent, but do not reuse the user's rough wording. Rewrite it into the clearest, strongest wording that fits the

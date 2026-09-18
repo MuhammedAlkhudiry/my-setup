@@ -39,7 +39,7 @@ function writePlan(
 
 describe("plans list", () => {
   test("returns stored and configured projects in the JSON contract", () => {
-    const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
+    const fixture = mkdtempSync(join(tmpdir(), "plans-"));
     const plansRoot = join(fixture, "plans");
     const checkout = join(fixture, "checkout");
 
@@ -54,12 +54,6 @@ describe("plans list", () => {
         {
           cwd: checkout,
           encoding: "utf8",
-          env: {
-            ...process.env,
-            LANES_CONFIG_PATH: join(fixture, "missing-lanes.json"),
-            LANES_STATE_PATH: join(fixture, "missing-state.json"),
-            LANES_STATE_LOCK_PATH: join(fixture, "missing-state.lock"),
-          },
         },
       );
       const document = JSON.parse(result.stdout) as {
@@ -123,7 +117,7 @@ describe("plans list", () => {
   });
 
   test("falls back to the directory name outside a registered environment", () => {
-    const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
+    const fixture = mkdtempSync(join(tmpdir(), "plans-"));
     const plansRoot = join(fixture, "plans");
     const checkout = join(fixture, "unconfigured-checkout");
 
@@ -145,7 +139,7 @@ describe("plans list", () => {
   });
 
   test("keeps explicit project listing scoped to that project", () => {
-    const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
+    const fixture = mkdtempSync(join(tmpdir(), "plans-"));
     const plansRoot = join(fixture, "plans");
     const checkout = join(fixture, "example-project");
 
@@ -175,7 +169,7 @@ describe("plans list", () => {
 
 describe("plans create", () => {
   test("creates the first saved plan and index in an empty plans root", () => {
-    const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
+    const fixture = mkdtempSync(join(tmpdir(), "plans-"));
     const plansRoot = join(fixture, "plans");
     const checkout = join(fixture, "example-project");
     const planPath = join(plansRoot, "example-project", "billing-brief.md");
@@ -224,7 +218,7 @@ describe("plans create", () => {
   });
 
   test("does not overwrite an existing plan", () => {
-    const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
+    const fixture = mkdtempSync(join(tmpdir(), "plans-"));
     const plansRoot = join(fixture, "plans");
     const checkout = join(fixture, "example-project");
     const planPath = join(plansRoot, "example-project", "billing-brief.md");
@@ -257,7 +251,7 @@ describe("plans create", () => {
 
 describe("plans save", () => {
   test("saves edited content, refreshes the updated date, and rewrites the index", () => {
-    const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
+    const fixture = mkdtempSync(join(tmpdir(), "plans-"));
     const plansRoot = join(fixture, "plans");
     const checkout = join(fixture, "example-project");
     const planPath = join(plansRoot, "example-project", "billing.md");
@@ -308,7 +302,7 @@ describe("plans save", () => {
 
 describe("plans status", () => {
   test("sets the strict pending, progress, or done status and refreshes the index", () => {
-    const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
+    const fixture = mkdtempSync(join(tmpdir(), "plans-"));
     const plansRoot = join(fixture, "plans");
     const checkout = join(fixture, "example-project");
     const planPath = join(plansRoot, "example-project", "billing.md");
@@ -348,7 +342,7 @@ describe("plans status", () => {
 
 describe("plans archive", () => {
   test("archives the matching plan without changing frontmatter", () => {
-    const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
+    const fixture = mkdtempSync(join(tmpdir(), "plans-"));
     const plansRoot = join(fixture, "plans");
     const checkout = join(fixture, "example-project");
     const projectRoot = join(plansRoot, "example-project");
@@ -394,7 +388,7 @@ describe("plans archive", () => {
   });
 
   test("archives every done plan across projects and keeps pending and progress plans active", () => {
-    const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
+    const fixture = mkdtempSync(join(tmpdir(), "plans-"));
     const plansRoot = join(fixture, "plans");
     const checkout = join(fixture, "checkout");
 
