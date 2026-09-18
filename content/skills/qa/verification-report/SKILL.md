@@ -1,6 +1,6 @@
 ---
 name: verification-report
-description: Assess project verification coverage, test quality, speed, reliability, code quality checks, and CI.
+description: Assess project verification coverage, test quality, speed, reliability, formatting, code quality checks, and CI.
 ---
 
 ## Scope
@@ -24,6 +24,8 @@ variation, and observed failures. A single passing run does not establish reliab
 For recommendations, account for project dependencies and ecosystem tooling, including tools to install, configuration changes, and anything to
 remove.
 
+## Rated areas
+
 - **Verification capability:** A score of 0 means the project has no useful checks and changes are difficult to verify. A score of 10 means nearly
   every meaningful change can be verified with suitable tools and coverage. Provide a roadmap to 10 for weak setups, or targeted actions for stronger
   ones.
@@ -33,7 +35,10 @@ remove.
 - **CI quality and speed:** Assess CI independently of local verification. Profile and benchmark it, then recommend improvements. Creating a PR to
   obtain CI measurements is permitted when needed.
 - **Reliability:** Assess flakiness across tests and other checks; a higher score means more reliable verification. Recommend corrective actions.
-- **Code quality checks:** Assess the coverage, enforcement, and speed of linting, formatting, and static analysis. Provide a roadmap or targeted
-  actions to reach 10.
+- **Code quality checks:** Assess the coverage, enforcement, and speed of linting and static analysis. Provide a roadmap or targeted actions to
+  reach 10.
+- **Formatting:** Identify the formatter and every file type it covers, including code, Markdown, styles, and configuration. Run its check command and
+  report the number of unformatted files. Assess enforcement in the editor, in pre-commit hooks, and in CI, and report any rule that the formatter and
+  the linter both own. Recommend a single formatter per file type and automatic enforcement over manual review.
 - **Test coverage:** If coverage measurement is missing, recommend adding it. Otherwise, recommend actions to reach at least 95% coverage and justify
   exclusions for code that does not need testing.

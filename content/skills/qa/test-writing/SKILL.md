@@ -13,4 +13,5 @@ description: Test audits, writing, and review.
 - Mock external dependencies when needed, without reproducing the code's internal steps. Check function calls only when the call itself is required
   behavior.
 - Keep tests that catch the intended failure and survive internal changes that preserve behavior.
-- Never test non-user facing, like internal dev tools, dev pages, local only seeders or similar, if working on it and need verification make something temporary but never part of test suite.
+- Never test non-user facing, like internal dev tools, dev pages, local only seeders or similar, if working on it and need verification make something
+  temporary but never part of test suite.

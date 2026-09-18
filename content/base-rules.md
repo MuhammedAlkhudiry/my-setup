@@ -126,4 +126,3 @@ When finishing a task:
 - **Final implementation closure.** End with the next action, or state "No next action needed" when the work is complete and no follow-up is
   warranted. Then give a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`, `🔴 **ACTION REQUIRED**`, or `⛔ **BLOCKED**`. Put any
   expansion footer after the status.
-

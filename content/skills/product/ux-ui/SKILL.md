@@ -14,8 +14,8 @@ description: UX/UI design, implementation, review, and visual options.
 
 ## Requested options
 
-- By default, create five substantially different options plus mulitple options labeled **Wild**. Use the wild options to explore beyond the
-  brief's design constraints and avoid settling for minor variations of the current approach.
+- By default, create five substantially different options plus mulitple options labeled **Wild**. Use the wild options to explore beyond the brief's
+  design constraints and avoid settling for minor variations of the current approach.
 - Present options in a new HTML preview or visualization by default. If the user requests options inside the app or website, present them there. In
   either format, include an option switcher.
 - Loop animated previews when repetition helps compare the options.
