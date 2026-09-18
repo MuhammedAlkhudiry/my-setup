@@ -5,13 +5,13 @@ Use this for Arabic interface copy across actions, forms, feedback, onboarding, 
 ## Workflow and defaults
 
 1. Write purposeful, concise, natural فصحى مبسطة; use a more formal register for legal, privacy, payment, government, and policy text.
-2. Match the product's gender, numerals, currency, punctuation, terminology, and system-action voice.
+2. Match the product's gender, currency, punctuation, terminology, and system-action voice.
 3. Preserve variables, tags, links, product names, emails, filenames, codes, SKUs, API names, plan IDs, and ICU syntax exactly.
 4. Check for literal English structure, broken placeholder order, plural errors, and mixed RTL/LTR rendering.
 
 - Keep the product's gender strategy. If none exists, use masculine imperative for direct actions, masdar labels for neutral or formal menus, and
   personalized gender only with reliable data and rendering support.
-- Keep the product's numeral style. Western digits are the default for technical products; use Eastern digits when established by the locale.
+- Always use Latin digits (`1,250`), never Eastern Arabic-Indic (`١٬٢٥٠`).
 - Avoid diacritics unless needed for clarity. Use dialect only when the product voice intentionally does so.
 
 ## Arabic-specific corrections

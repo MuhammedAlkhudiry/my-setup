@@ -10,6 +10,10 @@ description: Use when translating or localizing interface copy, reviewing existi
 3. Read [references/arabic-ux-copy.md](references/arabic-ux-copy.md) for Arabic interface copy.
 4. Return improved copy or specific review findings. State anything still unclear.
 
+## Numerals
+
+Always render numbers with Latin digits (`1,250`, `03:45`, `2026`). Never use Eastern Arabic-Indic digits (`١٬٢٥٠`).
+
 ## Review
 
 To save review progress, keep `.translations-review/<feature-or-file>/translation-review.md` with files and languages, progress, issues by severity,
