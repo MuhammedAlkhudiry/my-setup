@@ -29,9 +29,8 @@ const cli = cac("my-setup");
 cli
   .command("install", "Install generated rules, config, skills, and shell helpers locally")
   .option("--compact", "Print only warnings, failures, and the final result")
-  .option("--widgets", "Build, install, and restart the native menu-bar widgets")
-  .action(async (options: { compact?: boolean; widgets?: boolean }) => {
-    await install({ widgets: options.widgets });
+  .action(async (options: { compact?: boolean }) => {
+    await install();
     await runScript("zsh", [join(ROOT_DIR, "shell", "doctor.zsh")], options.compact);
     if (options.compact) console.log("my-setup install: ok");
   });

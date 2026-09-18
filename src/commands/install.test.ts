@@ -88,6 +88,23 @@ describe("syncManagedSkillsAsync", () => {
       expect(existsSync(join(dest, "typescript", "SKILL.md"))).toBe(true);
     });
   });
+
+  test("keeps namespace directories that hold skills one level down", async () => {
+    await withTempDirs(async (src, dest) => {
+      writeSkill(src, "tools", "typescript");
+
+      // Claude Code writes its own synced skills into `synced/<id>/SKILL.md`.
+      mkdirSync(join(dest, "synced", "docx"), { recursive: true });
+      writeFileSync(
+        join(dest, "synced", "docx", "SKILL.md"),
+        "---\nname: docx\ndescription: Synced skill.\n---\n",
+      );
+
+      await syncManagedSkillsAsync({ src, dest, label: "test skills" });
+
+      expect(existsSync(join(dest, "synced", "docx", "SKILL.md"))).toBe(true);
+    });
+  });
 });
 
 test("skill reinstall replaces stale files, preserves custom skills, and omits symlinks", async () => {

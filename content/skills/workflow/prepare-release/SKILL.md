@@ -1,6 +1,6 @@
 ---
 name: prepare-release
-description: Release preparation, production readiness, and post-release follow-up.
+description: Use when deciding whether a change is ready to release, and planning its release actions, rollback limits, and post-release cleanup.
 ---
 
 ## Workflow

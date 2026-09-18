@@ -1,6 +1,6 @@
 ---
 name: personal-knowledge
-description: Find and maintain the owner's personal knowledge.
+description: Use when answering from or updating the owner's personal knowledge about their life, work, tools, preferences, and decisions.
 ---
 
 ## Source routing

@@ -1,6 +1,6 @@
 ---
 name: product-health
-description: Product health checks, investigations, and reports.
+description: Use to check a live product's health or investigate anomalies in errors, jobs, data, performance, or cost.
 ---
 
 ## Workflow
@@ -21,7 +21,8 @@ description: Product health checks, investigations, and reports.
 Use `PRODUCT_SETUP.md` to identify the relevant sources and access routes.
 
 - **Sentry:** Use $sentry-cli.
-- **PostHog:** Use $cli-tools for PostHog source access, $investigate-metric for material metric changes, and $diagnosing-sdk-health for SDK health.
+- **PostHog:** Use $cli-tools for PostHog source access, $querying-posthog-data before writing any HogQL query, $investigate-metric for material
+  metric changes, and $diagnosing-sdk-health for SDK health.
 - **Queues, schedulers, and servers:** Follow `PRODUCT_SETUP.md`. Use $cli-tools for Laravel Forge or SSH as applicable. Measure live backlog, job
   age, retries, failures, execution, service health, and capacity.
 - **Caches, databases, managed services, and full-text search:** Use $service-access or SSH. For DigitalOcean managed databases, use `doctl` and read

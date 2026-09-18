@@ -1,6 +1,6 @@
 ---
 name: ux-ui
-description: UX/UI design, implementation, review, and visual options.
+description: Use when designing, implementing, or reviewing an interface, or when the user asks for visual options to compare.
 ---
 
 ## Design workflow
@@ -14,7 +14,7 @@ description: UX/UI design, implementation, review, and visual options.
 
 ## Requested options
 
-- By default, create five substantially different options plus mulitple options labeled **Wild**. Use the wild options to explore beyond the brief's
+- By default, create five substantially different options plus several more labeled **Wild**. Use the wild options to explore beyond the brief's
   design constraints and avoid settling for minor variations of the current approach.
 - Present options in a new HTML preview or visualization by default. If the user requests options inside the app or website, present them there. In
   either format, include an option switcher.
@@ -22,8 +22,8 @@ description: UX/UI design, implementation, review, and visual options.
 - When the user selects an option without requesting implementation, acknowledge the selection and ask whether to integrate it.
 - When the user selects multiple options or parts of different options, revise the design to combine the selected elements.
 - Keep the HTML file minimal, focusing only on options.
-- When user ask for changes, prefer creating new html over editting last one.
-- When user point to one or multiple options, take this as a reference or direction of what the user want to go and generate from it/them new options.
+- When the user asks for changes, create a new HTML file instead of editing the previous one.
+- When the user points to one or more options, treat them as the chosen direction and generate new options from them.
 
 ## Design checks
 
@@ -38,7 +38,7 @@ a green verification emoji. Identify any checks that could not be completed.
 - Check every UI element against the design system and correct inconsistencies.
 - Check responsive layouts across relevant viewport sizes. Correct overflow, clipping, and controls or content that become difficult to use.
 - Check loading, error, and recovery states. Make progress clear and provide a useful retry or recovery action when a flow fails.
-- Check no word wrapping in buttons/labels.
+- Check that text in buttons and labels does not wrap.
 
 ## Animation
 

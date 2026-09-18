@@ -110,13 +110,15 @@ test("normalizes legacy and modern exec outputs without duplicating wrapper byte
     execOutputs: 2,
     unmatchedToolOutputs: 1,
   });
-  expect(report.commands).toHaveLength(2);
-  expect(
-    report.commands.find((item: any) => item.command.startsWith("functions.exec wrapper")),
-  ).toMatchObject({
-    declared: 2,
+  expect(report.commands.map((item: any) => item.command).sort()).toEqual([
+    "git status",
+    "one",
+    "two",
+  ]);
+  expect(report.commands.find((item: any) => item.command === "one")).toMatchObject({
+    declared: 1,
     outputs: 1,
-    bytes: Buffer.byteLength(JSON.stringify(modernOutput)),
+    bytes: Math.round(Buffer.byteLength(JSON.stringify(modernOutput)) / 2),
   });
 });
 
@@ -300,4 +302,237 @@ test("unknown options fail clearly", () => {
   const result = run(root, stateDb, "--wat", "value");
   expect(result.exitCode).toBe(2);
   expect(result.stderr.toString()).toContain("Unknown option: --wat");
+});
+
+test("uses the first in-window snapshot as the baseline for a forked session", () => {
+  const events = (extra: Record<string, unknown>) => [
+    at("2026-09-01T00:00:00Z", "session_meta", {
+      id: "child",
+      cwd: "/projects/example",
+      timestamp: "2026-09-01T00:00:00Z",
+      base_instructions: { text: "base" },
+      ...extra,
+    }),
+    usage("2026-09-01T00:10:00Z", 40, 5_000_000),
+    usage("2026-09-01T00:20:00Z", 60, 5_000_400),
+    usage("2026-09-01T00:30:00Z", 80, 5_001_000),
+  ];
+  const forked = fixture(
+    events({
+      parent_thread_id: "parent",
+      source: { subagent: { thread_spawn: { parent_thread_id: "parent", depth: 1 } } },
+    }),
+  );
+  const session = JSON.parse(
+    run(forked.root, forked.stateDb, "--since", "2026-09-01").stdout.toString(),
+  ).sessions[0];
+  expect(session).toMatchObject({
+    forked: true,
+    forkSource: "subagent",
+    parentId: "parent",
+    forkBaselineInput: 5_000_000,
+    usageMode: "cumulative",
+    totalInput: 1000,
+    cachedInput: 500,
+    totalOutput: 100,
+  });
+  const plain = fixture(events({}));
+  const plainSession = JSON.parse(
+    run(plain.root, plain.stateDb, "--since", "2026-09-01").stdout.toString(),
+  ).sessions[0];
+  expect(plainSession).toMatchObject({ forked: false, totalInput: 5_001_000 });
+});
+
+test("attributes wrapper output to the shell commands it declares", () => {
+  const output = "x".repeat(400);
+  const { root, stateDb } = fixture([
+    meta("commands", "2026-09-01T00:00:00Z"),
+    at("2026-09-01T00:00:01Z", "response_item", {
+      type: "custom_tool_call",
+      call_id: "wrapper",
+      name: "exec",
+      input: `const r = await tools.exec_command({"cmd":"git status --short && rg -n pattern src | head -40","workdir":"/projects/example"}); text(r.output);`,
+    }),
+    at("2026-09-01T00:00:02Z", "response_item", {
+      type: "custom_tool_call_output",
+      call_id: "wrapper",
+      output,
+    }),
+  ]);
+  const report = JSON.parse(run(root, stateDb, "--since", "2026-09-01").stdout.toString());
+  expect(report.commands.map((item: any) => item.command).sort()).toEqual(["git status", "rg"]);
+  expect(report.commands.find((item: any) => item.command === "rg")).toMatchObject({
+    outputs: 1,
+    declared: 1,
+    bytes: Math.round(Buffer.byteLength(output) / 2),
+  });
+});
+
+function claudeFixture(files: Record<string, unknown[]>): { directory: string; root: string } {
+  const directory = mkdtempSync(join(tmpdir(), "claude-context-audit-"));
+  temporaryDirectories.push(directory);
+  const root = join(directory, "projects");
+  for (const [path, events] of Object.entries(files)) {
+    const file = join(root, path);
+    mkdirSync(join(file, ".."), { recursive: true });
+    writeFileSync(
+      file,
+      events.map((event) => (typeof event === "string" ? event : JSON.stringify(event))).join("\n"),
+    );
+  }
+  return { directory, root };
+}
+function runClaude(root: string, ...args: string[]) {
+  return Bun.spawnSync([
+    "bun",
+    join(import.meta.dir, "analyze-codex-sessions.ts"),
+    "--claude-root",
+    root,
+    "--json",
+    ...args,
+  ]);
+}
+const assistant = (
+  timestamp: string,
+  id: string,
+  usage: Record<string, number>,
+  content: unknown[],
+  extra: Record<string, unknown> = {},
+) => ({
+  type: "assistant",
+  timestamp,
+  sessionId: "main",
+  cwd: "/projects/example",
+  isSidechain: false,
+  uuid: `${id}-${timestamp}`,
+  message: { id, model: "claude-opus-5", role: "assistant", content, usage },
+  ...extra,
+});
+
+test("counts each Claude API response once and attributes tool output to the call", () => {
+  const usageBlock = {
+    input_tokens: 100,
+    cache_read_input_tokens: 1000,
+    cache_creation_input_tokens: 50,
+    output_tokens: 10,
+  };
+  const toolCall = {
+    type: "tool_use",
+    id: "tool-1",
+    name: "Bash",
+    input: { command: "git status --short" },
+  };
+  const { root } = claudeFixture({
+    "example/main.jsonl": [
+      {
+        type: "user",
+        timestamp: "2026-09-01T00:00:00Z",
+        sessionId: "main",
+        cwd: "/projects/example",
+        isSidechain: false,
+        uuid: "u1",
+        message: {
+          role: "user",
+          content: [
+            { type: "text", text: "<system-reminder>injected</system-reminder>Repair the analyzer" },
+          ],
+        },
+      },
+      assistant("2026-09-01T00:00:01Z", "msg-1", usageBlock, [{ type: "thinking", thinking: "" }]),
+      assistant("2026-09-01T00:00:02Z", "msg-1", usageBlock, [toolCall], { apiBlockIndex: 1 }),
+      {
+        type: "user",
+        timestamp: "2026-09-01T00:00:03Z",
+        sessionId: "main",
+        isSidechain: false,
+        uuid: "u2",
+        message: {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "tool-1", content: "M file.ts" }],
+        },
+      },
+      {
+        type: "system",
+        subtype: "compact_boundary",
+        timestamp: "2026-09-01T00:00:04Z",
+        sessionId: "main",
+        uuid: "s1",
+        compactMetadata: { trigger: "auto", preTokens: 170_000 },
+      },
+    ],
+    "example/main/subagents/agent-a1.jsonl": [
+      {
+        type: "user",
+        timestamp: "2026-09-01T00:01:00Z",
+        sessionId: "main",
+        agentId: "a1",
+        cwd: "/projects/example",
+        isSidechain: true,
+        uuid: "su1",
+        message: { role: "user", content: [{ type: "text", text: "Audit the skills" }] },
+      },
+      {
+        ...assistant(
+          "2026-09-01T00:01:01Z",
+          "msg-2",
+          {
+            input_tokens: 10,
+            cache_read_input_tokens: 500,
+            cache_creation_input_tokens: 0,
+            output_tokens: 5,
+          },
+          [{ type: "text", text: "done" }],
+        ),
+        agentId: "a1",
+        isSidechain: true,
+      },
+    ],
+  });
+  const report = JSON.parse(runClaude(root, "--since", "2026-09-01").stdout.toString());
+  expect(report.harnesses).toEqual(["claude"]);
+  expect(report.claude.totals).toMatchObject({
+    sessions: 2,
+    subagents: 1,
+    requests: 2,
+    input: 1660,
+    cachedInput: 1500,
+    compactions: 1,
+  });
+  const main = report.claude.sessions.find((item: any) => !item.sidechain);
+  expect(main).toMatchObject({
+    requests: 1,
+    totalInput: 1150,
+    firstInput: 1150,
+    humanRequests: 1,
+    firstUserMessage: "Repair the analyzer",
+    injectedUserMessages: 1,
+    compactions: 1,
+    toolOutputs: 1,
+    unmatchedToolOutputs: 0,
+  });
+  expect(report.claude.tools).toEqual([
+    {
+      tool: "Bash",
+      label: "Bash git status",
+      outputs: 1,
+      bytes: Buffer.byteLength("M file.ts"),
+      maxBytes: Buffer.byteLength("M file.ts"),
+      truncated: 0,
+    },
+  ]);
+  expect(report.claude.subagentTrees[0]).toMatchObject({
+    sessionId: "main",
+    subagents: 1,
+    mainInput: 1150,
+    subagentInput: 510,
+    totalInput: 1660,
+  });
+  expect(report.totals.sessions).toBe(0);
+});
+
+test("an unknown harness fails clearly", () => {
+  const { root } = claudeFixture({ "example/main.jsonl": [] });
+  const result = runClaude(root, "--harness", "wat");
+  expect(result.exitCode).toBe(2);
+  expect(result.stderr.toString()).toContain("--harness must be codex, claude, or all");
 });

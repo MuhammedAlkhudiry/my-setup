@@ -9,8 +9,16 @@ import { join } from "node:path";
 import { execaSync } from "execa";
 
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
+import { renderBaseRules } from "./install";
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
+const HOME = process.env.HOME || "";
+
+const INSTALLED_RULES_FILES = [
+  { label: "Claude Code", path: join(HOME, ".claude/CLAUDE.md") },
+  { label: "Codex", path: join(HOME, ".codex/AGENTS.md") },
+  { label: "OpenCode", path: join(HOME, ".config/opencode/AGENTS.md") },
+];
 
 interface Finding {
   level: "required" | "optional";
@@ -48,6 +56,22 @@ for (const root of [ROOT_DIR, ...ACTIVE_PROJECTS.map((project) => project.canoni
       detail: `${root}: ${prunable.join(", ")}; run git worktree prune`,
     });
   }
+}
+
+const expectedRules = renderBaseRules(
+  readFileSync(join(ROOT_DIR, "content", "base-rules.md"), "utf-8"),
+);
+const staleRules = INSTALLED_RULES_FILES.filter(
+  ({ path }) => !existsSync(path) || readFileSync(path, "utf-8") !== expectedRules,
+);
+if (staleRules.length > 0) {
+  findings.push({
+    level: "required",
+    label: "stale installed rules",
+    detail: `${staleRules
+      .map(({ label }) => label)
+      .join(", ")} differ from content/base-rules.md; run mise run install -- --compact`,
+  });
 }
 
 if (findings.length === 0) {

@@ -95,15 +95,6 @@ export const SYSTEM_TOOL_GROUPS = [
           note: "Usually updated by macOS or the package manager that owns the shell.",
         },
       },
-      {
-        name: "swift",
-        level: "optional",
-        why: "Builds native menu-bar widgets with mise run install -- --widgets.",
-        versionArgs: ["--version"],
-        update: {
-          note: "Update through Xcode or Xcode Command Line Tools.",
-        },
-      },
     ],
   },
   {

@@ -38,7 +38,6 @@ import {
 } from "../lib/codex-config";
 import { replaceDirectory, ensureParentDir } from "../lib/fs";
 import { createLanesConfig, readLanesConfig } from "../lib/lanes-config";
-import { installMenuApps } from "../lib/menu-apps";
 import { secureManagedCredentials } from "../lib/credentials";
 import { colors, compactOutput, print, printBox, printSeparator } from "../lib/print";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
@@ -104,6 +103,7 @@ const SHARED_BIN_COMMANDS = [
   "pk",
   "ads",
   "lanes",
+  "plans",
 ];
 
 // =============================================================================
@@ -437,7 +437,7 @@ async function mergeCodexMcpConfigAsync(): Promise<void> {
   print.success("Codex MCP config merged");
 }
 
-async function installShared(installWidgets: boolean): Promise<void> {
+async function installShared(): Promise<void> {
   await installLocalSecrets();
   await installLanesConfig();
 
@@ -459,10 +459,6 @@ async function installShared(installWidgets: boolean): Promise<void> {
 
     await installManagedSymlink(sourcePath, destinationPath, `${command} command`);
     await chmod(sourcePath, 0o755);
-  }
-
-  if (installWidgets) {
-    await installMenuApps();
   }
 
   print.info(`Ensuring local command paths are in PATH via ${SHARED_PATHS.zshenv}...`);
@@ -623,6 +619,25 @@ interface ManagedSkillSyncOptions {
   remoteSkillSources?: RemoteSkillSource[];
 }
 
+async function containsSkillFile(dir: string, depth = 2): Promise<boolean> {
+  if (existsSync(join(dir, "SKILL.md"))) {
+    return true;
+  }
+  if (depth <= 0) {
+    return false;
+  }
+
+  const entries = await readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    if (await containsSkillFile(join(dir, entry.name), depth - 1)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 async function pruneInvalidInstalledSkillDirs(dest: string): Promise<number> {
   const entries = await readdir(dest, { withFileTypes: true });
   let removedCount = 0;
@@ -633,7 +648,8 @@ async function pruneInvalidInstalledSkillDirs(dest: string): Promise<number> {
     }
 
     const installedSkillPath = join(dest, entry.name);
-    if (existsSync(join(installedSkillPath, "SKILL.md"))) {
+    // Namespace folders such as Claude's `synced/` hold skills one level down.
+    if (await containsSkillFile(installedSkillPath)) {
       continue;
     }
 
@@ -814,7 +830,7 @@ async function installRemoteSkill(
 // Main
 // =============================================================================
 
-export async function install(options: { widgets?: boolean } = {}): Promise<void> {
+export async function install(): Promise<void> {
   if (!compactOutput) {
     console.log();
     printBox("My Setup - Installer");
@@ -858,7 +874,7 @@ export async function install(options: { widgets?: boolean } = {}): Promise<void
     installOpencode(),
     installCodex(),
     installClaude(),
-    installShared(options.widgets === true),
+    installShared(),
   ]);
 
   if (!compactOutput) {
@@ -869,7 +885,7 @@ export async function install(options: { widgets?: boolean } = {}): Promise<void
 }
 
 if (import.meta.main) {
-  install({ widgets: process.argv.includes("--widgets") }).catch((err: Error) => {
+  install().catch((err: Error) => {
     console.error(err);
     process.exit(1);
   });

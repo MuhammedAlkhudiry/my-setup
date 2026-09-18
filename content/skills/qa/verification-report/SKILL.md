@@ -1,6 +1,6 @@
 ---
 name: verification-report
-description: Assess project verification coverage, test quality, speed, reliability, formatting, code quality checks, and CI.
+description: Use to rate how well a project can be verified — coverage, quality, speed, reliability, lint, CI; to run its checks use $verification.
 ---
 
 ## Scope

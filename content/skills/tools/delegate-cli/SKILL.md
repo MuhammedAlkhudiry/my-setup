@@ -1,6 +1,6 @@
 ---
 name: delegate-cli
-description: Delegating tasks or second opinions to the Claude Code or Codex CLI.
+description: Use to run a task or second opinion through the Claude Code, Codex, or OpenCode CLI; to choose what and who use $using-subagents.
 ---
 
 Pick the model and reasoning effort with $using-subagents. Run the target CLI's live help before invoking it. Give each call one clear task, only the

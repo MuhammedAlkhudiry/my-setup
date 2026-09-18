@@ -1,6 +1,6 @@
 ---
 name: writing-documentation
-description: Writing and editing documents and Markdown files.
+description: Use when writing or editing Markdown documents and project documentation; for agent skills and instruction files use $writing-skills.
 ---
 
 Follow the shared response guidance.

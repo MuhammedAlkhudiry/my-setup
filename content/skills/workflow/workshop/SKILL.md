@@ -1,6 +1,6 @@
 ---
 name: workshop
-description: Idea stress-testing, brainstorming, and option comparison.
+description: Use to challenge and compare an idea, approach, or product decision before work starts; for a question series use $interview.
 ---
 
 ## Workflow

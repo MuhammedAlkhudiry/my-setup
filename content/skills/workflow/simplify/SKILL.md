@@ -1,6 +1,6 @@
 ---
 name: simplify
-description: Simplify completed work through safe edits and recommendations.
+description: Use to make completed work simpler: applies safe edits in scope and recommends the rest; to judge correctness use $code-review.
 ---
 
 ## Workflow
@@ -11,9 +11,18 @@ description: Simplify completed work through safe edits and recommendations.
 3. Reduce nesting and never add nested ternaries. Aim for the simplest direct implementation, reorganizing files when needed. Keep decisions local
    unless sharing or configuration is necessary.
 4. Recommend rather than apply changes that alter required behavior, expand scope, need a migration, introduce a meaningful trade-off, or cannot be
-   verified. Consider both the implementation and the user experience. Exclude style preferences and unsupported guesses.
-5. Classify each suggestion as `Recommended` or `Optional`, then report its area, affected files or flow, proposed simplification, expected benefit,
-   reason it was not applied, what could be lost, supporting evidence, and required decision or validation. If none exist, report
-   `No suggested simplifications found`.
-6. Use $react for React changes and $test-writing when changing tests. After approval, use $workshop for unresolved product decisions and $ux-ui for
+   verified. Consider both the implementation and the user experience.
+5. Use $react for React changes and $test-writing when changing tests. After approval, use $workshop for unresolved product decisions and $ux-ui for
    product or UX changes.
+
+## Recommended, not applied
+
+Report every change you did not apply, including structural improvements that reach beyond the diff: module boundaries, duplication across files, and
+responsibilities in the wrong place. Inspect the relevant callers, tests, and contracts before recommending one.
+
+Recommend a change only when it solves an observed problem. Exclude style preferences, unsupported guesses, and abstractions with no current need.
+
+Classify each item as `Recommended` or `Optional`, then give its area, affected files or flow, proposed change, expected benefit, reason it was not
+applied, what could be lost, supporting evidence, and the decision or validation it needs.
+
+If nothing is worthwhile, report `No suggested simplifications found`.

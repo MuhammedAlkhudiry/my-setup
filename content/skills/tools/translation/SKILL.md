@@ -1,6 +1,6 @@
 ---
 name: translation
-description: Translation, localization, Arabic UX copy, and copy review.
+description: Use when translating or localizing interface copy, reviewing existing translations, or writing Arabic interface copy.
 ---
 
 ## Workflow

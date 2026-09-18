@@ -13,7 +13,7 @@ import {
 import { spawnSync } from "node:child_process";
 import { basename, join, resolve, sep } from "node:path";
 
-import { getActiveProjects, getProjectLanes, LANES_CONFIG_PATH } from "../lib/project-lanes";
+import { ACTIVE_PROJECTS } from "../../config/active-projects";
 
 type Plan = {
   name: string;
@@ -41,18 +41,54 @@ type Options = {
 
 const home = process.env.HOME || "";
 
-function parseOptions(args: string[]): Options {
-  const resolvedCwd = realpathSync(process.cwd());
-  let laneProject: string | undefined;
-  if (existsSync(LANES_CONFIG_PATH)) {
-    laneProject = getActiveProjects().find((project) =>
-      getProjectLanes(project).some((lane) => {
-        const lanePath = existsSync(lane.path) ? realpathSync(lane.path) : resolve(lane.path);
-        return resolvedCwd === lanePath || resolvedCwd.startsWith(`${lanePath}${sep}`);
-      }),
-    )?.id;
+/**
+ * Resolves the plan folder for a checkout: an active project when the checkout belongs to one
+ * (canonical clone, side clone, or worktree), otherwise the checkout directory name.
+ */
+export function resolveProjectId(
+  cwd = process.cwd(),
+  projects: Array<{ id: string; remoteUrl: string; canonicalRoot: string }> = ACTIVE_PROJECTS,
+): string {
+  const resolvedCwd = existsSync(cwd) ? realpathSync(cwd) : resolve(cwd);
+
+  const byRoot = projects.find((project) => {
+    const root = existsSync(project.canonicalRoot)
+      ? realpathSync(project.canonicalRoot)
+      : resolve(project.canonicalRoot);
+    return resolvedCwd === root || resolvedCwd.startsWith(`${root}${sep}`);
+  });
+  if (byRoot) return byRoot.id;
+
+  const remote = spawnSync("git", ["remote", "get-url", "origin"], {
+    cwd: resolvedCwd,
+    encoding: "utf8",
+  });
+  const remoteUrl = remote.status === 0 ? remote.stdout.trim() : "";
+  if (remoteUrl) {
+    const byRemote = projects.find(
+      (project) => normalizeRemote(project.remoteUrl) === normalizeRemote(remoteUrl),
+    );
+    if (byRemote) return byRemote.id;
   }
-  const cwdProject = laneProject || basename(process.cwd().replace(/\/$/, ""));
+
+  const gitRoot = spawnSync("git", ["rev-parse", "--show-toplevel"], {
+    cwd: resolvedCwd,
+    encoding: "utf8",
+  });
+  const root = gitRoot.status === 0 ? gitRoot.stdout.trim() : "";
+  return basename((root || resolvedCwd).replace(/\/$/, ""));
+}
+
+function normalizeRemote(url: string): string {
+  return url
+    .trim()
+    .replace(/\.git$/, "")
+    .replace(/^git@([^:]+):/, "https://$1/")
+    .toLowerCase();
+}
+
+function parseOptions(args: string[]): Options {
+  const cwdProject = resolveProjectId();
   const query: string[] = [];
   let project = cwdProject;
   let plansRoot = join(home, "plans");
@@ -213,9 +249,7 @@ function pad(value: string, width: number): string {
 
 function relatedProjectNames(options: Options): string[] {
   if (options.all) {
-    const configuredProjects = existsSync(LANES_CONFIG_PATH)
-      ? getActiveProjects().map((project) => project.id)
-      : [];
+    const configuredProjects = ACTIVE_PROJECTS.map((project) => project.id);
     const storedProjects = existsSync(options.plansRoot)
       ? readdirSync(options.plansRoot, { withFileTypes: true })
           .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))

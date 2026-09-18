@@ -1,6 +1,6 @@
 ---
 name: help-me-land-this-pr
-description: Explain a PR, guide code review and QA, and follow it until it is ready to merge.
+description: Use when an open PR needs explaining, reviewing, QA, and follow-up until it is ready to merge.
 ---
 
 ## Workflow

@@ -1,11 +1,11 @@
 ---
 name: saved-plans
-description: Save and manage plans for code and non-code tasks.
+description: Use when the user asks to save, resume, update, or archive a plan; for tracking work deliberately postponed use $tech-debt.
 ---
 
-When the user asks to save or manage a plan, use the existing writable plan store and preserve the supplied content. When `lanes` is available, run
-`lanes plans --help` and follow its help. Otherwise use the connected repository's existing plan location. When no writable plan store exists, return
-the complete plan and state that it was not saved.
+When the user asks to save or manage a plan, use the existing writable plan store and preserve the supplied content. When the `plans` command is
+available, run `plans --help` and follow its help. Otherwise use the connected repository's existing plan location. When no writable plan store
+exists, return the complete plan and state that it was not saved.
 
 ## Saved Plan Status
 

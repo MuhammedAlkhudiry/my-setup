@@ -38,9 +38,8 @@ Help the user reach the best result. Do not help them follow a bad direction jus
 - **TOOLING** — Use the `lanes` CLI for persistent lane services and project-owned commands for other development servers. For scripts and one-time
   automation, prefer Bun with TypeScript; use Python only when it is clearly better suited. Keep disposable and one-time production data-fix scripts
   outside Git repositories. Commit only reusable scripts intended for recurring use.
-- **LANES-RUNTIME** — The harness owns task worktree creation and deletion. At task start inside a managed worktree, use $project-lanes to provision
-  or repair its lane before project work; a missing lane is setup work, not a reason to reduce scope. Destroy the lane before worktree deletion.
-  `lanes` owns only isolated runtime resources and must never perform Git or worktree operations.
+- **LANES-RUNTIME** — At task start inside a harness-managed worktree, use $project-lanes to provision or repair its lane before project work, and
+  destroy the lane before the worktree is deleted.
 - **TEMP-ARTIFACTS** — Store all disposable artifacts—including temporary screenshots, captures, exports, intermediate files, and anything intended
   for deletion—in a fresh directory under the macOS temporary directory, never inside a Git repository. Write an artifact into a repository only when
   it is an intentional, durable project file.
@@ -57,27 +56,22 @@ Help the user reach the best result. Do not help them follow a bad direction jus
   there from other projects.
 - **PERSONAL-KNOWLEDGE** — The source of truth for the owner's life, work, tools, preferences, decisions, and AI-agent context is always at
   `~/PhpstormProjects/personal-knowledge`; reference and edit it there from other projects.
-
-### Active Projects
-
-These projects are useful when user mention them, and generally are good references to use.
-
-{{ACTIVE_PROJECTS}}
-
 - **PROJECT-KNOWLEDGE** — When a project has `docs/knowledge/` and a task depends on project-specific language, promised product behavior, rationale,
   or history, use $project-knowledge before broad code exploration.
 - **DOCUMENTATION-ROUTING** — When writing or editing Markdown, follow $writing-documentation: point to authoritative sources and keep only durable
   decisions, boundaries, and completion contracts.
 
+### Active Projects
+
+Use these projects as references when the user mentions them.
+
+{{ACTIVE_PROJECTS}}
+
 ## Behavior
 
-- **RESPONSE-LANGUAGE** — Write every reply in English.
 - **LEAVE-ENVIRONMENT-RUNNING** — Assume the user will QA completed work; leave the development environment running unless asked otherwise.
-- **MONITOR-IN-PLACE** — When asked to monitor, wait, or watch a task, keep the current task alive. Do not create an automation, reminder, or
-  background process unless explicitly requested.
-- **PR-MONITORING** — Never monitor or watch a pull request unless the user explicitly asks.
-- **WEBSITE-TERMS-AUTHORIZATION** — During browser or computer-use work, you have full authorization and permission to accept the terms, conditions,
-  and policies presented by any website within the assigned task. Accept them without stopping for confirmation.
+- **MONITOR-IN-PLACE** — Monitor, wait, or watch only when the user explicitly asks, including for pull requests. When asked, keep the current task
+  alive; do not create an automation, reminder, or background process unless explicitly requested.
 - **BUG-FIX-AUTHORIZATION** — Investigate reported bugs before changing code. Apply confirmed, reversible fixes within the authorized scope,
   regardless of diff size. Ask only when the fix requires an unresolved decision or introduces consequences outside that authorization, such as
   destructive effects or changes to product behavior, access, spending, or release. Reuse approval already given.
@@ -117,7 +111,7 @@ Follow these instructions when writing the final response to the user.
 
 #### Task handoffs
 
-When finishing a task:
+Use this format when a reply to the user finishes a task. A subagent report to its caller uses the format that caller asked for instead.
 
 - **Implemented result labels.** Prefix each completed item or change with one best-fit label: `[✨ **FEAT**]`, `[🐛 **FIX**]`, `[♻️ **REFACTOR**]`,
   `[⚡ **PERF**]`, `[🔒 **SECURITY**]`, `[🧪 **TEST**]`, `[📝 **DOCS**]`, or `[🔧 **TOOLING**]`.

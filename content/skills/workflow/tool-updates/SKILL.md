@@ -1,6 +1,6 @@
 ---
 name: tool-updates
-description: Update external CLI tools.
+description: Use when updating the machine's external CLI tools and reporting what changed across the versions crossed.
 ---
 
 ## Workflow

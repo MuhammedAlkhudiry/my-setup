@@ -1,6 +1,6 @@
 ---
 name: product-setup
-description: PRODUCT_SETUP.md creation and maintenance.
+description: Use to create or refresh a project's `PRODUCT_SETUP.md`: definition, journeys, access routes, and recurring checks.
 ---
 
 ## Workflow

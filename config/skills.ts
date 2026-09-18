@@ -40,16 +40,6 @@ export const REMOTE_SKILL_SOURCES: RemoteSkillSource[] = [
     ],
   },
   {
-    repository: "https://github.com/vercel-labs/skills.git",
-    ref: "main",
-    skills: [
-      {
-        name: "find-skills",
-        sourcePath: "skills/find-skills",
-      },
-    ],
-  },
-  {
     repository: "https://github.com/callstackincubator/agent-device.git",
     ref: "main",
     skills: [
@@ -89,11 +79,11 @@ export const REMOTE_SKILL_SOURCES: RemoteSkillSource[] = [
   },
   {
     repository: "https://github.com/getsentry/cli.git",
-    ref: "0.38.0",
+    ref: "main",
     skills: [
       {
         name: "sentry-cli",
-        sourcePath: "plugins/sentry-cli/skills/sentry-cli",
+        sourcePath: "packages/cli/plugins/sentry-cli/skills/sentry-cli",
       },
     ],
   },

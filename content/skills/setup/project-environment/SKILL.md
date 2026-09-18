@@ -1,6 +1,6 @@
 ---
 name: project-environment
-description: Shared project environment setup and maintenance.
+description: Use to add or fix a project's adapter in the shared environment runtime; to operate an existing lane use $project-lanes.
 ---
 
 Keep every active project's environment adapter in the shared project-environment runtime. Project repositories must not contain lane lifecycle

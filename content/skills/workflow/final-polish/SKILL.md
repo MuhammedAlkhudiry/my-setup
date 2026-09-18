@@ -1,20 +1,21 @@
 ---
 name: final-polish
-description: Check and improve completed work before human review.
+description: Use after finishing work and before human review; runs $simplify, $code-review, and $verification once each and reports readiness.
 ---
 
 ## Workflow
 
+Run each pass once. No pass may re-enter an earlier one.
+
 1. Review the diff for unnecessary changes, test quality, regressions, and mismatches between connected components. Fix or report behavior that is
    broken, unsafe, outdated, or unclear.
-2. Run $simplify in a subagent started from a self-contained brief with the exact scope, evaluating each pass before the next. Run $test-writing to
-   audit coverage and close approved worthwhile gaps. These passes may edit.
+2. Run $simplify in a subagent started from a self-contained brief with the exact scope. Run $test-writing to audit coverage and close approved
+   worthwhile gaps. These passes may edit.
 3. Run these read-only reviews of the same scope in parallel, each in a subagent started from its own self-contained brief:
-   - $code-review as a Standards review.
-   - $refactor-opportunities.
+   - $code-review over the whole diff.
    - $ux-ui when the diff affects an interface; inspect the rendered result or report `BLOCKED`. Report unavailable passes instead of simulating them.
 4. Use $verification to check the final result. Fix failures caused by the task and report each check as `PASS`, `FAIL`, or `BLOCKED`.
-5. Run one final read-only review in a subagent with a self-contained brief. The main agent combines the findings and writes the final report.
+5. Combine the findings in the main agent and write the final report.
 
 ## Rules
 
@@ -30,18 +31,11 @@ description: Check and improve completed work before human review.
 ## Simplify
 
 - **Applied:** <items or none>
-- **Suggested:** <items or none>
-
-## Refactor opportunities
-
-- **<Recommended | Optional>: <problem>** (`<files>`)
-  - **Impact:** <impact>
-
-<or "No worthwhile refactor opportunities found">
+- **Recommended, not applied:** <items or "No suggested simplifications found">
 
 ## Code review
 
-<$code-review output>
+<findings in the $code-review finding format, or "Clear">
 
 ## UI/UX review
 
@@ -52,10 +46,6 @@ description: Check and improve completed work before human review.
   - **Reason:** <reason>
 
 <or "No findings", "Skipped", or "Blocked: <reason>">
-
-## Final review
-
-<use the $code-review finding format, or "Clear">
 
 ## Verification
 

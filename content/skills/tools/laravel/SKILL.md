@@ -1,6 +1,6 @@
 ---
 name: laravel
-description: Laravel implementation and review preferences.
+description: Use when writing or reviewing Laravel code, for style, HTTP layering, configuration, and Eloquent preferences.
 ---
 
 Follow stronger established project patterns.

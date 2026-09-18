@@ -1,6 +1,6 @@
 ---
 name: improve-agent-setup
-description: Agent setup audits and improvement recommendations.
+description: Use to audit the agent setup — context, skills, rules, install, projects, external tools — and recommend improvements.
 ---
 
 Recommend improvements without editing.
@@ -9,7 +9,8 @@ Recommend improvements without editing.
 
 1. Review every area below for a broad audit, or only the area named by the user.
 2. Inspect source files, installed configuration, and recent tasks for repeated problems, avoidable work, and wasted context. For context audits, run
-   `scripts/analyze-codex-sessions.ts --help` and use its current interface.
+   `scripts/analyze-codex-sessions.ts --help` and use its current interface. It covers Codex and Claude Code sessions; `--harness` limits the run to
+   one of them.
 3. For the external-tools review, search GitHub Trending and current GitHub results for agent tools that could solve the observed problems. Search
    other current external sources only when needed.
 4. Rank ideas by lasting value, supporting evidence, effort, and risk.

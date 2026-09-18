@@ -1,6 +1,6 @@
 ---
 name: using-subagents
-description: Delegating work to subagents or agent CLIs, selecting models, and verifying results.
+description: Use to decide whether to delegate work, which model and effort it gets, and how to check it; for CLI mechanics use $delegate-cli.
 ---
 
 | Task                    | Delegate to                            |

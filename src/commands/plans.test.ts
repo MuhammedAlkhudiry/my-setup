@@ -6,7 +6,10 @@ import { spawnSync } from "node:child_process";
 
 import { describe, expect, test } from "bun:test";
 
-const script = join(dirname(fileURLToPath(import.meta.url)), "lanes-cli.ts");
+import { ACTIVE_PROJECTS } from "../../config/active-projects";
+import { resolveProjectId } from "./plans";
+
+const script = join(dirname(fileURLToPath(import.meta.url)), "plans-cli.ts");
 
 function writePlan(
   root: string,
@@ -34,8 +37,8 @@ function writePlan(
   );
 }
 
-describe("lanes plans list", () => {
-  test("returns every project through the menu app JSON contract", () => {
+describe("plans list", () => {
+  test("returns stored and configured projects in the JSON contract", () => {
     const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
     const plansRoot = join(fixture, "plans");
     const checkout = join(fixture, "checkout");
@@ -47,7 +50,7 @@ describe("lanes plans list", () => {
 
       const result = spawnSync(
         "bun",
-        [script, "plans", "list", "--all", "--json", `--plans-root=${plansRoot}`],
+        [script, "list", "--all", "--json", `--plans-root=${plansRoot}`],
         {
           cwd: checkout,
           encoding: "utf8",
@@ -75,145 +78,45 @@ describe("lanes plans list", () => {
       expect(result.status).toBe(0);
       expect(document.contractVersion).toBe(2);
       expect(document.plansRoot).toBe(plansRoot);
-      expect(document.projects.map((project) => project.id)).toEqual([
-        "example-project",
-        "other-project",
-      ]);
-      expect(document.projects[0].plans[0].title).toBe("Base Plan");
-      expect(document.projects[0].plans[0].path).toBe(
-        join(plansRoot, "example-project", "base.md"),
+      expect(document.projects.map((project) => project.id)).toEqual(
+        expect.arrayContaining([
+          "example-project",
+          "other-project",
+          ...ACTIVE_PROJECTS.map((project) => project.id),
+        ]),
       );
-      expect(document.projects[0].plans[0].status).toBe("pending");
+      const example = document.projects.find((project) => project.id === "example-project");
+      expect(example?.plans[0].title).toBe("Base Plan");
+      expect(example?.plans[0].path).toBe(join(plansRoot, "example-project", "base.md"));
+      expect(example?.plans[0].status).toBe("pending");
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
   });
 
-  test("uses the configured project id inside a task worktree", () => {
-    const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
-    const plansRoot = join(fixture, "plans");
-    const checkout = join(fixture, "example-project-lane-1");
-    const lanesConfig = join(fixture, "lanes.json");
-    const lanesState = join(fixture, "state.json");
-
-    try {
-      mkdirSync(checkout, { recursive: true });
-      writeFileSync(
-        lanesConfig,
-        JSON.stringify({
-          version: 5,
-          projects: [
-            {
-              id: "example-project",
-              name: "Example Project",
-              remoteUrl: "https://example.com/example-project-repository.git",
-              baseBranch: "main",
-              canonicalRoot: join(fixture, "example-project"),
-              environmentVariable: "EXAMPLE_PROJECT_LANE_ROOT",
-              services: [
-                {
-                  id: "frontend",
-                  name: "Frontend",
-                  directory: "app",
-                  runner: { type: "bun-script", script: "dev" },
-                },
-              ],
-            },
-          ],
-        }),
-      );
-      writeFileSync(
-        lanesState,
-        JSON.stringify({
-          version: 2,
-          projects: {
-            "example-project": {
-              "plan-task": { path: checkout, number: 1, kind: "task" },
-            },
-          },
-        }),
-      );
-      writePlan(plansRoot, "example-project", "base.md", "Base Plan");
-      writePlan(plansRoot, "example-project-repository", "remote.md", "Remote Plan");
-      writePlan(plansRoot, "other-project", "other.md", "Other Plan");
-
-      const result = spawnSync("bun", [script, "plans", "list", `--plans-root=${plansRoot}`], {
-        cwd: checkout,
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          LANES_CONFIG_PATH: lanesConfig,
-          LANES_STATE_PATH: lanesState,
-          LANES_STATE_LOCK_PATH: `${lanesState}.lock`,
-        },
-      });
-
-      expect(result.status).toBe(0);
-      expect(result.stdout).not.toContain("Projects:");
-      expect(result.stdout).toContain("base.md");
-      expect(result.stdout).not.toContain("remote.md");
-      expect(result.stdout).not.toContain("other.md");
-    } finally {
-      rmSync(fixture, { recursive: true, force: true });
-    }
-  });
-
-  test("returns configured projects before any plan directory exists", () => {
-    const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
+  test("lists configured projects before any plan directory exists", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "plans-"));
     const plansRoot = join(fixture, "plans");
     const checkout = join(fixture, "checkout");
-    const lanesConfig = join(fixture, "lanes.json");
-    const lanesState = join(fixture, "state.json");
 
     try {
       mkdirSync(plansRoot, { recursive: true });
       mkdirSync(checkout, { recursive: true });
-      writeFileSync(
-        lanesConfig,
-        JSON.stringify({
-          version: 5,
-          projects: [
-            {
-              id: "example-project",
-              name: "Example Project",
-              remoteUrl: "https://example.com/example-project.git",
-              baseBranch: "main",
-              canonicalRoot: checkout,
-              environmentVariable: "EXAMPLE_PROJECT_LANE_ROOT",
-              services: [
-                {
-                  id: "frontend",
-                  name: "Frontend",
-                  directory: "app",
-                  runner: { type: "bun-script", script: "dev" },
-                },
-              ],
-            },
-          ],
-        }),
-      );
-      writeFileSync(lanesState, JSON.stringify({ version: 2, projects: {} }));
 
       const result = spawnSync(
         "bun",
-        [script, "plans", "list", "--all", "--json", `--plans-root=${plansRoot}`],
-        {
-          cwd: checkout,
-          encoding: "utf8",
-          env: {
-            ...process.env,
-            LANES_CONFIG_PATH: lanesConfig,
-            LANES_STATE_PATH: lanesState,
-            LANES_STATE_LOCK_PATH: `${lanesState}.lock`,
-          },
-        },
+        [script, "list", "--all", "--json", `--plans-root=${plansRoot}`],
+        { cwd: checkout, encoding: "utf8" },
       );
       const document = JSON.parse(result.stdout) as {
         projects: Array<{ id: string; plans: unknown[] }>;
       };
 
       expect(result.status).toBe(0);
-      expect(document.projects).toEqual([{ id: "example-project", plans: [] }]);
+      expect(document.projects.map((project) => project.id)).toEqual(
+        ACTIVE_PROJECTS.map((project) => project.id),
+      );
+      expect(document.projects.every((project) => project.plans.length === 0)).toBe(true);
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }
@@ -228,7 +131,7 @@ describe("lanes plans list", () => {
       mkdirSync(checkout, { recursive: true });
       writePlan(plansRoot, "unconfigured-checkout", "local.md", "Local Plan");
 
-      const result = spawnSync("bun", [script, "plans", "list", `--plans-root=${plansRoot}`], {
+      const result = spawnSync("bun", [script, "list", `--plans-root=${plansRoot}`], {
         cwd: checkout,
         encoding: "utf8",
       });
@@ -253,7 +156,7 @@ describe("lanes plans list", () => {
 
       const result = spawnSync(
         "bun",
-        [script, "plans", "list", "--project=example-project", `--plans-root=${plansRoot}`],
+        [script, "list", "--project=example-project", `--plans-root=${plansRoot}`],
         {
           cwd: checkout,
           encoding: "utf8",
@@ -270,7 +173,7 @@ describe("lanes plans list", () => {
   });
 });
 
-describe("lanes plans create", () => {
+describe("plans create", () => {
   test("creates the first saved plan and index in an empty plans root", () => {
     const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
     const plansRoot = join(fixture, "plans");
@@ -294,7 +197,6 @@ describe("lanes plans create", () => {
         "bun",
         [
           script,
-          "plans",
           "create",
           "billing-brief",
           "--project=example-project",
@@ -335,7 +237,6 @@ describe("lanes plans create", () => {
         "bun",
         [
           script,
-          "plans",
           "create",
           "billing-brief",
           "--project=example-project",
@@ -354,7 +255,7 @@ describe("lanes plans create", () => {
   });
 });
 
-describe("lanes plans save", () => {
+describe("plans save", () => {
   test("saves edited content, refreshes the updated date, and rewrites the index", () => {
     const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
     const plansRoot = join(fixture, "plans");
@@ -382,7 +283,6 @@ describe("lanes plans save", () => {
         "bun",
         [
           script,
-          "plans",
           "save",
           "billing.md",
           "--project=example-project",
@@ -406,7 +306,7 @@ describe("lanes plans save", () => {
   });
 });
 
-describe("lanes plans status", () => {
+describe("plans status", () => {
   test("sets the strict pending, progress, or done status and refreshes the index", () => {
     const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
     const plansRoot = join(fixture, "plans");
@@ -419,7 +319,7 @@ describe("lanes plans status", () => {
 
       const progressResult = spawnSync(
         "bun",
-        [script, "plans", "status", "billing.md", "--status=progress", `--plans-root=${plansRoot}`],
+        [script, "status", "billing.md", "--status=progress", `--plans-root=${plansRoot}`],
         { cwd: checkout, encoding: "utf8" },
       );
       const progressing = readFileSync(planPath, "utf8");
@@ -431,7 +331,7 @@ describe("lanes plans status", () => {
 
       const result = spawnSync(
         "bun",
-        [script, "plans", "status", "billing.md", "--status=done", `--plans-root=${plansRoot}`],
+        [script, "status", "billing.md", "--status=done", `--plans-root=${plansRoot}`],
         { cwd: checkout, encoding: "utf8" },
       );
       const saved = readFileSync(planPath, "utf8");
@@ -446,7 +346,7 @@ describe("lanes plans status", () => {
   });
 });
 
-describe("lanes plans archive", () => {
+describe("plans archive", () => {
   test("archives the matching plan without changing frontmatter", () => {
     const fixture = mkdtempSync(join(tmpdir(), "lanes-plans-"));
     const plansRoot = join(fixture, "plans");
@@ -460,7 +360,7 @@ describe("lanes plans archive", () => {
 
       const result = spawnSync(
         "bun",
-        [script, "plans", "archive", "billing", `--plans-root=${plansRoot}`],
+        [script, "archive", "billing", `--plans-root=${plansRoot}`],
         {
           cwd: checkout,
           encoding: "utf8",
@@ -480,7 +380,7 @@ describe("lanes plans archive", () => {
       expect(index).toContain("editor.md");
       expect(index).not.toContain("billing.md");
 
-      const list = spawnSync("bun", [script, "plans", "list", `--plans-root=${plansRoot}`], {
+      const list = spawnSync("bun", [script, "list", `--plans-root=${plansRoot}`], {
         cwd: checkout,
         encoding: "utf8",
       });
@@ -507,7 +407,7 @@ describe("lanes plans archive", () => {
 
       const result = spawnSync(
         "bun",
-        [script, "plans", "archive-done", "--all", `--plans-root=${plansRoot}`],
+        [script, "archive-done", "--all", `--plans-root=${plansRoot}`],
         { cwd: checkout, encoding: "utf8" },
       );
 
@@ -523,6 +423,58 @@ describe("lanes plans archive", () => {
       expect(readFileSync(join(plansRoot, "example-project", "INDEX.md"), "utf8")).toContain(
         "progress.md",
       );
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("resolveProjectId", () => {
+  const projects = [
+    {
+      id: "example-project",
+      remoteUrl: "https://example.com/example-project.git",
+      canonicalRoot: "/does/not/exist/example-project",
+    },
+  ];
+
+  test("uses the project that owns the checkout", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "plans-resolve-"));
+    try {
+      const canonicalRoot = join(fixture, "example-project");
+      mkdirSync(join(canonicalRoot, "nested"), { recursive: true });
+
+      expect(
+        resolveProjectId(join(canonicalRoot, "nested"), [{ ...projects[0], canonicalRoot }]),
+      ).toBe("example-project");
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  test("matches a side clone or worktree through its origin remote", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "plans-resolve-"));
+    try {
+      const checkout = join(fixture, "example-project-compare");
+      mkdirSync(checkout, { recursive: true });
+      spawnSync("git", ["init", "--quiet"], { cwd: checkout });
+      spawnSync("git", ["remote", "add", "origin", "git@example.com:example-project.git"], {
+        cwd: checkout,
+      });
+
+      expect(resolveProjectId(checkout, projects)).toBe("example-project");
+    } finally {
+      rmSync(fixture, { recursive: true, force: true });
+    }
+  });
+
+  test("falls back to the checkout directory name", () => {
+    const fixture = mkdtempSync(join(tmpdir(), "plans-resolve-"));
+    try {
+      const checkout = join(fixture, "unconfigured-checkout");
+      mkdirSync(checkout, { recursive: true });
+
+      expect(resolveProjectId(checkout, projects)).toBe("unconfigured-checkout");
     } finally {
       rmSync(fixture, { recursive: true, force: true });
     }

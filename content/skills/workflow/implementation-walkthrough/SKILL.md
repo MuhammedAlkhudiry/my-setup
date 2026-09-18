@@ -1,6 +1,6 @@
 ---
 name: implementation-walkthrough
-description: Gentle walkthroughs of implemented work.
+description: Use when guiding the user step by step through implemented work to inspect or QA it, saving progress between turns.
 ---
 
 ## Saved progress

@@ -1,6 +1,6 @@
 ---
 name: project-knowledge
-description: Project feature knowledge, functionality documentation, glossary terms, and history.
+description: Use before broad code exploration when a task depends on a project's vocabulary, promised behavior, boundaries, or history.
 ---
 
 Use project knowledge only for information whose loss would cause a future agent to make the wrong product decision. Run `knowledge --help` for the

@@ -1,6 +1,6 @@
 ---
 name: react
-description: React implementation and review preferences.
+description: Use when writing or reviewing React or React Native code, for component order, server data, store access, and props preferences.
 ---
 
 Follow established project patterns when they give more specific guidance.

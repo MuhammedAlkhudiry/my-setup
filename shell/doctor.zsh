@@ -251,7 +251,6 @@ main() {
   check_tool mise required "Needed for the supported local task workflow and global runtime management."
   check_tool node required "Hosts npm itself and the npm-installed agent CLIs."
   check_tool zsh required "Needed by all installed shared shell commands."
-  check_tool swift optional "Builds native menu-bar widgets with mise run install -- --widgets."
 
   print_header "Shell and helper integrations"
   check_tool phpstorm optional "Used by the synced zsh config as the editor command."

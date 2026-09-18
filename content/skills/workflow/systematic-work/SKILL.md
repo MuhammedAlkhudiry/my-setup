@@ -1,6 +1,6 @@
 ---
 name: systematic-work
-description: Work through every item in a defined scope.
+description: Use when a task means covering every item in a defined set and no item may be silently missed.
 ---
 
 ## Workflow

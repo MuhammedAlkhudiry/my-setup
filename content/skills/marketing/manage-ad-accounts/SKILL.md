@@ -1,6 +1,6 @@
 ---
 name: manage-ad-accounts
-description: Advertising account management, inventory, reporting, and audits.
+description: Use for advertising accounts, campaigns, conversions, and lead flow, and to maintain the project's `ADS.md` inventory.
 ---
 
 - Use $service-access for account access and provider sources.

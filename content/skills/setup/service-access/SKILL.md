@@ -1,6 +1,6 @@
 ---
 name: service-access
-description: Configured service access and credential repair.
+description: Use when a configured third-party provider needs sign-in, credentials, or access repair before other work can run.
 ---
 
 Read only the reference for the requested provider. If none matches, this skill does not cover that provider.

@@ -1,6 +1,6 @@
 ---
 name: cli-tools
-description: Hugeicons, Laravel Forge, and PostHog CLI usage.
+description: Use when working with the Hugeicons, Laravel Forge, or PostHog CLIs.
 ---
 
 Read the narrowest relevant live help before acting; it is the authority for commands, options, and supported platforms.

@@ -1,6 +1,6 @@
 ---
 name: writing-skills
-description: Write and maintain agent skills and instructions.
+description: Use when creating, editing, or trimming an agent skill or an always-loaded instruction file.
 ---
 
 ## Content

@@ -1,6 +1,6 @@
 ---
 name: verification
-description: Project verification and `CHECKLIST.md` setup.
+description: Use to run a project's checks after a change, or to create or repair its `CHECKLIST.md`; to rate the setup use $verification-report.
 ---
 
 ## Workflow

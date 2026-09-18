@@ -1,6 +1,6 @@
 ---
 name: project-lanes
-description: Manage isolated development environments and their services.
+description: Use to provision, repair, verify, or destroy an isolated task environment; to change the shared runtime use $project-environment.
 ---
 
 A lane is an isolated runtime environment attached to either a project's canonical clone or a disposable task worktree. The coding harness owns

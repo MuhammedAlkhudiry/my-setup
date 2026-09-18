@@ -1,6 +1,6 @@
 ---
 name: interview
-description: Interview the user when requested or when several important decisions need a connected series of questions.
+description: Use when the user asks for an interview or when linked decisions need a series of questions; to challenge one idea use $workshop.
 ---
 
 ## Workflow

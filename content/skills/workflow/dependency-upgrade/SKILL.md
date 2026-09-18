@@ -1,6 +1,6 @@
 ---
 name: dependency-upgrade
-description: Dependency upgrades, freshness audits, and unused-package cleanup.
+description: Use when upgrading project dependencies, auditing how current they are, or removing unused packages.
 ---
 
 ## Workflow

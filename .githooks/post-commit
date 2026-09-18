@@ -1,0 +1,19 @@
+#!/bin/sh
+
+set -eu
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
+if [ -n "${MY_SETUP_SKIP_INSTALL_HOOK:-}" ]; then
+  exit 0
+fi
+
+if ! command -v mise >/dev/null 2>&1; then
+  printf '%s\n' "[my-setup] Skipped install after commit: 'mise' is not available."
+  exit 0
+fi
+
+printf '%s\n' "[my-setup] Running mise run install after commit..."
+
+cd "$repo_root"
+mise run install -- --compact

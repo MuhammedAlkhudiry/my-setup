@@ -1,6 +1,6 @@
 ---
 name: power-user-qa
-description: Use a product or feature as a demanding real user and collect UX issues and bugs.
+description: Use to exercise a running product as a demanding real user and find bugs and UX issues; for design review use $ux-ui.
 ---
 
 ## Workflow
