@@ -34,8 +34,6 @@
   from `SKILL.md` alone.
 - **SKILL-CROSS-REFERENCES** — When one skill refers to another, write `$skill-name` instead of a bare or code-formatted name so renames, removals,
   and typos are validated.
-- **SKILL-CREATION-WORKSHOP** — Before creating a new skill, always workshop the goal, arguments, trade-offs, and scope with the user, then do a deep
-  web search for current external guidance or examples even if the user did not ask for it.
 - **SKILL-PORTABLE** — Installed-facing skill files must not point back to source-only repo paths such as `content/skills/...` or local `my-setup`
   paths; use skill-relative references.
 - **SKILL-GLOBAL** — Skill instructions are global capabilities; do not mention any project, repo, product, client, or local workspace by name.
