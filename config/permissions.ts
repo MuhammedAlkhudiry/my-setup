@@ -20,6 +20,7 @@ export const ALLOWED_COMMAND_PREFIXES = [
   "composer",
   "knowledge",
   "pk",
+  "share-html",
   "doctor",
   "system-tools",
 ] as const;

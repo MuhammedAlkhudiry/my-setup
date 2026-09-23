@@ -16,7 +16,7 @@ description: Use when designing, implementing, or reviewing an interface, or whe
 
 - By default, create five substantially different options plus several more labeled **Wild**. Use the wild options to explore beyond the brief's
   design constraints and avoid settling for minor variations of the current approach.
-- Present options in a new HTML preview or visualization by default. If the user requests options inside the app or website, present them there. In
+- Present options in a new HTML preview or visualization built with $html-artifacts by default. If the user requests options inside the app or website, present them there. In
   either format, include an option switcher.
 - Loop animated previews when repetition helps compare the options.
 - When the user selects an option without requesting implementation, acknowledge the selection and ask whether to integrate it.

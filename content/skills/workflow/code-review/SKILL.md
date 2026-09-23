@@ -31,8 +31,8 @@ Judge the change on its merits, not on how close it is to shipping; a major chan
 
 ## HTML report
 
-When there are findings, deliver a minimal standalone HTML file with embedded styles and scripts and no external dependencies; otherwise reply
-normally. Link it in the final response and open a preview when available.
+When there are findings, deliver a minimal standalone HTML file with embedded styles and scripts, built with $html-artifacts; otherwise reply
+normally. Open a preview when available.
 
 - State the reviewed scope and verification limits. Group findings by review area, order them by severity, and mark areas with no findings `Clear`.
   Distinguish unreviewed or inapplicable areas from those checked and clear.
