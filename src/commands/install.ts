@@ -80,7 +80,6 @@ const SHARED_PATHS = {
   credentials: join(HOME, CREDENTIALS_ROOT),
   secrets: join(HOME, CREDENTIALS_ROOT, "secrets.zsh"),
   binDir: join(HOME, "bin"),
-  localBinDir: join(HOME, ".local/bin"),
 };
 
 const REMOTE_SKILLS_STATE_PATH = join(STATE_HOME, "my-setup/remote-skills.json");
@@ -98,8 +97,6 @@ const SHARED_BIN_COMMANDS = [
   "doctor",
   "knowledge",
   "pk",
-  "ads",
-  "plans",
 ];
 
 // =============================================================================
@@ -307,12 +304,13 @@ async function mergeClaudeSettingsAsync(): Promise<void> {
       print.warning("Failed to parse existing Claude Code settings, creating new file");
     }
   }
-  const managed = createClaudeManagedSettings();
+  const { permissions, ...managedKeys } = createClaudeManagedSettings();
   const merged = {
     ...existing,
+    ...managedKeys,
     permissions: {
       ...(existing.permissions as Record<string, unknown> | undefined),
-      allow: managed.permissions.allow,
+      allow: permissions.allow,
     },
   };
   await writeFile(CLAUDE_PATHS.settings, JSON.stringify(merged, null, 2) + "\n");

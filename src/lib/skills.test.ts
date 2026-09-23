@@ -63,6 +63,22 @@ describe("discoverLocalSkills", () => {
     }
   });
 
+  test("reads a description that wraps onto several lines", () => {
+    const root = mkdtempSync(join(tmpdir(), "my-setup-skills-"));
+    try {
+      const dir = join(root, "tools", "laravel");
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "SKILL.md"),
+        "---\nname: laravel\ndescription:\n  Use when writing\n  Laravel code.\n---\n",
+      );
+
+      expect(discoverLocalSkills(root)[0]?.description).toBe("Use when writing Laravel code.");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test("accepts namespaced external skill references", () => {
     const root = mkdtempSync(join(tmpdir(), "my-setup-skills-"));
     try {

@@ -17,3 +17,13 @@ Treat these as independent contracts:
 5. Make durable changes in tracked configuration rather than ignored generated native files.
 6. Update every affected surface together. Rebuild installed clients when compiled native configuration changes.
 7. Verify machine-readable configuration, the running process, client loading, automation reload, and API access that changed.
+
+## Local HTTPS
+
+A new simulator or emulator trusts no local certificate, so HTTPS requests to local domains fail during the handshake and the app looks broken.
+Install the local development certificate authority before signing in:
+
+- Use the project's own task when it has one.
+- For an iOS simulator on a host with Herd or Valet, run
+  `xcrun simctl keychain <udid> add-root-cert "$HOME/Library/Application Support/Herd/config/valet/CA/LaravelValetCASelfSigned.pem"`.
+- Restart the app afterwards, because a running app keeps its earlier trust decision.

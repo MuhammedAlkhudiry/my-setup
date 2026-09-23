@@ -118,6 +118,15 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
+        name: "forge",
+        level: "optional",
+        why: "Manages Laravel Forge servers and sites through the cli-tools skill.",
+        versionArgs: ["--version"],
+        update: {
+          note: "Laravel Herd installs and updates this CLI.",
+        },
+      },
+      {
         name: "opencode",
         level: "optional",
         why: "Used by the ai/opencode launcher and OpenCode workflows.",
@@ -162,7 +171,7 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "playwright-cli",
         level: "required",
-        why: "Default browser automation CLI when existing user browser state is not required.",
+        why: "Fallback headless browser automation CLI.",
         versionArgs: ["--version"],
         latest: {
           type: "command",
@@ -217,23 +226,9 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
-        name: "simslim",
-        level: "required",
-        why: "Applies and verifies the memory-saving service profile for persistent lane simulators.",
-        versionArgs: ["--version"],
-        latest: {
-          type: "homebrew",
-          formula: "mobai-app/tap/simslim",
-        },
-        update: {
-          commands: ["brew upgrade mobai-app/tap/simslim"],
-          note: "Install with brew install mobai-app/tap/simslim.",
-        },
-      },
-      {
         name: "fzf",
         level: "optional",
-        why: "Used by project pickers and interactive saved-plan archiving.",
+        why: "Used by the zsh fzf plugin and the project picker.",
         versionArgs: ["--version"],
         latest: {
           type: "homebrew",

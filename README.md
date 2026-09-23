@@ -17,8 +17,8 @@ drift.
 
 ## Source Layout
 
-- `content/` — shared agent rules, local skills, and active-project references.
-- `config/` — Codex, OpenCode, MCP, remote-skill, model, and secret-template configuration.
+- `content/` — shared agent rules and local skills.
+- `config/` — Codex, OpenCode, Claude Code, MCP, permission, active-project, remote-skill, model, and secret-template configuration.
 - `src/` — generator, installer, doctor support, project and personal knowledge commands, and tool-status logic.
 - `shell/` — synced Zsh configuration and installed helper commands.
 - `src/lib/system-tools.ts` — authoritative host-tool inventory and update metadata.

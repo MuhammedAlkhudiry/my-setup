@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { ACTIVE_PROJECTS, getActiveProject } from "./active-projects";
+import { ACTIVE_PROJECTS } from "./active-projects";
 
 test("declares a unique id, remote, and canonical clone for every active project", () => {
   const ids = ACTIVE_PROJECTS.map(({ id }) => id);
@@ -11,9 +11,4 @@ test("declares a unique id, remote, and canonical clone for every active project
     expect(project.canonicalRoot.startsWith("/")).toBe(true);
     expect(project.baseBranch.length).toBeGreaterThan(0);
   }
-});
-
-test("looks a project up by id and rejects unknown ids", () => {
-  expect(getActiveProject("awraq").name).toBe("Awraq");
-  expect(() => getActiveProject("missing")).toThrow("No active project named missing");
 });

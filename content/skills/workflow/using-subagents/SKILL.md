@@ -11,5 +11,5 @@ description: Use to decide whether to delegate work, which model and effort it g
 - Never delegate to Sonnet, Fable, or Astro.
 - Prefer medium reasoning effort for delegated work. Set it explicitly when supported; use another level when the user requests it or the task
   warrants it.
+- Split a review across subagents only when the diff is too large for one context.
 - For Codex `spawn_agent`, explicitly set `fork_turns: "none"`; inherit context only when the user requests it.
-- $delegate-cli covers CLI mechanics.

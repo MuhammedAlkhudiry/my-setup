@@ -26,9 +26,3 @@ export const ACTIVE_PROJECTS: ActiveProject[] = [
     canonicalRoot: join(projectsRoot, "harium-project"),
   },
 ];
-
-export function getActiveProject(projectId: string): ActiveProject {
-  const project = ACTIVE_PROJECTS.find(({ id }) => id === projectId);
-  if (!project) throw new Error(`No active project named ${projectId}`);
-  return project;
-}

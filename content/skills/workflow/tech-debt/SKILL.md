@@ -1,6 +1,6 @@
 ---
 name: tech-debt
-description: Use to record or clear intentionally postponed work in `TECH_DEBT.md`; for plans of work to do use $saved-plans.
+description: Use to record or clear intentionally postponed work in `TECH_DEBT.md`; for plans of work to do use $saved-work.
 ---
 
 ## Workflow

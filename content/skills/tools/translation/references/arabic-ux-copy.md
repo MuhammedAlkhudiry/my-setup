@@ -1,18 +1,13 @@
 # Arabic UX/UI Copy
 
-Use this for Arabic interface copy across actions, forms, feedback, onboarding, settings, permissions, checkout, subscriptions, and terminology.
+## Defaults
 
-## Workflow and defaults
-
-1. Write purposeful, concise, natural فصحى مبسطة; use a more formal register for legal, privacy, payment, government, and policy text.
-2. Match the product's gender, currency, punctuation, terminology, and system-action voice.
-3. Preserve variables, tags, links, product names, emails, filenames, codes, SKUs, API names, plan IDs, and ICU syntax exactly.
-4. Check for literal English structure, broken placeholder order, plural errors, and mixed RTL/LTR rendering.
-
+- Write concise, natural فصحى مبسطة. Use a more formal register for legal, privacy, payment, government, and policy text.
+- Match the product's currency, punctuation, terminology, and system-action voice.
 - Keep the product's gender strategy. If none exists, use masculine imperative for direct actions, masdar labels for neutral or formal menus, and
   personalized gender only with reliable data and rendering support.
-- Always use Latin digits (`1,250`), never Eastern Arabic-Indic (`١٬٢٥٠`).
 - Avoid diacritics unless needed for clarity. Use dialect only when the product voice intentionally does so.
+- Check placeholder order, plural forms, and mixed RTL/LTR rendering.
 
 ## Arabic-specific corrections
 

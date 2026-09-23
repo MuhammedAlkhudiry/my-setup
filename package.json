@@ -7,7 +7,6 @@
     "doctor": "zsh shell/doctor.zsh",
     "tools:status": "bun src/commands/system-tools-cli.ts status",
     "tools:update:plan": "bun src/commands/system-tools-cli.ts update-plan",
-    "lanes:status": "bun src/commands/lanes-cli.ts status",
     "format": "bun node_modules/oxfmt/dist/cli.js src/cli.ts src/commands src/lib config '**/*.md' package.json tsconfig.json .oxfmtrc.json .oxlintrc.json",
     "format:check": "bun node_modules/oxfmt/dist/cli.js --check src/cli.ts src/commands src/lib config '**/*.md' package.json tsconfig.json .oxfmtrc.json .oxlintrc.json",
     "lint": "bun node_modules/oxlint/dist/cli.js .",

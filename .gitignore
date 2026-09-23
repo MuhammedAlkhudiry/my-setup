@@ -10,9 +10,6 @@ gen
 # JavaScript dependencies
 node_modules
 
-# Swift Package Manager build artifacts
-.build/
-
 # macOS metadata and disposable scratch space
 .DS_Store
 tmp/

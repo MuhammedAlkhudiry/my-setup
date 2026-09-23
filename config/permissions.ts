@@ -18,7 +18,6 @@ export const ALLOWED_COMMAND_PREFIXES = [
   "mise",
   "bun",
   "composer",
-  "lanes",
   "knowledge",
   "pk",
   "doctor",

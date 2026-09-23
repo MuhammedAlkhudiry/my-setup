@@ -16,13 +16,7 @@ export interface RemoteSkillSource {
 }
 
 // Skills supplied by an agent runtime rather than installed or managed by this repository.
-export const OPTIONAL_EXTERNAL_SKILL_NAMES = [
-  "chrome:control-chrome",
-  "imagegen",
-  "remotion-create",
-  "remotion-markup",
-  "remotion-render",
-] as const;
+export const OPTIONAL_EXTERNAL_SKILL_NAMES = ["chrome:control-chrome"] as const;
 
 // Remote skills intentionally track upstream branches: current guidance takes priority over
 // reproducible snapshots, especially when skills accompany CLIs that update independently.

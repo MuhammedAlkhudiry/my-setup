@@ -11,9 +11,10 @@ description: Use to exercise a running product as a demanding real user and find
    Use $browser-simulator-routing for tools and the project's own development commands for the environment.
 3. Use every feature in scope heavily through complete journeys, then try to break it as a real user could: repetition, interruption, abandoned flows,
    limits, bad input, account switching, poor network, locale, and accessibility. For a large scope, split areas across subagents that share no
-   devices or accounts.
-4. After each meaningful action, check stored data, side effects, and logs against the intended result, even when the interface looks correct.
-5. Record UX issues and bugs: broken behavior, confusing copy, dead ends, missing feedback, missing expected features, and hidden wrong results.
-   Reproduce each issue twice.
+   devices or accounts. For UI journeys, include [screen and text coverage](references/screen-and-text-coverage.md).
+4. After each meaningful action, check stored data, side effects, and logs against the intended result, even when the interface looks correct. Look
+   for failed requests that the interface hides.
+5. Record UX issues and bugs: broken behavior, controls that do nothing, confusing copy, dead ends, missing feedback, missing expected features, and
+   hidden wrong results. Reproduce each issue twice.
 6. For each issue, report severity by user impact, where it happens, steps, expected and actual result in plain user language, evidence, and a
    recommended fix. Also list what held up and what could not be tested and why.

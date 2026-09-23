@@ -1,11 +1,11 @@
 ---
 name: cli-tools
-description: Use when working with the Hugeicons, Laravel Forge, or PostHog CLIs.
+description: Use to find icons, manage Laravel Forge servers and sites, or read PostHog data from the command line.
 ---
 
-Read the narrowest relevant live help before acting; it is the authority for commands, options, and supported platforms.
+Before you run a command, read that CLI's help for it. The help decides which commands and options exist.
 
-- **Hugeicons:** `hugeicons --help` for icon search, export, and framework snippets.
-- **Laravel Forge:** `forge list` and `forge help <command>`. Confirm the current organization and server before scoped operations, and prefer the CLI
-  over the Forge API or dashboard.
-- **PostHog:** `posthog-cli api --agent-help`. Use $service-access for authentication or credential setup.
+- **Hugeicons:** `hugeicons --help`.
+- **Laravel Forge:** `forge list` and `forge help <command>`. Herd installs this CLI. Before a command that changes a server or site, check the active
+  organization and server. Use the CLI instead of the Forge API or dashboard.
+- **PostHog:** `posthog-cli api --agent-help`. For sign-in or credentials, use $service-access.

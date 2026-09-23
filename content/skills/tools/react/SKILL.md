@@ -3,17 +3,17 @@ name: react
 description: Use when writing or reviewing React or React Native code, for component order, server data, store access, and props preferences.
 ---
 
-Follow established project patterns when they give more specific guidance.
+When the project already uses a consistent pattern, follow it instead.
 
-- Order component code as hooks grouped by purpose, calculated values, handlers, conditional returns, then JSX.
-- Use a query library for server data; never fetch directly inside components.
-- Treat the query cache as the source of truth; do not mirror it in local state.
-- Select only the required store state, using shallow equality where appropriate.
-- Access global stores through hooks rather than passing their state through props.
-- Keep props few and prefer complete objects over passing their fields separately.
-- Use lazy loading only when there is a specific reason to load code separately or later.
+- Order component code: hooks grouped by purpose, calculated values, handlers, early returns, then JSX.
+- In client components, load server data through the project's query library, not direct fetches. Treat its cache as the source of truth; do not
+  copy it into local state.
+- Read global store state through a selector hook in the component that needs it, not through props. Select only the fields it uses; use
+  `useShallow` when the selector returns an object or array.
+- Pass a complete object as one prop instead of passing its fields separately.
+- When the project uses React Compiler, do not add `useMemo`, `useCallback`, or `memo` by habit.
 
 ## React Native
 
-- Assume React Native projects target native platforms only; support web only when the project explicitly declares it as a target.
-- Keep mobile JavaScript compatible with the project's Hermes runtime.
+- Target native platforms only, unless the project declares web as a target.
+- Before using newer JavaScript or `Intl` APIs, check that Hermes supports them.

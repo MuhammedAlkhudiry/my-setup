@@ -1,20 +1,12 @@
 ---
 name: delegate-cli
-description: Use to run a task or second opinion through the Claude Code, Codex, or OpenCode CLI; to choose what and who use $using-subagents.
+description: Use to run a task or second opinion through the Claude Code or Codex CLI; to choose whether and to whom, use $using-subagents.
 ---
 
-Pick the model and reasoning effort with $using-subagents. Run the target CLI's live help before invoking it. Give each call one clear task, only the
-context it needs, and a request for a concise response.
+Choose the model and effort with $using-subagents. Before a call, read that CLI's help. Give each call one task, only the context it needs, and a
+request for a short answer. Start a fresh session for each call.
 
-## Claude Code
-
-- Conserve the Claude Pro allowance. Use one fresh call through the `claude` CLI.
-
-## Codex
-
-- Run fresh, non-interactive `codex exec` calls; set the model the routing table selects.
-
-## OpenCode
-
-- Read the refreshed verbose model catalog, then use `opencode-go/glm-5.3-flash`.
-- Use the `high` reasoning level, not the model's highest available level.
+| CLI         | Command      | Model     | Effort                              | Notes                                                                            |
+| ----------- | ------------ | --------- | ----------------------------------- | -------------------------------------------------------------------------------- |
+| Codex       | `codex exec` | `-m`      | `-c model_reasoning_effort=<level>` | Use `-s read-only` for second opinions. `-o <file>` saves only the final answer. |
+| Claude Code | `claude -p`  | `--model` | `--effort`                          | One call per task; the plan's usage is limited.                                  |

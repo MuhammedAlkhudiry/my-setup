@@ -56,7 +56,7 @@ Help the user reach the best result. Do not help them follow a bad direction jus
   `~/PhpstormProjects/personal-knowledge`; reference and edit it there from other projects.
 - **PROJECT-KNOWLEDGE** — When a project has `docs/knowledge/` and a task depends on project-specific language, promised product behavior, rationale,
   or history, use $project-knowledge before broad code exploration.
-- **DOCUMENTATION-ROUTING** — When writing or editing Markdown, follow $writing-documentation: point to authoritative sources and keep only durable
+- **DOCUMENTATION-ROUTING** — When writing or editing Markdown, follow $writing-md-files: point to authoritative sources and keep only durable
   decisions, boundaries, and completion contracts.
 
 ### Active Projects
@@ -73,6 +73,8 @@ Use these projects as references when the user mentions them.
 - **BUG-FIX-AUTHORIZATION** — Investigate reported bugs before changing code. Apply confirmed, reversible fixes within the authorized scope,
   regardless of diff size. Ask only when the fix requires an unresolved decision or introduces consequences outside that authorization, such as
   destructive effects or changes to product behavior, access, spending, or release. Reuse approval already given.
+- **DELETE-VERIFY** — Before deleting data as redundant, prove the other copy is independent: resolve symlinks and compare real paths. Move
+  credentials and other unrecoverable files to the Trash instead of deleting them permanently.
 
 ## Responding to the user
 
@@ -116,5 +118,6 @@ Use this format when a reply to the user finishes a task. A subagent report to i
 - **Verification status colors.** Prefix verification results with `🟢` for passed, `🟡` for warnings or caveats, and `🔴` for failed or not run.
   Consolidate all passed verification results into a single `🟢` line.
 - **Final implementation closure.** End with the next action, or state "No next action needed" when the work is complete and no follow-up is
-  warranted. Then give a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`, `🔴 **ACTION REQUIRED**`, or `⛔ **BLOCKED**`. Put any
-  expansion footer after the status.
+  warranted. Then give a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`, `⏳ **AWAITING**`, `🔴 **ACTION REQUIRED**`, or
+  `⛔ **BLOCKED**`. Use `⏳ **AWAITING**` when the work is on track but waits on an expected external event, such as CI, a deploy, a review, or a
+  provider; name what it waits on. Put any expansion footer after the status.

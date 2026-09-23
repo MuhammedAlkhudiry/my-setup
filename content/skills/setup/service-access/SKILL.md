@@ -3,21 +3,13 @@ name: service-access
 description: Use when a configured third-party provider needs sign-in, credentials, or access repair before other work can run.
 ---
 
-Read only the reference for the requested provider. If none matches, this skill does not cover that provider.
+Read the reference for the requested provider in the skill reference folder.
 
-## References
+## Access guidance
 
-- Advertising platforms: [references/ads.md](references/ads.md)
-- Apple services: [references/apple.md](references/apple.md)
-- Google services other than Google Ads: [references/google.md](references/google.md)
-- Remaining configured providers: [references/others.md](references/others.md)
-
-## Workflow
-
-1. Check existing connections, sign-ins, runtime access, and `$SERVICE_CREDENTIALS_HOME` before requesting credentials.
-2. Follow the provider reference and verify access with its smallest read-only check.
-3. Repair missing access, pausing only for OAuth, 2FA, new permissions, or credentials the user must create.
-4. Keep each provider’s own sign-in data in its normal location. Store agent-managed credentials under `$SERVICE_CREDENTIALS_HOME/<provider>/` with
-   directories at mode 700 and files at mode 600.
-
-Report how access works, whether it is ready, and where credentials are stored without exposing their values.
+- Existing connections, provider sign-ins, runtime access, and `$SERVICE_CREDENTIALS_HOME` are the first sources to check before requesting
+  credentials.
+- The provider reference defines the access route. Its smallest read-only check confirms whether access works.
+- OAuth, 2FA, new permissions, and credentials the user must create require user action. Repair other missing access directly.
+- Keep provider sign-in data in its normal location. Store agent-managed credentials under `$SERVICE_CREDENTIALS_HOME/<provider>/`, with directories
+  at mode 700 and files at mode 600.

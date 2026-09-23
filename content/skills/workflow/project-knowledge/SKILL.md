@@ -19,11 +19,10 @@ live CLI.
 ## Creating or Refreshing
 
 1. Inspect local evidence first. Create a missing pack with `knowledge feature "<Feature Name>"`.
-2. Put shared vocabulary only in the glossary. Feature packs have no language, glossary, code-map, or evidence section.
+2. Put shared vocabulary only in the glossary. Feature packs contain only Product Contracts, Boundaries, and optional Rationale.
 3. Give each promised behavior a stable contract ID and a Given/When/Then outcome. Describe what should happen, not how the code implements it.
 4. Keep lasting ownership and compatibility rules, and reasons for decisions that might otherwise be revisited.
 5. Do not list source files. Put the stable contract ID in an acceptance test when useful so agents can find executable coverage by search. Keep an
    external link only when a contract depends on an external constraint the agent cannot readily rediscover.
 6. Move reproducible bug behavior into regression tests. Keep a written lesson only when it explains an important constraint that a test cannot.
-7. Keep feature packs to Product Contracts, Boundaries, and optional Rationale. Run `knowledge lint` after editing knowledge; it checks structure, not
-   factual accuracy or whether the information is current.
+7. Run `knowledge lint` after editing knowledge; it checks structure, not whether facts are accurate or current.

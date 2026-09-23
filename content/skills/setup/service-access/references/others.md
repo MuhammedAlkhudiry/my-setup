@@ -2,9 +2,8 @@
 
 ## DigitalOcean
 
-- Use `doctl`; derive the current authentication and read-only verification commands from `doctl help`.
+Use `doctl` and its live help for authentication and a read-only access check.
 
 ## PostHog
 
-- Use $cli-tools for PostHog operations.
-- Discover the installed credential template and current environment before requesting credentials; derive authentication repair from live agent help.
+Use $cli-tools. Check the installed credential template and current environment before requesting credentials; use live agent help to repair access.

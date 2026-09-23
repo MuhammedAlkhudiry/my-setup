@@ -22,6 +22,16 @@ Routine store releases are API/CLI-only: use EAS for builds and submissions and 
 release operations. Never automate App Store Connect or Google Play Console through a browser. Treat API-unsupported account, policy, legal, payment,
 and review tasks as explicit manual blockers requiring fresh user intent.
 
+## TestFlight Only
+
+When the user asks for TestFlight instead of a store release, the target state is a processed build available to testers, not waiting for review.
+
+- Build and upload through the established EAS path. Confirm the build's `processingState` is `VALID` with `scripts/mobile-store-status.ts`.
+- Do not create or update an App Store version, and do not submit for App Review.
+- Make the build available to the tester group the user names. Internal groups need no review. An external group needs Beta App Review, which is a
+  submission; get the user's approval first.
+- Report the build number, processing state, and the groups that can install it.
+
 ## App Store Version Preparation
 
 Use the bundled `scripts/mobile-app-store-release.ts` for App Store version preparation and submission. Resolve it relative to this skill, read its

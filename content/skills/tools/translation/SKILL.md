@@ -3,21 +3,21 @@ name: translation
 description: Use when translating or localizing interface copy, reviewing existing translations, or writing Arabic interface copy.
 ---
 
+For Arabic copy, also read [Arabic UX copy](references/arabic-ux-copy.md).
+
 ## Workflow
 
 1. Inspect the product voice, locale files, UI context, placeholders, and plural rules.
-2. Update every affected locale. Preserve dynamic placeholders, formatting, and content that must remain exact.
-3. Read [references/arabic-ux-copy.md](references/arabic-ux-copy.md) for Arabic interface copy.
-4. Return improved copy or specific review findings. State anything still unclear.
+2. Update every affected locale. Keep placeholders, ICU syntax, formatting, and exact values unchanged.
+3. Return improved copy or specific review findings. State anything still unclear.
 
 ## Numerals
 
-Always render numbers with Latin digits (`1,250`, `03:45`, `2026`). Never use Eastern Arabic-Indic digits (`١٬٢٥٠`).
+Always render Latin digits, including numbers produced by locale formatters.
 
 ## Review
 
-To save review progress, keep `.translations-review/<feature-or-file>/translation-review.md` with files and languages, progress, issues by severity,
-and approved patterns. Read and update it on every continuation.
+For a review that spans sessions, save progress with $saved-work as type `tracker`.
 
 Report each finding as:
 
@@ -25,7 +25,7 @@ Report each finding as:
 `translation.key`
 Current: "..."
 Suggested: "..."
-Issue: missing | literal | unnatural | tone | context | technical
+Issue: missing | literal | unnatural | tone | context | placeholder
 Reason: ...
 ```
 

@@ -5,52 +5,32 @@ description: Use when guiding the user step by step through implemented work to 
 
 ## Saved progress
 
-1. Find the canonical repository root and current branch or PR.
-2. Under `${XDG_STATE_HOME:-~/.local/state}/implementation-walkthroughs/`, derive a safe, repeatable filename from the repository root and PR number,
-   falling back to the branch name.
-3. Before analysis or writes, resume that file or create it automatically.
-4. Update the same file when the implementation changes. Mark only affected parts stale.
-
-Save this structure, omitting `pr` when no PR exists, and reconstruct broader context from the repository on resume:
-
-```json
-{
-  "branch": "branch-name",
-  "pr": 123,
-  "summary": "One short description.",
-  "cursor": { "part": 0 },
-  "parts": [
-    {
-      "title": "Part title",
-      "status": "pending"
-    }
-  ],
-  "environment": { "url": "https://example.test", "note": "Durable resume context." }
-}
-```
+1. Find the repository and its current PR, or the branch when no PR exists.
+2. Resume the $saved-work tracker `walkthrough-pr-<number>`, or `walkthrough-<branch-slug>` when no PR exists. Create it as type `tracker` when
+   none exists.
+3. Record the summary, target URL, resume notes, current part, and each part's `pending`, `completed`, `skipped`, or `stale` status. Reconstruct
+   broader context from the repository on resume.
+4. Update the same tracker when the implementation changes. Mark only affected parts stale. Set its status to `done` when the walkthrough ends.
 
 ## Prepare Quietly
 
 1. Use saved progress and repository evidence to understand what changed, why, and what the walkthrough should cover.
-2. Split the work into parts that each explain one behavior or related change.
-3. Prepare the environment before the walkthrough; do not make setup a walkthrough part. Verify a responding target URL in Chrome for web, or the
-   built and launched target screen on a device for mobile. Keep preparation invisible unless it needs the user's attention.
+2. Split the work into parts that each explain one behavior or related change; skip trivial changes.
+3. Prepare the environment before the walkthrough; do not make setup a walkthrough part. Verify the target with $browser-simulator-routing: a
+   responding URL for web, or the built and launched screen on a device for mobile. Keep preparation invisible unless it needs the user's attention.
 
 ## Walkthrough Loop
 
-1. Use warm, calm, gentle language and the final-answer shape below for walkthrough turns.
+1. Use warm, plain language and the turn shape below.
 2. Make every **Do** self-contained: include the exact target URL as a clickable Markdown link plus any required account or role, test data, starting
    state, and navigation the URL cannot encode. Never tell the user to open or visit a named page without linking directly to it.
 3. Present only the current part. Treat "done" or equivalent confirmation as completion and immediately present the next part in the same turn. After
    the final part, report walkthrough completion.
-4. After each walkthrough turn, save the current position and each part's `pending`, `completed`, `skipped`, or `stale` status.
-5. When the user requests a change, pause the walkthrough and handle the work normally, regardless of size. After the fix, treat "done" or equivalent
-   acceptance as completion of the current part and resume with the next part immediately. An explicit request for the next part also resumes the
-   walkthrough. Update affected parts before resuming.
+4. Save the tracker after each turn.
+5. When the user requests a change, pause and handle it normally, regardless of size. Update affected parts, then continue; accepting the fix
+   completes the current part.
 
-## Final-answer shape
-
-Keep each part focused on product behavior, substantive changes, or core implementation.
+## Turn shape
 
 ```md
 ## Side talk

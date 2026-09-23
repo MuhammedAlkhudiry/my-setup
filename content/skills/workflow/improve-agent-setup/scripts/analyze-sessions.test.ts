@@ -30,7 +30,7 @@ function fixture(events: unknown[]): {
 function run(root: string, stateDb: string, ...args: string[]) {
   return Bun.spawnSync([
     "bun",
-    join(import.meta.dir, "analyze-codex-sessions.ts"),
+    join(import.meta.dir, "analyze-sessions.ts"),
     "--root",
     root,
     "--state-db",
@@ -385,7 +385,7 @@ function claudeFixture(files: Record<string, unknown[]>): { directory: string; r
 function runClaude(root: string, ...args: string[]) {
   return Bun.spawnSync([
     "bun",
-    join(import.meta.dir, "analyze-codex-sessions.ts"),
+    join(import.meta.dir, "analyze-sessions.ts"),
     "--claude-root",
     root,
     "--json",

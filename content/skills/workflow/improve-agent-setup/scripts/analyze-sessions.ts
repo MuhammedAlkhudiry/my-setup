@@ -166,7 +166,7 @@ function parseArgs(values: string[]): Map<string, string> {
 const args = parseArgs(process.argv.slice(2));
 if (args.has("help") || args.has("h")) {
   console.log(`Usage:
-  analyze-codex-sessions.ts [options]
+  analyze-sessions.ts [options]
 
 Audits recorded agent sessions for context waste. Covers Codex rollouts and
 Claude Code transcripts.
@@ -330,7 +330,6 @@ const subcommandBinaries = new Set([
   "go",
   "knowledge",
   "kubectl",
-  "lanes",
   "maestro",
   "make",
   "mise",

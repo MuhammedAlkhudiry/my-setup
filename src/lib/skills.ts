@@ -33,18 +33,13 @@ function parseSkillFrontmatter(content: string, skillPath: string): SkillFrontma
     throw new Error(`Skill is missing YAML frontmatter: ${skillPath}`);
   }
 
-  const values = new Map<string, string>();
-  for (const line of match[1].split(/\r?\n/)) {
-    const field = line.match(/^([a-zA-Z0-9_-]+):\s*(.*)$/);
-    if (!field) {
-      continue;
-    }
-    values.set(field[1], field[2].replace(/^["']|["']$/g, ""));
+  const values = Bun.YAML.parse(match[1]);
+  if (!values || typeof values !== "object" || Array.isArray(values)) {
+    throw new Error(`Skill frontmatter must be a YAML object: ${skillPath}`);
   }
 
-  const name = values.get("name");
-  const description = values.get("description");
-  if (!name || !description) {
+  const { name, description } = values as Record<string, unknown>;
+  if (typeof name !== "string" || !name || typeof description !== "string" || !description) {
     throw new Error(`Skill frontmatter needs name and description: ${skillPath}`);
   }
 
