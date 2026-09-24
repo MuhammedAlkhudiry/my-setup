@@ -41,8 +41,12 @@ export function slugify(value: string): string {
   return slug || "artifact";
 }
 
-export function artifactPrefix(name: string, now = new Date()): string {
-  return `${now.toISOString().slice(0, 10)}-${slugify(name)}-${randomBytes(4).toString("hex")}`;
+export function artifactPrefix(
+  name: string,
+  now = new Date(),
+  suffix = randomBytes(4).toString("hex"),
+): string {
+  return `${now.toISOString().slice(0, 10)}-${slugify(name)}-${suffix}`;
 }
 
 export function findLocalOnlyReferences(html: string): string[] {
@@ -174,16 +178,20 @@ export async function shareHtml(input: string, options: ShareOptions): Promise<v
   const { files, name } = await resolveArtifact(input);
   await assertPortable(files);
 
-  const prefix = artifactPrefix(options.name || name);
-  const url = `https://${SHARE_HOST}/${prefix}/index.html`;
   const total = files.reduce((sum, file) => sum + file.size, 0);
 
   if (options.dryRun) {
-    console.log(`Would publish ${files.length} files (${formatBytes(total)}) to ${url}`);
+    // Each publish draws a new random suffix, so a dry run can only show the URL's shape.
+    const example = artifactPrefix(options.name || name, new Date(), "<random>");
+    console.log(
+      `Would publish ${files.length} files (${formatBytes(total)}) to https://${SHARE_HOST}/${example}/index.html`,
+    );
     for (const file of files) console.log(`  ${file.key} (${formatBytes(file.size)})`);
     return;
   }
 
+  const prefix = artifactPrefix(options.name || name);
+  const url = `https://${SHARE_HOST}/${prefix}/index.html`;
   await assertAccessProtected();
   await upload(prefix, files);
 

@@ -73,7 +73,7 @@ describe("share-html", () => {
         console.log = originalLog;
       }
 
-      expect(output[0]).toMatch(/^Would publish 2 files .* to https:\/\/share\.harium\.app\/.*-demo-/);
+      expect(output[0]).toMatch(/^Would publish 2 files .* to https:\/\/share\.harium\.app\/\d{4}-\d{2}-\d{2}-demo-<random>\/index\.html$/);
       expect(output.slice(1).map((line) => line.trim().split(" ")[0]).sort()).toEqual([
         "index.html",
         "shots/a.png",

@@ -39,7 +39,7 @@ normally. Open a preview when available.
 - Give each finding a stable ID and the fields below.
 - Explain issues and fixes through side-by-side current/proposed behavior or code, highlighted differences, expandable evidence, or diagrams. Choose
   what clarifies each finding; label proposed code as a suggestion.
-- Give every finding an unchecked **Include in copied feedback** checkbox and a labeled notes field. Selection means inclusion, not resolution.
+- Give every finding an unchecked **Should fix** checkbox and a labeled notes field. Selection means inclusion, not resolution.
   Provide **Select all**, **Clear selection**, and **Copy selected** controls with a selected count. Disable copying when nothing is selected.
 - Copy selected findings as Markdown in the format below, including entered notes. Offer selectable text if clipboard access fails. Retain notes and
   selections when collapsing sections and across reloads using local storage keyed to the review. Show storage failures without blocking use.

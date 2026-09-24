@@ -8,7 +8,7 @@ const cli = cac("share-html");
 cli
   .command("<path>", "Publish an HTML file or a folder with index.html to a private URL")
   .option("--name <name>", "Readable part of the URL, defaults to the file or folder name")
-  .option("--dry-run", "List the files and URL without uploading")
+  .option("--dry-run", "List the files and the URL shape without uploading; each publish gets a new random suffix")
   .action(async (path: string, options) => {
     try {
       await shareHtml(path, options);
