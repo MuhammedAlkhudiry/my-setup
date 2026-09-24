@@ -8,7 +8,8 @@
 - **CONCURRENT-AGENTS** — Before changing files or implementing work, check for other active agent sessions on the same project, whether they run in
   the same harness as you or a different one. If you find one, agree with it on how to share the work, or wait until it finishes. If you find none,
   proceed. If you later suspect that another agent is editing the same project, stop and coordinate with it before you continue. If you cannot reach
-  the other agent, stop and ask the user how to proceed.
+  the other agent, stop and ask the user how to proceed. If another agent is using a browser, simulator, or emulator you need, create a separate
+  instance for your work instead of taking over or waiting for the shared one.
 
 ## Answering questions
 
