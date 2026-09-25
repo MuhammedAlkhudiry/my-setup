@@ -101,6 +101,17 @@ export const SYSTEM_TOOL_GROUPS = [
     title: "Shell and helper integrations",
     tools: [
       {
+        name: "rtk",
+        level: "required",
+        why: "Compresses agent shell output; native Codex hooks require RTK 0.50.0 or newer.",
+        versionArgs: ["--version"],
+        latest: { type: "homebrew", formula: "rtk" },
+        update: {
+          commands: ["brew upgrade rtk", "mise run install -- --compact"],
+          note: "Run the sync in ~/PhpstormProjects/my-setup to refresh the bundled OpenCode plugin. Restart agents; review new Codex hooks in /hooks.",
+        },
+      },
+      {
         name: "phpstorm",
         level: "optional",
         why: "Used by the synced zsh config as the editor command.",

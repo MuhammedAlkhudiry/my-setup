@@ -30,6 +30,7 @@ import { createClaudeManagedSettings } from "../../config/claude";
 import { CREDENTIALS_HOME_ENV, CREDENTIALS_ROOT } from "../../config/credentials";
 import { MCP_SERVERS } from "../../config/mcp";
 import { createOpencodeConfig } from "../../config/opencode";
+import { mergeRtkHooks } from "../../config/rtk";
 import { renderCodexRules } from "../../config/permissions";
 import {
   codexManagedSectionValues,
@@ -64,6 +65,7 @@ const CODEX_PATHS = {
   rules: join(HOME, ".codex/AGENTS.md"),
   config: join(HOME, ".codex/config.toml"),
   execRules: join(HOME, ".codex/rules/default.rules"),
+  hooks: join(HOME, ".codex/hooks.json"),
 };
 
 const CLAUDE_PATHS = {
@@ -232,6 +234,11 @@ async function installSharedSkills(): Promise<void> {
 async function installOpencode(): Promise<void> {
   copyRules(OPENCODE_PATHS.rules, "OpenCode");
   await mergeOpencodeConfigAsync();
+  // Use the plugin bundled with the installed RTK binary; leave agent rules alone.
+  await execa("rtk", ["init", "--global", "--opencode", "--hook-only", "--no-trust-filters"], {
+    stdio: "pipe",
+  });
+  print.success("RTK OpenCode plugin installed");
 }
 
 async function mergeOpencodeConfigAsync(): Promise<void> {
@@ -278,6 +285,14 @@ async function installCodex(): Promise<void> {
   await mergeCodexConfigAsync();
   await mergeCodexMcpConfigAsync();
   await writeCodexRules();
+  const existing = existsSync(CODEX_PATHS.hooks)
+    ? JSON.parse(await readFile(CODEX_PATHS.hooks, "utf-8"))
+    : {};
+  await writeFile(
+    CODEX_PATHS.hooks,
+    JSON.stringify({ ...existing, hooks: mergeRtkHooks(existing.hooks, "codex") }, null, 2) + "\n",
+  );
+  print.success("RTK Codex hook installed; new hooks require review in /hooks");
 }
 
 async function writeCodexRules(): Promise<void> {
@@ -309,6 +324,7 @@ async function mergeClaudeSettingsAsync(): Promise<void> {
   const merged = {
     ...existing,
     ...managedKeys,
+    hooks: mergeRtkHooks(existing.hooks, "claude"),
     permissions: {
       ...(existing.permissions as Record<string, unknown> | undefined),
       allow: permissions.allow,
@@ -814,6 +830,15 @@ async function installRemoteSkill(
 // =============================================================================
 
 export async function install(): Promise<void> {
+  if (!Bun.which("rtk")) {
+    throw new Error("RTK is required. Run brew install rtk, then rerun mise run install.");
+  }
+  // Native Codex hooks require RTK 0.50.0 or newer.
+  await execa("rtk", ["hook", "codex", "--help"], { stdio: "pipe" }).catch(() => {
+    throw new Error(
+      "RTK needs native Codex hook support. Run brew upgrade rtk, then rerun mise run install.",
+    );
+  });
   if (!compactOutput) {
     console.log();
     printBox("My Setup - Installer");

@@ -1,37 +1,36 @@
 ---
 name: html-artifacts
-description: Use when creating an HTML file for the user to view, such as a report, review, audit, design options, or a visual comparison.
+description: Use whenever you create any HTML page or file for the user, such as a report, review, audit, design options, or a visual comparison.
 ---
+
+Every HTML page for the user goes through this skill and ends as a published `share-html` URL. Never hand over a local file or local URL.
+
+The page is disposable. Spend minutes, not polish: one `index.html` with inline CSS and JS, no build step, no framework.
 
 ## Build
 
-- Put the page in a fresh folder under the macOS temporary directory, named `<project>-<topic>.XXXX`, with `index.html` as the entry and other pages
-  linked from it. `share-html` publishes every file in the folder except dotfiles, so keep briefs, logs, scripts, and raw captures in a separate
-  working folder.
-- Make the page work from `file://` and from HTTPS without a server. Use relative paths only. Copy the project fonts and images it needs into the
-  folder. Embed data as inline JSON instead of fetching local files. Never link to `localhost`, `127.0.0.1`, `.test` hosts, or `file://` paths.
-- Compress screenshots to WebP or JPEG at their display width. `share-html` rejects artifacts over 20 MB.
-- Make it readable on a phone: a responsive layout down to 360 px, light and dark themes through `prefers-color-scheme`, and `lang` plus `dir="rtl"`
-  for Arabic content.
-- Start with a one-line header: project, title, date, and scope. Give each item a stable ID and anchor so feedback can point to it.
-- When the user will respond to individual items, add a checkbox and notes field per item and a **Copy selected** control that copies Markdown. Keep
-  that state in local storage keyed to the artifact.
+- Create a fresh folder under the macOS temporary directory named `<project>-<topic>.XXXX`. `share-html` publishes every non-dot file in it, so keep
+  scripts, logs, and raw captures elsewhere.
+- Keep it self-contained: relative paths, inline data, and copies of any images it needs. Never link to `localhost`, `.test` hosts, or `file://`
+  paths. Capture content from a running app as screenshots or inline data.
+- Save screenshots as WebP or JPEG at display width. `share-html` rejects artifacts over 20 MB.
+- Add a viewport meta tag and a fluid layout so it reads on a phone. Use `dir="rtl"` for Arabic content.
+- When the user will respond to individual items, give each a stable ID, a checkbox, and a notes field, plus a **Copy selected** button that copies
+  Markdown.
 
 ## Design
 
-- Show only the page's subject. Drop sections, summaries, and decoration that do not serve it.
-- Keep text minimal: labels and short phrases instead of sentences. Put detail behind expandable elements.
-- Keep the layout lean and dense so the main content fits one screen: tight spacing, side-by-side panels, and collapsed detail instead of scrolling.
-- For a project page, use the project's theme and design system: its tokens, fonts, colors, and component styles.
-- For interactive pages, especially long forms, follow $ux-ui and minimize effort: one-click choices over typing, the recommended answer
-  preselected, notes fields opened on demand, visible progress, keyboard navigation, and a sticky bar with the selected count and main action.
+Minimal is the rule, not a preference. Every element must earn its place; when unsure, cut it.
 
-## Deliver
+- Show only the page's subject. No intro, summary, recap, legend, footer, or decoration.
+- No sentences on the surface. Use labels, numbers, and short phrases. Put any detail behind `<details>`.
+- Fit the main content on one screen: tight spacing, side-by-side panels, and collapsed detail instead of scrolling.
+- For design options in a project, reuse its colors and fonts. Otherwise use plain system styling.
 
-- Open the page at desktop and phone widths. Fix missing assets, broken layout, and console errors.
-- Run `share-html <folder>`, or `share-html <file>` for a single self-contained file. Add `--name <words>` for a readable URL. The URL is private
-  behind Cloudflare Access, and the upload is deleted after 30 days.
-- Give the user the printed URL and the local path.
+## Publish
+
+- Open the page once and fix anything visibly broken.
+- Run `share-html <folder>`. Add `--name <words>` for a readable URL. The URL is private behind Cloudflare Access and expires after 30 days.
+- Give the user the printed URL only.
 - When `share-html` reports that wrangler is not signed in, repair access with $service-access. When it reports that the host is not behind
   Cloudflare Access, stop and report it; never publish another way.
-- A page that needs a running dev server cannot be shared this way; give its local URL.

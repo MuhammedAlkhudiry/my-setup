@@ -6,9 +6,11 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { execaSync } from "execa";
 
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
+import { mergeRtkHooks } from "../../config/rtk";
 import { renderBaseRules } from "./install";
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
@@ -71,6 +73,50 @@ if (staleRules.length > 0) {
     detail: `${staleRules
       .map(({ label }) => label)
       .join(", ")} differ from content/base-rules.md; run mise run install -- --compact`,
+  });
+}
+
+for (const [agent, path] of [
+  ["claude", join(HOME, ".claude/settings.json")],
+  ["codex", join(HOME, ".codex/hooks.json")],
+] as const) {
+  try {
+    const config = JSON.parse(readFileSync(path, "utf-8"));
+    if (
+      config.disableAllHooks === true ||
+      !isDeepStrictEqual(config.hooks, mergeRtkHooks(config.hooks, agent))
+    ) {
+      throw new Error("missing, disabled, duplicated, or stale hook");
+    }
+  } catch {
+    findings.push({
+      level: "required",
+      label: `RTK ${agent} hook`,
+      detail: `${path} needs an enabled RTK hook; run mise run install -- --compact`,
+    });
+  }
+}
+
+const rtkPlugin = join(HOME, ".config/opencode/plugins/rtk.ts");
+if (
+  !existsSync(rtkPlugin) ||
+  !readFileSync(rtkPlugin, "utf-8").includes("rtk rewrite ${command}")
+) {
+  findings.push({
+    level: "required",
+    label: "RTK OpenCode plugin",
+    detail: `${rtkPlugin} is missing or invalid; run mise run install -- --compact`,
+  });
+}
+
+if (
+  Bun.which("rtk") &&
+  execaSync("rtk", ["hook", "codex", "--help"], { reject: false }).exitCode !== 0
+) {
+  findings.push({
+    level: "required",
+    label: "RTK version",
+    detail: "native Codex hooks require RTK 0.50.0 or newer; run brew upgrade rtk",
   });
 }
 

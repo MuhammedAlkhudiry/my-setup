@@ -253,6 +253,7 @@ main() {
   check_tool zsh required "Needed by all installed shared shell commands."
 
   print_header "Shell and helper integrations"
+  check_tool rtk required "Agent shell output compression; install with brew install rtk (0.50.0+)."
   check_tool phpstorm optional "Used by the synced zsh config as the editor command."
   check_tool herd optional "Used by Laravel aliases in the synced zsh config."
   check_tool forge optional "Manages Laravel Forge servers and sites through the cli-tools skill."

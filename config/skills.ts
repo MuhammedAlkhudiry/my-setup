@@ -65,10 +65,6 @@ export const REMOTE_SKILL_SOURCES: RemoteSkillSource[] = [
         name: "investigate-metric",
         sourcePath: "skills/investigate-metric",
       },
-      {
-        name: "diagnosing-sdk-health",
-        sourcePath: "skills/diagnosing-sdk-health",
-      },
     ],
   },
   {
