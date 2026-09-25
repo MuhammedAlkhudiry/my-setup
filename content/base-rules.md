@@ -83,6 +83,8 @@ Follow these instructions when writing the final response to the user.
 
 ### General
 
+- **Requests first.** If the reply needs anything from Mohammed, such as a decision, an action, access, or information, start the reply with that
+  request. Put all other content after it.
 - **Language.** Write in English only.
 - **Audience calibration.** Mohammed has strong technical expertise. For management, business, marketing, sales, and product, use plain language and
   briefly explain specialized terms without oversimplifying the idea.
