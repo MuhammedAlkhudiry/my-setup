@@ -267,6 +267,7 @@ main() {
   check_tool fzf optional "Used by the zsh fzf plugin and the project picker."
   check_tool sg optional "Install ast-grep for AST-shaped code search."
   check_tool magick optional "Used to inspect and measure raster UI references."
+  check_tool ffmpeg optional "Used to edit demo recordings and render promo videos."
   check_tool mo optional "Install with brew install mole for macOS storage auditing and cleanup."
   check_tool wacli optional "Used to read and export WhatsApp data for authorized personal knowledge workflows."
   check_tool imsg optional "Used to read and export local SMS and iMessage data for authorized personal knowledge workflows."

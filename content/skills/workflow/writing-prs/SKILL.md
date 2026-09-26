@@ -17,20 +17,32 @@ Write them in this order. Omit a section that has nothing to say.
      choices. Give each the one fact needed to approve it.
 2. **What changes for users:** one short paragraph from the product side: who notices, and what they can now do or no longer hit. No file, class,
    or function names.
-3. **Demo:** required when the UI changes. Record a video of the flow; use a screenshot only for a static state. Show before and after for a UI fix,
-   and cover every changed surface: web and mobile, light and dark, RTL.
-4. **Review size:** a table of changed lines by kind (app code, tests, migrations, generated and lock files, docs, assets), then the app files in
-   review order with their line counts. Count with `git diff --numstat <base>...HEAD`.
+3. **Demo:** required when the UI changes. Deliver an edited demo, never a raw recording; see [Demo media](#demo-media). Use a video for a flow
+   and a screenshot for a static state. Show before and after for a UI fix, and cover every changed surface: web and mobile, light and dark, RTL.
+4. **Review size:** a table of changed lines by kind (app code, tests, migrations, generated and lock files, docs, assets). Split app code into
+   backend, frontend, and mobile rows; in a monorepo, give each changed app or package its own row instead and name its layer. Then list the app
+   files in review order with their line counts, grouped the same way. Count with `git diff --numstat <base>...HEAD`.
 5. **Performance:** only when the pull request targets performance. Before and after numbers from the same method and data, and every trade-off,
    such as memory, staleness, or complexity.
 6. **QA steps:** numbered steps with the exact route, account, and data to use.
 7. **Known gaps:** what was deliberately left out.
 8. **Independent review:** the reviewer's verdict and what it checked.
 
-## Media upload
+## Demo media
 
-Use the browser tool chosen by $browser-simulator-routing to record. To get a GitHub-hosted URL, drop the file into a comment editor on the
-repository and copy the generated `user-attachments` link; do not submit the comment.
+Capture with the tool chosen by $browser-simulator-routing, then edit the capture into a demo that a reviewer understands without running the
+branch. Choose the editing tools yourself.
+
+- Setup never appears: the demo starts on the screen where the change begins.
+- Only the change remains: page loads, typing, navigation, retries, and idle time are cut. A wait the flow needs is sped up and labeled.
+- A short caption at each step names what changes on screen.
+- The changed region is readable: crop or zoom when it is small on the full screen.
+- Before and after appear side by side, or in sequence with a label for each.
+- A video lasts under 30 seconds and stays under 10 MB. A screenshot is cropped to the changed region with the change marked.
+- The final cut is checked for wrong text, stale states, and private data.
+
+To get a GitHub-hosted URL, drop the file into a comment editor on the repository and copy the generated `user-attachments` link; do not submit
+the comment.
 
 ## Independent review
 

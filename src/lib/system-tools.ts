@@ -276,6 +276,19 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
+        name: "ffmpeg",
+        level: "optional",
+        why: "Edits demo recordings for pull requests and renders promo videos.",
+        versionArgs: ["-version"],
+        latest: {
+          type: "homebrew",
+          formula: "ffmpeg",
+        },
+        update: {
+          commands: ["brew upgrade ffmpeg"],
+        },
+      },
+      {
         name: "mo",
         level: "optional",
         why: "Audits and cleans macOS storage through Mole.",
