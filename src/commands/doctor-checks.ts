@@ -4,7 +4,7 @@
  * Local hygiene checks used by `doctor`. Prints one `<level>\t<label>: <detail>` line per finding.
  */
 
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readlinkSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { execaSync } from "execa";
@@ -15,6 +15,7 @@ import { renderBaseRules } from "./install";
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
 const HOME = process.env.HOME || "";
+const MIN_FREE_GIB = 20;
 
 const INSTALLED_RULES_FILES = [
   { label: "Claude Code", path: join(HOME, ".claude/CLAUDE.md") },
@@ -118,6 +119,30 @@ if (
     label: "RTK version",
     detail: "native Codex hooks require RTK 0.50.0 or newer; run brew upgrade rtk",
   });
+}
+
+const disk = statfsSync(HOME);
+const freeGib = (disk.bavail * disk.bsize) / 1024 ** 3;
+if (freeGib < MIN_FREE_GIB) {
+  findings.push({
+    level: "optional",
+    label: "low disk space",
+    detail: `${freeGib.toFixed(1)} GiB free, below ${MIN_FREE_GIB} GiB; clear build caches or run mo clean`,
+  });
+}
+
+const avdHome = join(HOME, ".android/avd");
+if (
+  existsSync(join(HOME, ".android")) &&
+  lstatSync(avdHome, { throwIfNoEntry: false })?.isSymbolicLink()
+) {
+  if (!existsSync(avdHome)) {
+    findings.push({
+      level: "optional",
+      label: "Android emulators offline",
+      detail: `${avdHome} points to ${readlinkSync(avdHome)}, which is not mounted; connect the SSD`,
+    });
+  }
 }
 
 if (findings.length === 0) {

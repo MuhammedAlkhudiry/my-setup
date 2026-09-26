@@ -34,6 +34,12 @@ export PATH="$PATH:$ANDROID_HOME/emulator"
 export PATH="$PATH:$ANDROID_HOME/platform-tools"
 export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
 
+# --- External SSD ------------------------------------------------------------
+# Names the external dev drive that holds Android emulators and archived projects.
+# `~ssd` works like `~` in zsh; `$SSD` is for scripts and other tools.
+export SSD="/Volumes/DevSSD"
+hash -d ssd="$SSD"
+
 # --- Local Tools -------------------------------------------------------------
 # Adds personal/user-level command locations before project helpers are loaded.
 # `fpath` includes local completions shipped by installed command-line tools.
