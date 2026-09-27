@@ -1,11 +1,12 @@
 ---
 name: html-artifacts
-description: Use whenever you create any HTML page or file for the user, such as a report, review, audit, design options, or a visual comparison.
+description: Use whenever you create any HTML page or file for the user, such as a report, review, audit, design options, a visual comparison, or a visual prototype.
 ---
 
 Every HTML page for the user goes through this skill and ends as a published `share-html` URL. Never hand over a local file or local URL.
 
-The page is disposable. Spend minutes, not polish: one `index.html` with inline CSS and JS, no build step, no framework.
+The page is disposable. Spend minutes, not polish: one `index.html` with inline CSS and JS, no build step, no framework. A visual prototype may
+add a shared stylesheet and font files next to `index.html`.
 
 ## Build
 
@@ -20,12 +21,27 @@ The page is disposable. Spend minutes, not polish: one `index.html` with inline 
 
 ## Design
 
+Build a minimal page unless the user asks to visualize something or asks for a prototype or mockup; then build a visual prototype.
+
+### Minimal page
+
 Minimal is the rule, not a preference. Every element must earn its place; when unsure, cut it.
 
 - Show only the page's subject. No intro, summary, recap, legend, footer, or decoration.
 - No sentences on the surface. Use labels, numbers, and short phrases. Put any detail behind `<details>`.
 - Fit the main content on one screen: tight spacing, side-by-side panels, and collapsed detail instead of scrolling.
 - For design options in a project, reuse its colors and fonts. Otherwise use plain system styling.
+
+### Visual prototype
+
+Show each item as it would look, not as text about it.
+
+- Render every item as a realistic mockup of the real product screen, in a phone frame, a browser frame, or both, to match the platforms it
+  affects. Use the project's design system, fonts, real copy, and text direction.
+- Mark what is new with one to three short callouts on the mockup. Put the item's title and one-line detail beside it.
+- For more than a few items, first write a shared CSS kit and a script that screenshots one mockup. Give each subagent a range of items, one
+  fragment file per item, then assemble one page.
+- Check every mockup screenshot for clipping, overlap, and wrong text direction before publishing.
 
 ## Publish
 

@@ -180,6 +180,20 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
+        name: "cliproxyapi",
+        level: "optional",
+        why: "Pools Claude OAuth accounts for the local T3 Code Claude provider.",
+        versionArgs: ["-h"],
+        latest: {
+          type: "command",
+          command: "gh",
+          args: ["api", "repos/router-for-me/CLIProxyAPI/releases/latest", "--jq", ".tag_name"],
+        },
+        update: {
+          note: "Update the pinned version and macOS checksums in config/claude-pool.ts, then run mise run install -- --compact. Restart the launch agent after active Claude Pool agents finish.",
+        },
+      },
+      {
         name: "playwright-cli",
         level: "required",
         why: "Fallback headless browser automation CLI.",
@@ -191,21 +205,6 @@ export const SYSTEM_TOOL_GROUPS = [
         },
         update: {
           commands: ["npm install -g @playwright/cli@latest"],
-        },
-      },
-      {
-        name: "playwriter",
-        level: "required",
-        why: "Controls the owner's signed-in Chrome tabs through the Playwriter extension.",
-        versionArgs: ["--version"],
-        latest: {
-          type: "command",
-          command: "npm",
-          args: ["view", "playwriter", "version"],
-        },
-        update: {
-          commands: ["npm install -g playwriter@latest"],
-          note: "The Chrome extension must also be installed and enabled on each tab Playwriter should control.",
         },
       },
       {

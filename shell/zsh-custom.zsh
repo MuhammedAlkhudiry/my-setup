@@ -76,7 +76,7 @@ command -v mise >/dev/null && eval "$(mise activate zsh)"
 
 # --- PHP ---------------------------------------------------------------------
 # Herd exposes its PHP binary and PHP 8.4 configuration for host-side tools.
-export HERD_PHP_84_INI_SCAN_DIR="$HOME/Library/Application Support/Herd/config/php/84/"
+export HERD_PHP_84_INI_SCAN_DIR="$HOME/Library/Application Support/Herd/config/php/84"
 export PATH="$HOME/Library/Application Support/Herd/bin/:$PATH"
 
 # --- ZSH Settings ------------------------------------------------------------

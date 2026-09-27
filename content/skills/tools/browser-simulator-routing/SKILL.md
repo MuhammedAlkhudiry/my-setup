@@ -24,7 +24,7 @@ Rows are in order of preference within each area.
 | ------- | ------------------------------------ | ---------------------------------------------------------------------------------------- |
 | Browser | T3 Code preview (`preview_*` tools)  | The host provides it.                                                                    |
 | Browser | $chrome:control-chrome               | The runtime provides it.                                                                 |
-| Browser | $playwriter                          | The task needs the user's signed-in browser state.                                       |
+| Browser | Claude Code Chrome (`--chrome`)      | A Claude Code session needs the user's signed-in Chrome state.                           |
 | Browser | `playwright-cli`                     | No other browser tool fits.                                                              |
 | Device  | Maestro MCP                          | The task runs, changes, or creates a Maestro flow stored in the project.                 |
 | Device  | T3 Code device panel (`device_open`) | The host provides it. Drive the opened device with the $agent-device command it returns. |

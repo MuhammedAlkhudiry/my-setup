@@ -44,16 +44,6 @@ export const REMOTE_SKILL_SOURCES: RemoteSkillSource[] = [
     ],
   },
   {
-    repository: "https://github.com/remorses/playwriter.git",
-    ref: "main",
-    skills: [
-      {
-        name: "playwriter",
-        sourcePath: "skills/playwriter",
-      },
-    ],
-  },
-  {
     repository: "https://github.com/PostHog/ai-plugin.git",
     ref: "main",
     skills: [

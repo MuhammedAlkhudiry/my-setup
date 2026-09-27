@@ -4,13 +4,15 @@
  * Local hygiene checks used by `doctor`. Prints one `<level>\t<label>: <detail>` line per finding.
  */
 
-import { existsSync, lstatSync, readFileSync, readlinkSync, statfsSync } from "node:fs";
+import { existsSync, lstatSync, readFileSync, readlinkSync, readdirSync, statfsSync } from "node:fs";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { execaSync } from "execa";
 
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
+import { CLAUDE_POOL } from "../../config/claude-pool";
 import { mergeRtkHooks } from "../../config/rtk";
+import { claudePoolPaths } from "../lib/claude-pool";
 import { renderBaseRules } from "./install";
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
@@ -118,6 +120,133 @@ if (
     level: "required",
     label: "RTK version",
     detail: "native Codex hooks require RTK 0.50.0 or newer; run brew upgrade rtk",
+  });
+}
+
+const pool = claudePoolPaths(HOME);
+const poolFiles = [
+  pool.config,
+  pool.clientKey,
+  pool.managementKey,
+  pool.claudeSettings,
+  pool.launchAgent,
+  pool.stdoutLog,
+  pool.stderrLog,
+];
+for (const path of poolFiles) {
+  const file = lstatSync(path, { throwIfNoEntry: false });
+  if (!file) {
+    findings.push({ level: "optional", label: "Claude pool file", detail: `${path} is missing` });
+  } else if (!file.isFile() || (file.mode & 0o777) !== 0o600) {
+    findings.push({ level: "required", label: "Claude pool permissions", detail: `${path} must be a private mode-600 file` });
+  }
+}
+for (const path of [join(HOME, ".cli-proxy-api"), pool.authDir, pool.claudeDir]) {
+  const dir = lstatSync(path, { throwIfNoEntry: false });
+  if (!dir || !dir.isDirectory() || (dir.mode & 0o777) !== 0o700) {
+    findings.push({ level: "required", label: "Claude pool permissions", detail: `${path} must be a private mode-700 directory` });
+  }
+}
+
+if (existsSync(pool.config)) {
+  const config = readFileSync(pool.config, "utf8");
+  if (
+    !config.includes('host: "127.0.0.1"') ||
+    !config.includes(`port: ${CLAUDE_POOL.port}`) ||
+    !config.includes("allow-remote: false") ||
+    !config.includes("disable-control-panel: false") ||
+    !config.includes("session-affinity-subagents: false") ||
+    !config.includes('alias: "claude-haiku-4-5"') ||
+    !config.includes('alias: "claude-opus-4-5"')
+  ) {
+    findings.push({
+      level: "required",
+      label: "Claude pool configuration",
+      detail: "local routing, dashboard, or model aliases differ from the managed setup; run mise run install -- --compact",
+    });
+  }
+}
+
+if (existsSync(pool.claudeSettings) && existsSync(pool.clientKey)) {
+  try {
+    const settings = JSON.parse(readFileSync(pool.claudeSettings, "utf8"));
+    const clientKey = readFileSync(pool.clientKey, "utf8").trim();
+    if (
+      settings.env?.ANTHROPIC_BASE_URL !== `http://127.0.0.1:${CLAUDE_POOL.port}` ||
+      settings.env?.ANTHROPIC_AUTH_TOKEN !== clientKey ||
+      settings.env?.ANTHROPIC_API_KEY !== ""
+    ) {
+      throw new Error("Claude settings do not match the local proxy");
+    }
+  } catch {
+    findings.push({
+      level: "required",
+      label: "Claude pool credentials",
+      detail: "isolated Claude settings do not match the local client key; run mise run install -- --compact",
+    });
+  }
+}
+
+const poolService = execaSync("launchctl", ["print", `gui/${process.getuid?.() ?? 0}/${CLAUDE_POOL.label}`], {
+  reject: false,
+});
+if (poolService.exitCode !== 0 || !poolService.stdout.includes("state = running")) {
+  findings.push({
+    level: "optional",
+    label: "Claude pool service",
+    detail: "launch agent is not running; run mise run install -- --compact",
+  });
+}
+const poolListener = execaSync("lsof", ["-nP", `-iTCP:${CLAUDE_POOL.port}`, "-sTCP:LISTEN"], {
+  reject: false,
+});
+const listenerLines = poolListener.stdout.split("\n").slice(1).filter(Boolean);
+if (
+  listenerLines.length === 0 ||
+  listenerLines.some((line) => !line.includes(`127.0.0.1:${CLAUDE_POOL.port}`))
+) {
+  findings.push({
+    level: "required",
+    label: "Claude pool listener",
+    detail: `port ${CLAUDE_POOL.port} must listen only on 127.0.0.1`,
+  });
+}
+
+if (existsSync(pool.authDir)) {
+  const accounts = readdirSync(pool.authDir).filter((name) => /^claude-.+\.json$/.test(name)).length;
+  if (accounts < 2) {
+    findings.push({
+      level: "optional",
+      label: "Claude pool accounts",
+      detail: `found ${accounts} Claude OAuth credential files; authenticate the other account locally`,
+    });
+  }
+}
+
+const t3SettingsPath = join(HOME, ".t3/userdata/settings.json");
+if (existsSync(t3SettingsPath)) {
+  try {
+    const t3Settings = JSON.parse(readFileSync(t3SettingsPath, "utf8"));
+    const instance = t3Settings.providerInstances?.[CLAUDE_POOL.t3InstanceId];
+    if (
+      instance?.driver !== "claudeAgent" ||
+      instance.enabled === false ||
+      !["~/.claude_cliproxy", pool.claudeDir].includes(instance.config?.homePath)
+    ) {
+      throw new Error("Claude Pool provider instance is missing or disabled");
+    }
+  } catch {
+    findings.push({
+      level: "optional",
+      label: "T3 Claude Pool",
+      detail: "add the Claude Pool instance in T3 Code Settings > Providers with CLAUDE_CONFIG_DIR ~/.claude_cliproxy",
+    });
+  }
+} else {
+  findings.push({
+    level: "optional",
+    label: "T3 Claude Pool",
+    detail: "T3 Code settings are missing; add the Claude Pool instance after installing T3 Code",
   });
 }
 

@@ -1,10 +1,6 @@
 ## Instruction priority
 
-- **QUESTION-ONLY** — A question requests an answer, never execution of the work it asks about. Perform only the read-only investigation needed to
-  answer, then stop. Questions such as "Can you change this?", "Should we fix this?", and "How would you implement this?" do not authorize changes.
-  This rule takes precedence over every conflicting rule in this setup, including autonomy, bug fixing, environment repair, and approval reuse.
-  Execute work only when separately and explicitly requested; a question never expands an existing task's authorization. If a message contains both an
-  explicit task and a question, carry out only the explicit task and answer the question.
+- NEVER start implementing until you have the go ahead, this is critical.
 - **CONCURRENT-AGENTS** — Before changing files or implementing work, check for other active agent sessions on the same project, whether they run in
   the same harness as you or a different one. If you find one, agree with it on how to share the work, or wait until it finishes. If you find none,
   proceed. If you later suspect that another agent is editing the same project, stop and coordinate with it before you continue. If you cannot reach
@@ -14,13 +10,6 @@
   continue your task. Tell the user only: "Got an unrelated agent message."
 
 ## Answering questions
-
-Apply the shared **QUESTION-ONLY** rule to determine what the user authorized.
-
-> “Can you change the button color?” → Do any read-only operations and answer directly.
-
-> “Remove the old implementation. How can we build the new one?” → Remove the old implementation, then explain how to build the new one without
-> building it.
 
 - Say when the question starts from a wrong idea. Keep the user’s goal and suggest a better way to reach it. “Which table should store this temporary
   filter?” → “None; it belongs in client state.”
@@ -45,25 +34,19 @@ Help the user reach the best result. Do not help them follow a bad direction jus
   for deletion—in a fresh directory under the macOS temporary directory, never inside a Git repository. Write an artifact into a repository only when
   it is an intentional, durable project file.
 - **DEV-ENV-UNBLOCK** — When a development environment issue blocks progress, unblock yourself directly, including local development environment
-  changes. Report what changed after the task.
+  changes. Report what changed after the task, never stop on env issue.
 - **SELF-SERVE-TOOLS** — You have access to browsers, iOS simulators, Android emulators, App Store Connect, and Google Play Console. Operate them
-  yourself to inspect, verify, and complete work. Never ask the user to open, check, or operate them for you. If access fails, repair it with
-  $service-access.
+  yourself to inspect, verify, and complete work. If task depend on browser never ask user to do it.
+- for image generation, use Codex cli.
 
 ## Repo Context
 
-- **PROJECT-AGENTS-MD** — Before project work, read the repository's `AGENTS.md` unless it is already loaded.
-- **GIT-SCOPE** — Ignore unrelated changes and staging state. Do not modify unrelated diffs; the user manages the Git index.
-- **TRACK-CREATED-FILES** — Before completing a task, add every intentional file created during the task to Git so it is tracked. Do not stage
-  unrelated files or pre-existing modifications.
 - **GUIDELINES-PROJECT** — The shared AI rules, skills, and configuration repository is always at `~/PhpstormProjects/my-setup`; reference and edit it
   there from other projects.
 - **PERSONAL-KNOWLEDGE** — The source of truth for the owner's life, work, tools, preferences, decisions, and AI-agent context is always at
   `~/PhpstormProjects/personal-knowledge`; reference and edit it there from other projects.
 - **PROJECT-KNOWLEDGE** — When a project has `docs/knowledge/` and a task depends on project-specific language, promised product behavior, rationale,
   or history, use $project-knowledge before broad code exploration.
-- **DOCUMENTATION-ROUTING** — When writing or editing Markdown, follow $writing-md-files: point to authoritative sources and keep only durable
-  decisions, boundaries, and completion contracts.
 
 ### Active Projects
 
@@ -73,16 +56,8 @@ Use these projects as references when the user mentions them.
 
 ## Behavior
 
-- **LEAVE-ENVIRONMENT-RUNNING** — Assume the user will QA completed work; leave the development environment running unless asked otherwise.
-- **MONITOR-IN-PLACE** — Monitor, wait, or watch only when the user explicitly asks, including for pull requests. When asked, keep the current task
-  alive; do not create an automation, reminder, or background process unless explicitly requested.
-- **BUG-FIX-AUTHORIZATION** — Apply confirmed, reversible fixes within the authorized scope, regardless of diff size. Ask only when the fix
-  requires an unresolved decision or introduces consequences outside that authorization, such as destructive effects or changes to product
-  behavior, access, spending, or release. Reuse approval already given.
 - **BUG-FIX-PREVENTION** — For each bug you fix, search the codebase for the same pattern. In the handoff, state for each bug how to prevent it
   from happening again, the similar bugs you found, and how to automate prevention, such as with a test, type, lint rule, or CI check.
-- **DELETE-VERIFY** — Before deleting data as redundant, prove the other copy is independent: resolve symlinks and compare real paths. Move
-  credentials and other unrecoverable files to the Trash instead of deleting them permanently.
 
 ## Responding to the user
 
@@ -90,36 +65,17 @@ Follow these instructions when writing the final response to the user.
 
 ### General
 
-- **Requests first.** If the reply needs anything from Mohammed, such as a decision, an action, access, or information, start the reply with that
-  request. Put all other content after it.
 - **Language.** Write in English only.
 - **Audience calibration.** Mohammed has strong technical expertise. For management, business, marketing, sales, and product, use plain language and
   briefly explain specialized terms without oversimplifying the idea.
 - **Clickable URLs.** Render every known URL as a Markdown link to the exact page, never as plain text, inline code, or quoted text.
-- **Opaque identifiers.** When the source URL is known, link the identifier and include its title or a brief description alongside it.
 - **Other sessions.** Refer to another agent session by its thread title. If the title is unknown, describe the work it is doing. Never refer
   to a session by its generated ID alone, such as `harium-project-04`.
 
 ### Writing
 
-- Default to about 250 words. Scale to the request. Never pad:
-  - Question, status, yes or no: 50–150 words; maximum 250.
-  - Task handoff, bug report, or small-diff review: 150–300 words; maximum 400.
-  - Requested audit, plan, comparison, or walkthrough: 400–800 words; maximum 1,000.
-  - Explicit requests for deep or detailed work: use headings and as much detail as the evidence needs.
-- When content is cut to fit a ceiling, say what was cut in a short footer and offer to expand a specific topic.
-- React to facts instead of neutrally listing pros and cons. Use "I" when it fits.
-- Vary sentence rhythm. Split dense sentences before the reader has to backtrack. Prefer short sentences.
-- Avoid walls of text. Keep paragraphs short, and use headings, lists, or tables when they make the response easier to scan.
-- Keep tables narrow so they fit on a phone screen: use few columns and short cells, and move long explanations out of the table.
-- Be specific. Replace vague concern, praise, puffery, formulaic challenges, and generic conclusions with the fact, mechanism, instruction, or number.
-- Remove chatbot filler and flattery such as "Of course", "Great question", "I hope this helps", and "Let me know if".
-- Prefer active voice when the actor matters. Passive voice is fine when the actor is unknown or irrelevant.
 - Use the plain word: "use" instead of "utilize" or "leverage", "help" instead of "facilitate", and "if" instead of "in the event that".
-- Follow ASD-STE100 for technical instructions: use one term for each concept, put conditions before actions, and give one instruction per sentence.
 - Cut filler, stacked hedges, weak adverbs, forced groups of three, false ranges, synonym cycling, and "not just X, but Y" constructions.
-- Avoid abstract technical metaphors when a concrete term exists. If a sentence could appear unchanged in another product's documentation, make it
-  specific or cut it.
 - Use emojis as visual markers to make key points and section structure easier to scan.
 
 #### Progress updates

@@ -38,6 +38,7 @@ import {
   renderCodexMcpServersToml,
 } from "../lib/codex-config";
 import { replaceDirectory, ensureParentDir } from "../lib/fs";
+import { installClaudePool } from "../lib/claude-pool";
 import { secureManagedCredentials } from "../lib/credentials";
 import { colors, compactOutput, print, printBox, printSeparator } from "../lib/print";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
@@ -883,6 +884,13 @@ export async function install(): Promise<void> {
     installCodex(),
     installClaude(),
     installShared(),
+    installClaudePool(HOME).then(({ restartDeferred }) => {
+      if (restartDeferred) {
+        print.warning("CLIProxyAPI update needs a restart after active Claude Pool agents finish");
+      } else {
+        print.success("Local Claude Pool proxy installed");
+      }
+    }),
   ]);
 
   if (!compactOutput) {
