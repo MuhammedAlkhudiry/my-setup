@@ -236,6 +236,34 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
+        name: "simslim",
+        level: "required",
+        why: "Disables unneeded iOS simulator daemons so parallel agent simulators use less memory.",
+        versionArgs: ["--version"],
+        latest: {
+          type: "homebrew",
+          formula: "mobai-app/tap/simslim",
+        },
+        update: {
+          commands: ["brew upgrade mobai-app/tap/simslim"],
+          note: "Install with brew install mobai-app/tap/simslim.",
+        },
+      },
+      {
+        name: "avdslim",
+        level: "required",
+        why: "Shrinks Android emulator RAM and disables unneeded packages so parallel agent emulators use less memory.",
+        versionArgs: ["--version"],
+        latest: {
+          type: "homebrew",
+          formula: "kdbhalala/avdslim/avdslim",
+        },
+        update: {
+          commands: ["brew upgrade kdbhalala/avdslim/avdslim"],
+          note: "Install with brew tap kdbhalala/avdslim https://github.com/kdbhalala/avdslim.git && brew install kdbhalala/avdslim/avdslim.",
+        },
+      },
+      {
         name: "fzf",
         level: "optional",
         why: "Used by the zsh fzf plugin and the project picker.",

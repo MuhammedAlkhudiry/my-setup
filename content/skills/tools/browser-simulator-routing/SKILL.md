@@ -15,6 +15,7 @@ description: Use before any browser, simulator, or emulator automation to pick t
   and leave it running.
 - Use the iOS simulator unless the work is Android-specific. Keep the device window visible; never run it headless.
 - Before signing in on a new simulator or emulator, set up local HTTPS trust with $mobile-app-infra.
+- Before starting long agent work on a simulator or emulator that is not slimmed, slim it with $mobile-app-infra.
 
 ## Tools
 

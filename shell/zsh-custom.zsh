@@ -39,6 +39,8 @@ export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
 # `~ssd` works like `~` in zsh; `$SSD` is for scripts and other tools.
 export SSD="/Volumes/DevSSD"
 hash -d ssd="$SSD"
+# avdslim does not follow a symlinked AVD directory, so point Android tools at its real path.
+[[ -L "$HOME/.android/avd" ]] && export ANDROID_AVD_HOME="${${:-$HOME/.android/avd}:A}"
 
 # --- Local Tools -------------------------------------------------------------
 # Adds personal/user-level command locations before project helpers are loaded.

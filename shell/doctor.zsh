@@ -264,6 +264,8 @@ main() {
   check_tool playwright-cli required "Fallback headless browser automation CLI."
   check_tool agent-device required "Default AI-agent mobile and device automation CLI."
   check_tool maestro required "Mobile E2E testing and bundled MCP server for agents."
+  check_tool simslim required "Install with brew install mobai-app/tap/simslim to slim iOS simulators."
+  check_tool avdslim required "Install from the kdbhalala/avdslim Homebrew tap to slim Android emulators."
   check_tool fzf optional "Used by the zsh fzf plugin and the project picker."
   check_tool sg optional "Install ast-grep for AST-shaped code search."
   check_tool magick optional "Used to inspect and measure raster UI references."

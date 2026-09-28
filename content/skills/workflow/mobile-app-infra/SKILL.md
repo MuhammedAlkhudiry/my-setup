@@ -1,6 +1,6 @@
 ---
 name: mobile-app-infra
-description: Use when working on Expo or React Native development ports and HTTPS trust, native sign-in, in-app payments, or EAS and app-store releases.
+description: Use when working on Expo or React Native development ports and HTTPS trust, simulator or emulator slimming, native sign-in, in-app payments, or EAS and app-store releases.
 ---
 
 ## Routing
@@ -8,6 +8,7 @@ description: Use when working on Expo or React Native development ports and HTTP
 Load only the relevant references:
 
 - [Development ports](references/dev-ports.md) for local connection, HTTPS trust, and reload failures.
+- [Device slimming](references/device-slimming.md) for reducing simulator and emulator memory without breaking app features.
 - [Social sign-in](references/social-sign-in.md) for provider sign-in and verification of signed apps.
 - [In-app payments](references/in-app-payments.md) for implementing and testing purchases.
 - [Store release](references/store-release.md) for building, TestFlight distribution, and releasing apps.
