@@ -21,7 +21,8 @@ description: Use when designing, implementing, or reviewing an interface, or whe
 - Loop animated previews when repetition helps compare the options.
 - When the user selects an option without requesting implementation, acknowledge the selection and ask whether to integrate it.
 - When the user selects multiple options or parts of different options, revise the design to combine the selected elements.
-- Keep the HTML file minimal, focusing only on options.
+- Keep an options page focused on the options. Under each option, write two plain sentences: what the person would see, and why to pick it.
+  Keep short labels for secondary detail only. When options belong to a feature proposal, summarize them in the proposal's options section and link the full options page.
 - When the user asks for changes, create a new HTML file instead of editing the previous one.
 - When the user points to one or more options, treat them as the chosen direction and generate new options from them.
 

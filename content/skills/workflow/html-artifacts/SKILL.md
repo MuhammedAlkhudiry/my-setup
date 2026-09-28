@@ -21,7 +21,12 @@ add a shared stylesheet and font files next to `index.html`.
 
 ## Design
 
-Build a minimal page unless the user asks to visualize something or asks for a prototype or mockup; then build a visual prototype.
+Pick one mode:
+
+- **Feature proposal** when the page proposes a feature, explains a product idea, or asks for a product decision. Follow
+  [references/feature-proposal.md](references/feature-proposal.md); the minimal-page rules below do not apply.
+- **Visual prototype** when the user asks to visualize something or asks for a prototype or mockup.
+- **Minimal page** for everything else, such as reports, reviews, audits, and comparisons.
 
 ### Minimal page
 
