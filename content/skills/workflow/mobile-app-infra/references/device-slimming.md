@@ -22,7 +22,8 @@ Undo with `simslim off <udid>`.
 Use `avdslim`. Its package list and defaults would break common app features, so always pass the flags below:
 
 - **Never pass `--aggressive`.** It disables the Play Store, which in-app purchases need, and Chrome, which web sign-in and links need.
-- **Keep location on** with `--skip=location`. Without it, slimming turns device location off.
+- **Keep location and the background-process limit** with `--skip=location,bglimit`. Otherwise slimming turns device location off and
+  caps background processes at 4, which can kill the app while a share sheet, photo picker, or browser sign-in covers it.
 - **Keep the contacts, calendar, and camera apps.** Contact pickers, calendar event screens, and camera capture open these apps.
 - **Keep host camera and audio.** `tune-avd` turns both off.
 - **Use 2048 MB RAM** for Google Play images. The 1536 MB default is too tight for Play services plus a development build.
@@ -49,13 +50,15 @@ changes. Before restarting it, check for app installs newer than its boot and ha
 4. Slim it after boot:
 
    ```sh
-   avdslim on emulator-<port> --skip=location \
+   avdslim on emulator-<port> --skip=location,bglimit \
      --keep=com.android.contacts --keep=com.google.android.contacts \
      --keep=com.android.calendar --keep=com.google.android.calendar \
      --keep=com.android.camera2
    ```
 
 5. Verify that `adb -s emulator-<port> shell pm list packages` still lists the app and `com.android.vending`.
+
+`avdslim` has no dry run; every `on` applies its changes immediately.
 
 Undo with `avdslim off emulator-<port>`. If a slimmed emulator hangs on a black screen, run `avdslim repair`. It needs `adb root`, which Google
 Play images refuse, so use `avdslim off` there instead.
