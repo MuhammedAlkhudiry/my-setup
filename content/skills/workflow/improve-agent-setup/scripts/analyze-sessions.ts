@@ -328,7 +328,6 @@ const subcommandBinaries = new Set([
   "gh",
   "git",
   "go",
-  "knowledge",
   "kubectl",
   "maestro",
   "make",

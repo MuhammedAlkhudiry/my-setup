@@ -41,6 +41,5 @@
   skills must be declared in `config/skills.ts` for this repo's source/import logic.
 - **MY-SETUP-CLI** — `my-setup` only provides `install` and built-in help. Use `doctor` for setup health checks and `system-tools status` or
   `system-tools update-plan` for external CLI maintenance.
-- **KNOWLEDGE-CLI** — Use the standalone `knowledge` command for project knowledge packs; read its live help for the task.
 - **WORDING-QUALITY** — Preserve user intent, but do not reuse the user's rough wording. Rewrite it into the clearest, strongest wording that fits the
   repo's voice.

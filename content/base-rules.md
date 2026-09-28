@@ -45,8 +45,6 @@ Help the user reach the best result. Do not help them follow a bad direction jus
   there from other projects.
 - **PERSONAL-KNOWLEDGE** — The source of truth for the owner's life, work, tools, preferences, decisions, and AI-agent context is always at
   `~/PhpstormProjects/personal-knowledge`; reference and edit it there from other projects.
-- **PROJECT-KNOWLEDGE** — When a project has `docs/knowledge/` and a task depends on project-specific language, promised product behavior, rationale,
-  or history, use $project-knowledge before broad code exploration.
 
 ### Active Projects
 

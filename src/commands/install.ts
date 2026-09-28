@@ -101,7 +101,6 @@ const SHARED_BIN_COMMANDS = [
   "system-tools",
   "hugeicons",
   "doctor",
-  "knowledge",
   "pk",
   "share-html",
 ];

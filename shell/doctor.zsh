@@ -294,7 +294,6 @@ main() {
   check_link system-tools "$HOME/bin/system-tools" "$MY_SETUP_ROOT/shell/system-tools.zsh"
   check_link hugeicons "$HOME/bin/hugeicons" "$MY_SETUP_ROOT/shell/hugeicons.zsh"
   check_link doctor "$HOME/bin/doctor" "$MY_SETUP_ROOT/shell/doctor.zsh"
-  check_link knowledge "$HOME/bin/knowledge" "$MY_SETUP_ROOT/shell/knowledge.zsh"
   check_link pk "$HOME/bin/pk" "$MY_SETUP_ROOT/shell/pk.zsh"
   check_link share-html "$HOME/bin/share-html" "$MY_SETUP_ROOT/shell/share-html.zsh"
   check_link claude-skills "$HOME/.claude_cliproxy/skills" "$HOME/.agents/skills"
