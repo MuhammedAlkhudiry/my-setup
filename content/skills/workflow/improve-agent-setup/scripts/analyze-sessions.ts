@@ -175,7 +175,7 @@ Options:
   --harness <name>      codex, claude, or all. Default: every root that exists,
                         or only the harness whose root was passed explicitly.
   --root <path>         Codex session root. Default: ~/.codex/sessions.
-  --claude-root <path>  Claude Code project root. Default: ~/.claude/projects.
+  --claude-root <path>  Claude Code project root. Default: ~/.claude_cliproxy/projects.
   --days <number>       Event-time lookback when --since is absent. Default: 14.
   --limit <number>      Maximum ranked items per section. Default: 12.
   --cwd <path>          Include only sessions for this working directory.
@@ -196,7 +196,7 @@ function epoch(value: string, option: string): number {
   return number > 10_000_000_000 ? number : number * 1000;
 }
 const root = args.get("root") || join(home, ".codex", "sessions");
-const claudeRoot = args.get("claude-root") || join(home, ".claude", "projects");
+const claudeRoot = args.get("claude-root") || join(home, ".claude_cliproxy", "projects");
 const requestedHarness = args.get("harness");
 if (requestedHarness && !["codex", "claude", "all"].includes(requestedHarness))
   die(`--harness must be codex, claude, or all: ${requestedHarness}`);

@@ -12,7 +12,7 @@ import { execaSync } from "execa";
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
 import { CLAUDE_POOL } from "../../config/claude-pool";
 import { mergeRtkHooks } from "../../config/rtk";
-import { claudePoolPaths } from "../lib/claude-pool";
+import { claudePoolPaths, findLegacyClaudeFiles } from "../lib/claude-pool";
 import { renderBaseRules } from "./install";
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
@@ -20,7 +20,7 @@ const HOME = process.env.HOME || "";
 const MIN_FREE_GIB = 20;
 
 const INSTALLED_RULES_FILES = [
-  { label: "Claude Code", path: join(HOME, ".claude/CLAUDE.md") },
+  { label: "Claude Code", path: claudePoolPaths(HOME).claudeRules },
   { label: "Codex", path: join(HOME, ".codex/AGENTS.md") },
   { label: "OpenCode", path: join(HOME, ".config/opencode/AGENTS.md") },
 ];
@@ -80,7 +80,7 @@ if (staleRules.length > 0) {
 }
 
 for (const [agent, path] of [
-  ["claude", join(HOME, ".claude/settings.json")],
+  ["claude", claudePoolPaths(HOME).claudeSettings],
   ["codex", join(HOME, ".codex/hooks.json")],
 ] as const) {
   try {
@@ -187,6 +187,15 @@ if (existsSync(pool.claudeSettings) && existsSync(pool.clientKey)) {
   }
 }
 
+const legacyClaudeFiles = findLegacyClaudeFiles(HOME);
+if (legacyClaudeFiles.length > 0) {
+  findings.push({
+    level: "required",
+    label: "old Claude config",
+    detail: `${legacyClaudeFiles.join(", ")} would load stale rules in Claude Pool sessions; run mise run install -- --compact`,
+  });
+}
+
 const poolService = execaSync("launchctl", ["print", `gui/${process.getuid?.() ?? 0}/${CLAUDE_POOL.label}`], {
   reject: false,
 });
@@ -228,6 +237,14 @@ if (existsSync(t3SettingsPath)) {
   try {
     const t3Settings = JSON.parse(readFileSync(t3SettingsPath, "utf8"));
     const instance = t3Settings.providerInstances?.[CLAUDE_POOL.t3InstanceId];
+    const defaultClaude = t3Settings.providerInstances?.claudeAgent;
+    if (defaultClaude && defaultClaude.enabled !== false) {
+      findings.push({
+        level: "optional",
+        label: "T3 default Claude",
+        detail: "disable the default Claude provider in T3 Code Settings > Providers; Claude runs only through Claude Pool",
+      });
+    }
     if (
       instance?.driver !== "claudeAgent" ||
       instance.enabled === false ||

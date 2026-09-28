@@ -1,6 +1,17 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
-import { chmod, copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { existsSync, lstatSync } from "node:fs";
+import {
+  chmod,
+  copyFile,
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -18,6 +29,12 @@ export function claudePoolPaths(home: string) {
     authDir: join(proxyDir, "auth"),
     claudeDir: join(home, ".claude_cliproxy"),
     claudeSettings: join(home, ".claude_cliproxy/settings.json"),
+    claudeRules: join(home, ".claude_cliproxy/CLAUDE.md"),
+    claudeSkills: join(home, ".claude_cliproxy/skills"),
+    // The old default Claude config. Claude Code also reads ~/.claude/CLAUDE.md as an ancestor project file,
+    // so leftover managed files there would load stale rules twice in Pool sessions.
+    legacyClaudeRules: join(home, ".claude/CLAUDE.md"),
+    legacyClaudeSkills: join(home, ".claude/skills"),
     launchAgent: join(home, "Library/LaunchAgents", `${CLAUDE_POOL.label}.plist`),
     stdoutLog: join(home, "Library/Logs/CLIProxyAPI.log"),
     stderrLog: join(home, "Library/Logs/CLIProxyAPI.error.log"),
@@ -186,6 +203,40 @@ export function renderClaudePoolLaunchAgent(paths: PoolPaths): string {
   ].join("\n");
 }
 
+type SettingsObject = Record<string, unknown> & { env?: Record<string, unknown> };
+
+async function readSettingsObject(path: string): Promise<SettingsObject> {
+  const content = await readOptional(path);
+  const parsed: unknown = content ? JSON.parse(content) : {};
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`Invalid Claude settings at ${path}`);
+  }
+  const { env } = parsed as Record<string, unknown>;
+  if (env !== undefined && (!env || typeof env !== "object" || Array.isArray(env))) {
+    throw new Error(`Invalid Claude settings environment at ${path}`);
+  }
+  return parsed as SettingsObject;
+}
+
+/**
+ * Lists the files my-setup used to manage in ~/.claude. Claude Code now creates a real ~/.claude/skills folder for
+ * its own synced skills, so only the old skills symlink counts.
+ */
+export function findLegacyClaudeFiles(home: string): string[] {
+  const paths = claudePoolPaths(home);
+  return [paths.legacyClaudeRules, paths.legacyClaudeSkills].filter((path) => {
+    const entry = lstatSync(path, { throwIfNoEntry: false });
+    return entry && (path !== paths.legacyClaudeSkills || entry.isSymbolicLink());
+  });
+}
+
+/** Removes the files my-setup used to manage in ~/.claude; history and user-owned settings stay. */
+export async function retireLegacyClaudeFiles(home: string): Promise<string[]> {
+  const removed = findLegacyClaudeFiles(home);
+  for (const path of removed) await rm(path);
+  return removed;
+}
+
 export async function prepareClaudePoolFiles(home: string): Promise<{ plistChanged: boolean }> {
   const paths = claudePoolPaths(home);
   await privateDirectory(dirname(paths.config));
@@ -199,21 +250,16 @@ export async function prepareClaudePoolFiles(home: string): Promise<{ plistChang
   const hash = await managementHash(paths.config, managementKey);
   await privateFile(paths.config, renderClaudePoolConfig(paths, clientKey, hash));
 
-  const existingSettings = await readOptional(paths.claudeSettings);
-  const parsed: unknown = existingSettings ? JSON.parse(existingSettings) : {};
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`Invalid Claude pool settings at ${paths.claudeSettings}`);
-  }
-  const settings = parsed as Record<string, unknown>;
-  const currentEnv = settings.env;
-  if (currentEnv && (typeof currentEnv !== "object" || Array.isArray(currentEnv))) {
-    throw new Error(`Invalid Claude pool environment at ${paths.claudeSettings}`);
-  }
-  settings.env = {
-    ...(currentEnv as Record<string, unknown> | undefined),
-    ANTHROPIC_BASE_URL: `http://127.0.0.1:${CLAUDE_POOL.port}`,
-    ANTHROPIC_AUTH_TOKEN: clientKey,
-    ANTHROPIC_API_KEY: "",
+  // The pool directory is the only Claude config; installClaude merges the managed keys into these settings.
+  const poolSettings = await readSettingsObject(paths.claudeSettings);
+  const settings: Record<string, unknown> = {
+    ...poolSettings,
+    env: {
+      ...poolSettings.env,
+      ANTHROPIC_BASE_URL: `http://127.0.0.1:${CLAUDE_POOL.port}`,
+      ANTHROPIC_AUTH_TOKEN: clientKey,
+      ANTHROPIC_API_KEY: "",
+    },
   };
   await privateFile(paths.claudeSettings, `${JSON.stringify(settings, null, 2)}\n`);
 

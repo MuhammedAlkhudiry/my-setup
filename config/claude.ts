@@ -2,7 +2,7 @@ import { createClaudePermissionAllowList } from "./permissions";
 
 /**
  * Claude Code settings managed by my-setup. Only the keys returned here are overwritten in
- * `~/.claude/settings.json`; every other key stays user-owned.
+ * `~/.claude_cliproxy/settings.json`, the Claude Pool config; every other key stays user-owned.
  */
 export function createClaudeManagedSettings(): {
   permissions: { allow: string[] };

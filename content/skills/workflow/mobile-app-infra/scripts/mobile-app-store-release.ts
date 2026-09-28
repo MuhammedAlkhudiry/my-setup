@@ -102,6 +102,20 @@ async function submitRelease() {
 
   const existing = await findSubmissionForVersion(activeSubmissions, version.id);
 
+  // App Review rejected this version. Once prepare attaches the fixed build, the same submission goes
+  // back to review; reporting it as submitted would leave the release rejected.
+  if (existing?.attributes?.state === "UNRESOLVED_ISSUES") {
+    const resubmitted = await markSubmitted(existing.id);
+
+    console.log({
+      submitted: true,
+      resubmitted: true,
+      reviewId: existing.id,
+      state: resubmitted.attributes?.state,
+    });
+    return;
+  }
+
   if (existing) {
     console.log({
       submitted: true,
@@ -149,26 +163,27 @@ async function submitRelease() {
     }),
   });
 
-  const submitted = await appleJson(
-    `https://api.appstoreconnect.apple.com/v1/reviewSubmissions/${review.id}`,
-    {
-      method: "PATCH",
-      headers: jsonHeaders(headers),
-      body: JSON.stringify({
-        data: {
-          type: "reviewSubmissions",
-          id: review.id,
-          attributes: { submitted: true },
-        },
-      }),
-    },
-  ).then((response) => response.data);
+  const submitted = await markSubmitted(review.id);
 
   console.log({
     submitted: true,
     reviewId: review.id,
     state: submitted.attributes?.state,
   });
+}
+
+async function markSubmitted(reviewId: string): Promise<AppleResource> {
+  return appleJson(`https://api.appstoreconnect.apple.com/v1/reviewSubmissions/${reviewId}`, {
+    method: "PATCH",
+    headers: jsonHeaders(headers),
+    body: JSON.stringify({
+      data: {
+        type: "reviewSubmissions",
+        id: reviewId,
+        attributes: { submitted: true },
+      },
+    }),
+  }).then((response) => response.data);
 }
 
 async function createVersion(previousVersion: AppleResource | null) {

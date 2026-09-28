@@ -38,7 +38,7 @@ import {
   renderCodexMcpServersToml,
 } from "../lib/codex-config";
 import { replaceDirectory, ensureParentDir } from "../lib/fs";
-import { installClaudePool } from "../lib/claude-pool";
+import { claudePoolPaths, installClaudePool, retireLegacyClaudeFiles } from "../lib/claude-pool";
 import { secureManagedCredentials } from "../lib/credentials";
 import { colors, compactOutput, print, printBox, printSeparator } from "../lib/print";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
@@ -69,10 +69,13 @@ const CODEX_PATHS = {
   hooks: join(HOME, ".codex/hooks.json"),
 };
 
+// Claude Code runs only through the Claude Pool, so its config dir is the pool's CLAUDE_CONFIG_DIR.
+const CLAUDE_POOL_PATHS = claudePoolPaths(HOME);
 const CLAUDE_PATHS = {
-  rules: join(HOME, ".claude/CLAUDE.md"),
-  skills: join(HOME, ".claude/skills"),
-  settings: join(HOME, ".claude/settings.json"),
+  configDir: CLAUDE_POOL_PATHS.claudeDir,
+  rules: CLAUDE_POOL_PATHS.claudeRules,
+  skills: CLAUDE_POOL_PATHS.claudeSkills,
+  settings: CLAUDE_POOL_PATHS.claudeSettings,
 };
 
 const SHARED_PATHS = {
@@ -304,6 +307,9 @@ async function writeCodexRules(): Promise<void> {
 }
 
 async function installClaude(): Promise<void> {
+  for (const path of await retireLegacyClaudeFiles(HOME)) {
+    print.success(`Removed old Claude config file ${path}`);
+  }
   copyRules(CLAUDE_PATHS.rules, "Claude Code");
   await installManagedSymlink(SHARED_PATHS.skills, CLAUDE_PATHS.skills, "Claude Code skills");
   await mergeClaudeSettingsAsync();
@@ -342,11 +348,12 @@ async function installClaudeMcpServers(): Promise<void> {
   }
   for (const [name, server] of Object.entries(MCP_SERVERS)) {
     const [command, ...args] = server.command;
-    await execa("claude", ["mcp", "remove", "-s", "user", name], { reject: false, stdio: "pipe" });
+    const env = { CLAUDE_CONFIG_DIR: CLAUDE_PATHS.configDir };
+    await execa("claude", ["mcp", "remove", "-s", "user", name], { env, reject: false, stdio: "pipe" });
     await execa(
       "claude",
       ["mcp", "add-json", "-s", "user", name, JSON.stringify({ type: "stdio", command, args })],
-      { stdio: "pipe" },
+      { env, stdio: "pipe" },
     );
   }
   print.success(`Claude Code MCP servers installed (${Object.keys(MCP_SERVERS).length})`);
@@ -855,8 +862,9 @@ export async function install(): Promise<void> {
     console.log(`    Rules:    ${CODEX_PATHS.rules}`);
     console.log(`    Config:   ${CODEX_PATHS.config} (managed merge)`);
     console.log();
-    console.log(colors.blue("  Claude Code:"));
+    console.log(colors.blue("  Claude Code (Claude Pool):"));
     console.log(`    Rules:    ${CLAUDE_PATHS.rules}`);
+    console.log(`    Settings: ${CLAUDE_PATHS.settings} (merge)`);
     console.log(`    Skills:   ${CLAUDE_PATHS.skills} -> ${SHARED_PATHS.skills}`);
     console.log();
     console.log(colors.yellow("  Shared:"));
@@ -882,15 +890,17 @@ export async function install(): Promise<void> {
     installSharedSkills(),
     installOpencode(),
     installCodex(),
-    installClaude(),
     installShared(),
-    installClaudePool(HOME).then(({ restartDeferred }) => {
-      if (restartDeferred) {
-        print.warning("CLIProxyAPI update needs a restart after active Claude Pool agents finish");
-      } else {
-        print.success("Local Claude Pool proxy installed");
-      }
-    }),
+    // The pool creates the private config dir and its proxy settings before installClaude merges into them.
+    installClaudePool(HOME)
+      .then(({ restartDeferred }) => {
+        if (restartDeferred) {
+          print.warning("CLIProxyAPI update needs a restart after active Claude Pool agents finish");
+        } else {
+          print.success("Local Claude Pool proxy installed");
+        }
+      })
+      .then(() => installClaude()),
   ]);
 
   if (!compactOutput) {
