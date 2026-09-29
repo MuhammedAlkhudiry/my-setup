@@ -53,5 +53,5 @@ Show each item as it would look, not as text about it.
 - Open the page once and fix anything visibly broken.
 - Run `share-html <folder>`. Add `--name <words>` for a readable URL. The URL is private behind Cloudflare Access and expires after 30 days.
 - Give the user the printed URL only.
-- When `share-html` reports that wrangler is not signed in, repair access with $service-access. When it reports that the host is not behind
+- When `share-html` reports that `cf` is not signed in, repair access with $service-access. When it reports that the host is not behind
   Cloudflare Access, stop and report it; never publish another way.

@@ -139,8 +139,8 @@ export const SYSTEM_TOOL_GROUPS = [
       },
       {
         name: "cf",
-        level: "optional",
-        why: "Cloudflare CLI for deploys and the whole Cloudflare API through the cli-tools skill.",
+        level: "required",
+        why: "Cloudflare CLI: share-html uploads, deploys, and the whole Cloudflare API through the cli-tools skill.",
         versionArgs: ["--version"],
         latest: {
           type: "command",
@@ -276,6 +276,48 @@ export const SYSTEM_TOOL_GROUPS = [
         update: {
           commands: ["brew upgrade kdbhalala/avdslim/avdslim"],
           note: "Install with brew tap kdbhalala/avdslim https://github.com/kdbhalala/avdslim.git && brew install kdbhalala/avdslim/avdslim.",
+        },
+      },
+      {
+        name: "memcap",
+        level: "required",
+        why: "Reaps leaked dev servers, orphaned browsers, and idle simulators and emulators every minute; the Mac watcher reviews its log.",
+        versionArgs: ["version"],
+        latest: {
+          type: "homebrew",
+          formula: "alextitov19/memcap/memcap",
+        },
+        update: {
+          commands: ["brew upgrade alextitov19/memcap/memcap"],
+          note: "Install with brew install alextitov19/memcap/memcap. my-setup owns ~/.config/memcap/memcap.conf; do not run memcap init or memcap integrate.",
+        },
+      },
+      {
+        name: "asc",
+        level: "required",
+        why: "App Store Connect API CLI for TestFlight, App Store releases, screenshots, and store status in mobile-app-infra.",
+        versionArgs: ["version"],
+        latest: {
+          type: "homebrew",
+          formula: "asc",
+        },
+        update: {
+          commands: ["brew upgrade asc"],
+          note: "Install with brew install asc. The synced zsh config disables its telemetry and skill update checks.",
+        },
+      },
+      {
+        name: "gpc",
+        level: "required",
+        why: "Google Play Developer API CLI for releases, rollouts, listings, screenshots, and store status in mobile-app-infra.",
+        versionArgs: ["--version"],
+        latest: {
+          type: "homebrew",
+          formula: "yasserstudio/tap/gpc",
+        },
+        update: {
+          commands: ["brew upgrade yasserstudio/tap/gpc"],
+          note: "Install with brew install yasserstudio/tap/gpc.",
         },
       },
       {

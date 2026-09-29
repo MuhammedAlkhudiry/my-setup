@@ -138,20 +138,21 @@ async function assertAccessProtected(): Promise<void> {
 async function uploadFile(prefix: string, file: ArtifactFile): Promise<void> {
   const contentType = Bun.file(file.path).type || "application/octet-stream";
   await execa(
-    "bunx",
+    "cf",
     [
-      "wrangler",
       "r2",
-      "object",
+      "objects",
       "put",
-      `${SHARE_BUCKET}/${prefix}/${file.key}`,
+      `${prefix}/${file.key}`,
+      "--bucket-name",
+      SHARE_BUCKET,
       "--file",
       file.path,
       "--content-type",
       contentType,
-      "--remote",
+      "--quiet",
     ],
-    // A neutral cwd keeps a project's wrangler config from redirecting the upload.
+    // A neutral cwd keeps a project's Cloudflare config from redirecting the upload.
     { cwd: tmpdir() },
   ).catch((error: { stderr?: string; message: string }) => {
     throw new Error(`Upload of ${file.key} failed: ${error.stderr?.trim() || error.message}`);
@@ -159,7 +160,7 @@ async function uploadFile(prefix: string, file: ArtifactFile): Promise<void> {
 }
 
 async function upload(prefix: string, files: ArtifactFile[]): Promise<void> {
-  // The first upload runs alone so parallel wrangler processes never race to refresh its OAuth token.
+  // The first upload runs alone so parallel cf processes never race to refresh its OAuth token.
   const [first, ...rest] = files;
   if (first) await uploadFile(prefix, first);
   const worker = async () => {
