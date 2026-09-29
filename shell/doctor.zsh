@@ -257,6 +257,7 @@ main() {
   check_tool phpstorm optional "Used by the synced zsh config as the editor command."
   check_tool herd optional "Used by Laravel aliases in the synced zsh config."
   check_tool forge optional "Manages Laravel Forge servers and sites through the cli-tools skill."
+  check_tool cf optional "Cloudflare CLI for deploys and the whole Cloudflare API through the cli-tools skill."
   check_tool opencode optional "Used by the ai/opencode launcher and OpenCode workflows."
   check_tool codex optional "Used by Codex workflows and as a configured agent target."
   check_tool claude optional "Used by Claude Code workflows and as a configured agent target."

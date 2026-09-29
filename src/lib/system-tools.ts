@@ -138,6 +138,21 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
+        name: "cf",
+        level: "optional",
+        why: "Cloudflare CLI for deploys and the whole Cloudflare API through the cli-tools skill.",
+        versionArgs: ["--version"],
+        latest: {
+          type: "command",
+          command: "npm",
+          args: ["view", "cf", "version"],
+        },
+        update: {
+          commands: ["npm install -g cf@latest"],
+          note: "Open beta; it still delegates some builds and deploys to a project-local wrangler.",
+        },
+      },
+      {
         name: "opencode",
         level: "optional",
         why: "Used by the ai/opencode launcher and OpenCode workflows.",
