@@ -279,6 +279,20 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
+        name: "memcap",
+        level: "required",
+        why: "Reaps leaked dev servers, orphaned browsers, and idle simulators and emulators every minute; the Mac watcher reviews its log.",
+        versionArgs: ["version"],
+        latest: {
+          type: "homebrew",
+          formula: "alextitov19/memcap/memcap",
+        },
+        update: {
+          commands: ["brew upgrade alextitov19/memcap/memcap"],
+          note: "Install with brew install alextitov19/memcap/memcap. my-setup owns ~/.config/memcap/memcap.conf; do not run memcap init or memcap integrate.",
+        },
+      },
+      {
         name: "fzf",
         level: "optional",
         why: "Used by the zsh fzf plugin and the project picker.",

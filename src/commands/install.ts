@@ -40,6 +40,7 @@ import {
 import { replaceDirectory, ensureParentDir } from "../lib/fs";
 import { claudePoolPaths, installClaudePool, retireLegacyClaudeFiles } from "../lib/claude-pool";
 import { secureManagedCredentials } from "../lib/credentials";
+import { installMacWatcher } from "../lib/mac-watcher";
 import { colors, compactOutput, print, printBox, printSeparator } from "../lib/print";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
 import { discoverLocalSkills, findUnknownSkillReferences } from "../lib/skills";
@@ -900,6 +901,13 @@ export async function install(): Promise<void> {
         }
       })
       .then(() => installClaude()),
+    installMacWatcher({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }).then(({ memcapInstalled }) => {
+      if (memcapInstalled) {
+        print.success("memcap config and Mac watcher installed");
+      } else {
+        print.warning("Mac watcher installed; install memcap with brew install alextitov19/memcap/memcap");
+      }
+    }),
   ]);
 
   if (!compactOutput) {

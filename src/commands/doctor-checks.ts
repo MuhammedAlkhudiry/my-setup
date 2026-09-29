@@ -12,7 +12,9 @@ import { execaSync } from "execa";
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
 import { CLAUDE_POOL } from "../../config/claude-pool";
 import { mergeRtkHooks } from "../../config/rtk";
+import { MAC_WATCHER, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
 import { claudePoolPaths, findLegacyClaudeFiles } from "../lib/claude-pool";
+import { fileAgeSeconds, macWatcherPaths, readAlerts, readState, renderMemcapConfig } from "../lib/mac-watcher";
 import { renderBaseRules } from "./install";
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
@@ -289,6 +291,58 @@ if (
       detail: `${avdHome} points to ${readlinkSync(avdHome)}, which is not mounted; connect the SSD`,
     });
   }
+}
+
+const watcher = macWatcherPaths(HOME);
+const launchd = (label: string) =>
+  execaSync("launchctl", ["print", `gui/${process.getuid?.() ?? 0}/${label}`], { reject: false }).exitCode === 0;
+if (!existsSync(watcher.memcapConfig) || readFileSync(watcher.memcapConfig, "utf8") !== renderMemcapConfig()) {
+  findings.push({
+    level: "required",
+    label: "memcap config",
+    detail: `${watcher.memcapConfig} differs from config/mac-watcher.ts; run mise run install -- --compact`,
+  });
+}
+if (Bun.which("memcap")) {
+  const memcapAge = fileAgeSeconds(watcher.memcapLastPass);
+  if (!launchd(MEMCAP_LAUNCH_AGENT_LABEL)) {
+    findings.push({ level: "required", label: "memcap service", detail: "not loaded; run memcap service install" });
+  } else if (existsSync(watcher.memcapPaused)) {
+    findings.push({ level: "optional", label: "memcap paused", detail: "cleanup is off; resume with memcap on" });
+  } else if (memcapAge !== undefined && memcapAge > 600) {
+    findings.push({
+      level: "required",
+      label: "memcap heartbeat",
+      detail: `last pass ${Math.round(memcapAge / 60)} min ago; check memcap status and ~/.local/state/memcap/actions.log`,
+    });
+  }
+}
+if (!launchd(MAC_WATCHER.label)) {
+  findings.push({
+    level: "required",
+    label: "Mac watcher service",
+    detail: "launch agent is not loaded; run mise run install -- --compact",
+  });
+}
+try {
+  const state = readState(watcher);
+  const lastSuccess = state.lastSuccessAt ? Date.parse(state.lastSuccessAt) : undefined;
+  if (state.lastRunAt && (!lastSuccess || Date.now() - lastSuccess > 26 * 3_600_000)) {
+    findings.push({
+      level: "optional",
+      label: "Mac watcher runs",
+      detail: `no successful run in 26 hours${state.lastError ? ` (last error: ${state.lastError})` : ""}; see ${watcher.log}`,
+    });
+  }
+  for (const alert of readAlerts(watcher).filter((candidate) => candidate.status === "open")) {
+    findings.push({
+      level: "optional",
+      label: `Mac watcher alert ${alert.key}`,
+      detail: `[${alert.severity}] ${alert.title}. Fix: ${alert.fix} Closes after ${MAC_WATCHER.autoResolveAfterClearReviews} clear reviews, or run mise run watcher -- resolve ${alert.key}`,
+    });
+  }
+} catch (error) {
+  findings.push({ level: "optional", label: "Mac watcher state", detail: String(error) });
 }
 
 if (findings.length === 0) {

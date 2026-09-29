@@ -41,3 +41,7 @@ run = "bun run tools:status"
 [tasks."tools:update:plan"]
 description = "Print safe update commands for external CLI tools"
 run = "bun run tools:update:plan"
+
+[tasks.watcher]
+description = "Show the Mac watcher's alerts and memory, run it now, or resolve an alert"
+run = "bun run watcher"
