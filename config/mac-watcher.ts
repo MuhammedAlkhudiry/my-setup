@@ -1,12 +1,14 @@
 /**
  * Mac resource watcher managed by my-setup.
  *
- * memcap does the minute-by-minute cleanup with fixed rules. The watcher is a scheduled review: it collects a snapshot
- * without AI, and only asks Codex to judge it when something looks wrong or alerts are open. Codex never kills
- * processes; it records patterns and alerts that `doctor` shows until they stop recurring.
+ * memcap does the minute-by-minute memory cleanup with fixed rules, and the CPU guard does the same for leftover agent
+ * tooling that burns CPU. The watcher is a scheduled review: it collects a snapshot without AI, and only asks Codex to
+ * judge it when something looks wrong. Codex never kills processes; it records patterns and alerts that `doctor` shows
+ * until they stop recurring.
  */
 export const MAC_WATCHER = {
   label: "com.muhammed.mac-watcher",
+  guardLabel: "com.muhammed.mac-watcher-guard",
   /** Local times the watcher wakes every day; quiet hours keep one overnight run for agents working at night. */
   schedule: [
     { hour: 3, minute: 7 },
@@ -31,6 +33,15 @@ export const MAC_WATCHER = {
     orphanMinAgeMinutes: 60,
     /** Refresh Codex's memory and recheck open alerts at least this often, even on quiet days. */
     maxHoursWithoutReview: 24,
+  },
+  cpu: {
+    /** Leftover agent tooling (parent exited) is stopped after staying at this CPU for this long. Nothing else is. */
+    guard: { intervalSeconds: 60, hotPercent: 80, stopAfterMinutes: 10 },
+    /** Any process averaging this CPU over its life for this long is reported to the watcher, never stopped. */
+    sustainedPercent: 80,
+    sustainedMinMinutes: 30,
+    /** A 15-minute load average above cores times this triggers a review. */
+    maxLoadPerCore: 1,
   },
   /** Consecutive Codex reviews without seeing an alert before it closes on its own. */
   autoResolveAfterClearReviews: 3,

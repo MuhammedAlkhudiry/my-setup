@@ -19,6 +19,10 @@ const quiet: GateInput = {
   swapUsedGib: 1,
   diskFreeGib: 200,
   newOrphanCount: 0,
+  loadAverage15: 6,
+  cores: 14,
+  newSustainedCpuCount: 0,
+  guardStops: 0,
   memcapActionLines: 0,
   memcapHealthy: true,
   hoursSinceReview: 2,
@@ -39,6 +43,9 @@ test("a healthy machine skips the Codex review", () => {
 test("pressure, low disk, new leaks, memcap trouble, and the daily refresh each trigger a review", () => {
   expect(reviewReasons({ ...quiet, pressureLevel: "warning" })).toEqual(["memory pressure warning"]);
   expect(reviewReasons({ ...quiet, diskFreeGib: 12 })).toEqual(["disk free 12 GiB"]);
+  expect(reviewReasons({ ...quiet, loadAverage15: 21 })).toEqual(["load 21.0 on 14 cores"]);
+  expect(reviewReasons({ ...quiet, newSustainedCpuCount: 1 })).toEqual(["1 new sustained CPU users"]);
+  expect(reviewReasons({ ...quiet, guardStops: 2 })).toEqual(["2 CPU guard stops since last run"]);
   expect(reviewReasons({ ...quiet, newOrphanCount: 3 })).toEqual(["3 new orphaned agent processes"]);
   expect(reviewReasons({ ...quiet, memcapHealthy: false })).toEqual(["memcap not healthy"]);
   expect(reviewReasons({ ...quiet, hoursSinceReview: undefined })).toEqual(["daily memory refresh"]);
@@ -99,6 +106,7 @@ test("the memcap config renders every managed key as a parseable shell assignmen
 test("the launch agent runs the watcher on every scheduled time with a usable PATH", () => {
   const home = "/Users/test";
   const plist = renderWatcherLaunchAgent({
+    mode: "run",
     paths: macWatcherPaths(home),
     bun: "/Users/test/.bun/bin/bun",
     script: "/repo/src/commands/mac-watcher.ts",
@@ -121,4 +129,20 @@ test("routine memcap lines do not count as actions", () => {
   expect(isMemcapActionLine("[2026-09-29 23:39:28] tier1 orphan:  1196  12544 bun serve.ts")).toBe(true);
   expect(isMemcapActionLine("[2026-09-28 16:40:00] tier3: xcrun simctl shutdown ABC (iPhone) -- idle")).toBe(true);
   expect(isMemcapActionLine("[2026-09-28 16:40:00] tier3: reclaiming pid 42 -- idle 700s")).toBe(true);
+});
+
+test("the guard launch agent runs every minute and at load", () => {
+  const home = "/Users/test";
+  const plist = renderWatcherLaunchAgent({
+    mode: "guard",
+    paths: macWatcherPaths(home),
+    bun: "/Users/test/.bun/bin/bun",
+    script: "/repo/src/commands/mac-watcher.ts",
+    home,
+  });
+  expect(plist).toContain(`<string>${MAC_WATCHER.guardLabel}</string>`);
+  expect(plist).toContain("<string>guard</string>");
+  expect(plist).toContain("<key>StartInterval</key><integer>60</integer>");
+  expect(plist).not.toContain("StartCalendarInterval");
+  expect(Bun.spawnSync(["plutil", "-lint", "-"], { stdin: Buffer.from(plist) }).exitCode).toBe(0);
 });

@@ -1,19 +1,30 @@
 #!/usr/bin/env bun
 
 /**
- * Scheduled Mac resource review. `run` is started by the watcher LaunchAgent; `status` and `resolve` are for people.
+ * Mac resource watcher. `run` is the scheduled review and `guard` the minute-by-minute CPU guard, each started by its own
+ * LaunchAgent; `status` and `resolve` are for people.
  *
  * Each run collects a snapshot without AI, and asks Codex for a fresh, read-only review only when something looks wrong,
  * alerts are open, or the daily memory refresh is due. Memory between runs lives in the watcher state directory.
  */
 
 import { existsSync, readFileSync, statfsSync } from "node:fs";
-import { open } from "node:fs/promises";
+import { appendFile, open } from "node:fs/promises";
+import { cpus, loadavg } from "node:os";
 import { join } from "node:path";
 
 import { execa } from "execa";
 
 import { MAC_WATCHER, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
+import {
+  type GuardState,
+  guardStateSchema,
+  isOrphanedAgentTooling,
+  lifetimeCpuPercent,
+  listProcesses,
+  stepGuard,
+  sustainedCpuProcesses,
+} from "../lib/cpu-guard";
 import {
   type Alert,
   type GateInput,
@@ -49,22 +60,6 @@ async function run(command: string, args: string[], timeout = 20_000): Promise<s
   return result.exitCode === 0 ? result.stdout : "";
 }
 
-function parseEtime(value: string): number {
-  const [days, rest] = value.includes("-") ? value.split("-") : ["0", value];
-  const parts = rest.split(":").map(Number);
-  while (parts.length < 3) parts.unshift(0);
-  const [hours, minutes, seconds] = parts;
-  return Number(days) * 86400 + hours * 3600 + minutes * 60 + seconds;
-}
-
-interface ProcessRow {
-  pid: number;
-  ppid: number;
-  rssMib: number;
-  ageMinutes: number;
-  command: string;
-}
-
 const FAMILIES: Array<[name: string, pattern: RegExp]> = [
   ["Chrome for Testing / Playwright", /Chrome for Testing|ms-playwright|chrome-headless-shell/],
   ["Google Chrome", /Google Chrome\.app/],
@@ -78,31 +73,13 @@ const FAMILIES: Array<[name: string, pattern: RegExp]> = [
   ["Node / Bun", /(^|\/)(node|bun)( |$)/],
 ];
 
-const ORPHAN_PATTERN =
-  /Chrome for Testing|ms-playwright|chrome-headless-shell|chrome-devtools-mcp|playwright|\bmcp\b|-mcp|vite|next dev|webpack|esbuild|nodemon|\btsx\b|expo start|metro/i;
-
-async function listProcesses(): Promise<ProcessRow[]> {
-  const output = await run("ps", ["-axo", "pid=,ppid=,rss=,etime=,command="]);
-  return output
-    .split("\n")
-    .map((line) => line.trim().match(/^(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/))
-    .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((match) => ({
-      pid: Number(match[1]),
-      ppid: Number(match[2]),
-      rssMib: Math.round(Number(match[3]) / 1024),
-      ageMinutes: Math.round(parseEtime(match[4]) / 60),
-      command: match[5],
-    }));
-}
-
 function shortCommand(command: string): string {
   return command.replace(HOME, "~").slice(0, 160);
 }
 
-async function readNewMemcapLines(offset: number): Promise<{ lines: string[]; offset: number }> {
-  if (!existsSync(paths.memcapActionsLog)) return { lines: [], offset: 0 };
-  const handle = await open(paths.memcapActionsLog, "r");
+async function readNewLines(path: string, offset: number): Promise<{ lines: string[]; offset: number }> {
+  if (!existsSync(path)) return { lines: [], offset: 0 };
+  const handle = await open(path, "r");
   try {
     const { size } = await handle.stat();
     // A rotated or truncated log starts over from the beginning.
@@ -129,7 +106,7 @@ async function largestTempEntries(): Promise<Array<{ path: string; gib: number }
     .map((match) => ({ path: shortCommand(match[2]), gib: Number((Number(match[1]) / 1024 ** 2).toFixed(1)) }));
 }
 
-async function collectSnapshot(memcapLogOffset: number) {
+async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) {
   const [pressureText, pressureLevelText, swapText, processes, simsJson, adbText, memcapStatus] = await Promise.all([
     run("memory_pressure", []),
     run("sysctl", ["-n", "kern.memorystatus_vm_pressure_level"]),
@@ -158,15 +135,39 @@ async function collectSnapshot(memcapLogOffset: number) {
     families.set(family, entry);
   }
 
+  const uid = process.getuid?.() ?? 0;
   const orphans = processes
     .filter(
       (row) =>
-        row.ppid === 1 &&
-        row.ageMinutes >= MAC_WATCHER.gate.orphanMinAgeMinutes &&
-        ORPHAN_PATTERN.test(row.command) &&
-        !/Google Chrome\.app|\.app\/Contents\/MacOS\/[^/]+$/.test(row.command),
+        isOrphanedAgentTooling(row, uid) && row.ageSeconds >= MAC_WATCHER.gate.orphanMinAgeMinutes * 60,
     )
-    .map((row) => ({ ...row, command: shortCommand(row.command) }));
+    .map((row) => ({
+      pid: row.pid,
+      rssMib: row.rssMib,
+      ageMinutes: Math.round(row.ageSeconds / 60),
+      command: shortCommand(row.command),
+    }));
+
+  const [load1, load5, load15] = loadavg();
+  const cpuSummary = (row: (typeof processes)[number]) => ({
+    pid: row.pid,
+    cpuNow: row.cpuPercent,
+    cpuLifetime: Math.round(lifetimeCpuPercent(row)),
+    ageMinutes: Math.round(row.ageSeconds / 60),
+    rssMib: row.rssMib,
+    command: shortCommand(row.command),
+  });
+  const guardLog = await readNewLines(paths.guardLog, guardLogOffset);
+  const cpu = {
+    cores: cpus().length,
+    loadAverage: [load1, load5, load15].map((value) => Number(value.toFixed(2))),
+    topNow: [...processes]
+      .sort((a, b) => b.cpuPercent - a.cpuPercent)
+      .slice(0, 10)
+      .map(cpuSummary),
+    sustained: sustainedCpuProcesses(processes).slice(0, 15).map(cpuSummary),
+    guardStops: guardLog.lines.slice(-MAX_LOG_LINES),
+  };
 
   let bootedSimulators: string[] = [];
   try {
@@ -180,7 +181,7 @@ async function collectSnapshot(memcapLogOffset: number) {
   const emulators = adbText.split("\n").filter((line) => line.startsWith("emulator-"));
 
   const memcapAge = fileAgeSeconds(paths.memcapLastPass);
-  const memcapLog = await readNewMemcapLines(memcapLogOffset);
+  const memcapLog = await readNewLines(paths.memcapActionsLog, memcapLogOffset);
   const memcap = {
     installed: Boolean(Bun.which("memcap")),
     serviceLoaded: await isLaunchAgentLoaded(MEMCAP_LAUNCH_AGENT_LABEL),
@@ -200,6 +201,7 @@ async function collectSnapshot(memcapLogOffset: number) {
         pressureLevel,
         swapUsedGib: Number(swapUsedGib.toFixed(2)),
       },
+      cpu,
       diskFreeGib: Number(diskFreeGib.toFixed(1)),
       largestTemp,
       families: [...families.entries()]
@@ -208,7 +210,12 @@ async function collectSnapshot(memcapLogOffset: number) {
       topProcesses: [...processes]
         .sort((a, b) => b.rssMib - a.rssMib)
         .slice(0, 15)
-        .map((row) => ({ ...row, command: shortCommand(row.command) })),
+        .map((row) => ({
+          pid: row.pid,
+          rssMib: row.rssMib,
+          ageMinutes: Math.round(row.ageSeconds / 60),
+          command: shortCommand(row.command),
+        })),
       orphans: orphans.slice(0, 30),
       orphanCount: orphans.length,
       bootedSimulators,
@@ -216,6 +223,7 @@ async function collectSnapshot(memcapLogOffset: number) {
       memcap,
     },
     memcapLogOffset: memcapLog.offset,
+    guardLogOffset: guardLog.offset,
   };
 }
 
@@ -311,7 +319,10 @@ async function runOnce(force: boolean): Promise<void> {
   try {
     const alerts = readAlerts(paths);
     const openAlerts = alerts.filter((alert) => alert.status === "open");
-    const { snapshot, memcapLogOffset } = await collectSnapshot(state.memcapLogOffset);
+    const { snapshot, memcapLogOffset, guardLogOffset } = await collectSnapshot(
+      state.memcapLogOffset,
+      state.guardLogOffset,
+    );
     await writeJson(paths.lastSnapshot, snapshot);
 
     const gate: GateInput = {
@@ -319,6 +330,10 @@ async function runOnce(force: boolean): Promise<void> {
       pressureLevel: snapshot.memory.pressureLevel,
       swapUsedGib: snapshot.memory.swapUsedGib,
       diskFreeGib: snapshot.diskFreeGib,
+      loadAverage15: snapshot.cpu.loadAverage[2],
+      cores: snapshot.cpu.cores,
+      newSustainedCpuCount: snapshot.cpu.sustained.filter((row) => !state.seenCpuPids.includes(row.pid)).length,
+      guardStops: snapshot.cpu.guardStops.length,
       newOrphanCount: snapshot.orphans.filter((orphan) => !state.seenOrphanPids.includes(orphan.pid)).length,
       memcapActionLines: snapshot.memcap.actionLineCount,
       memcapHealthy: memcapHealthy(snapshot),
@@ -348,6 +363,8 @@ async function runOnce(force: boolean): Promise<void> {
 
     state.memcapLogOffset = memcapLogOffset;
     state.seenOrphanPids = snapshot.orphans.map((orphan) => orphan.pid);
+    state.guardLogOffset = guardLogOffset;
+    state.seenCpuPids = snapshot.cpu.sustained.map((row) => row.pid);
     state.runs = [...state.runs, { at, reviewed: reasons.length > 0, reasons, note }].slice(
       -MAC_WATCHER.historyLimit,
     );
@@ -360,6 +377,40 @@ async function runOnce(force: boolean): Promise<void> {
   } finally {
     await writeJson(paths.state, state);
   }
+}
+
+function readGuardState(): GuardState {
+  try {
+    return guardStateSchema.parse(JSON.parse(readFileSync(paths.guardState, "utf8")));
+  } catch {
+    return guardStateSchema.parse({});
+  }
+}
+
+async function startedAt(pid: number): Promise<string | undefined> {
+  const result = await execa("ps", ["-o", "lstart=", "-p", String(pid)], { reject: false });
+  return result.exitCode === 0 ? result.stdout.trim().replace(/\s+/g, " ") : undefined;
+}
+
+/** Stops leftover agent tooling that stayed hot; rechecks identity before each signal so a reused pid is never hit. */
+async function guardOnce(): Promise<void> {
+  const uid = process.getuid?.() ?? 0;
+  const now = Date.now();
+  const { next, stop } = stepGuard(readGuardState(), await listProcesses(), uid, now);
+
+  for (const { row, percent, hotMinutes } of stop) {
+    if ((await startedAt(row.pid)) !== row.started) continue;
+    process.kill(row.pid, "SIGTERM");
+    await Bun.sleep(5_000);
+    if ((await startedAt(row.pid)) === row.started) process.kill(row.pid, "SIGKILL");
+    delete next.tracked[String(row.pid)];
+    await appendFile(
+      paths.guardLog,
+      `[${new Date(now).toISOString()}] stopped pid ${row.pid} -- leftover at ${percent}% CPU for ${hotMinutes} min, ${row.rssMib} MiB: ${shortCommand(row.command)}\n`,
+    );
+  }
+
+  await writeJson(paths.guardState, next);
 }
 
 function printStatus(): void {
@@ -399,6 +450,9 @@ switch (command) {
   case "run":
     await runOnce(args.includes("--force"));
     break;
+  case "guard":
+    await guardOnce();
+    break;
   case "status":
     printStatus();
     break;
@@ -406,6 +460,6 @@ switch (command) {
     await resolveAlert(args[0]);
     break;
   default:
-    console.error("usage: mac-watcher run [--force] | status | resolve <alert-key>");
+    console.error("usage: mac-watcher run [--force] | guard | status | resolve <alert-key>");
     process.exitCode = 2;
 }

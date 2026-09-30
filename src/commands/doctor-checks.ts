@@ -317,6 +317,20 @@ if (Bun.which("memcap")) {
     });
   }
 }
+const guardAge = fileAgeSeconds(watcher.guardState);
+if (!launchd(MAC_WATCHER.guardLabel)) {
+  findings.push({
+    level: "required",
+    label: "CPU guard service",
+    detail: "launch agent is not loaded; run mise run install -- --compact",
+  });
+} else if (guardAge === undefined || guardAge > 600) {
+  findings.push({
+    level: "required",
+    label: "CPU guard heartbeat",
+    detail: `no guard pass in 10 min; see ${watcher.log}`,
+  });
+}
 if (!launchd(MAC_WATCHER.label)) {
   findings.push({
     level: "required",

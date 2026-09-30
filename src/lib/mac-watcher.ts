@@ -17,7 +17,10 @@ export function macWatcherPaths(home: string) {
     lastSnapshot: join(stateDir, "last-snapshot.json"),
     outputSchema: join(stateDir, "codex-output-schema.json"),
     codexOutput: join(stateDir, "codex-last-output.json"),
+    guardState: join(stateDir, "guard.json"),
+    guardLog: join(stateDir, "guard.log"),
     launchAgent: join(home, "Library/LaunchAgents", `${MAC_WATCHER.label}.plist`),
+    guardLaunchAgent: join(home, "Library/LaunchAgents", `${MAC_WATCHER.guardLabel}.plist`),
     log: join(home, "Library/Logs/mac-watcher.log"),
     memcapConfig: join(home, ".config/memcap/memcap.conf"),
     memcapStateDir,
@@ -103,6 +106,8 @@ const stateSchema = z.object({
   lastError: z.string().optional(),
   memcapLogOffset: z.number().default(0),
   seenOrphanPids: z.array(z.number()).default([]),
+  guardLogOffset: z.number().default(0),
+  seenCpuPids: z.array(z.number()).default([]),
   patterns: z.array(z.string()).default([]),
   runs: z.array(runSchema).default([]),
 });
@@ -141,6 +146,10 @@ export interface GateInput {
   swapUsedGib: number;
   diskFreeGib: number;
   newOrphanCount: number;
+  loadAverage15: number;
+  cores: number;
+  newSustainedCpuCount: number;
+  guardStops: number;
   memcapActionLines: number;
   memcapHealthy: boolean;
   hoursSinceReview: number | undefined;
@@ -151,7 +160,7 @@ export interface GateInput {
  * open alerts wait for the daily refresh so the same issue does not buy a review on every run.
  */
 export function reviewReasons(input: GateInput): string[] {
-  const { gate } = MAC_WATCHER;
+  const gate = { ...MAC_WATCHER.gate, maxLoadPerCore: MAC_WATCHER.cpu.maxLoadPerCore };
   const reasons: string[] = [];
   if (input.pressureLevel === "warning" || input.pressureLevel === "critical") {
     reasons.push(`memory pressure ${input.pressureLevel}`);
@@ -161,6 +170,11 @@ export function reviewReasons(input: GateInput): string[] {
   }
   if (input.swapUsedGib > gate.maxSwapUsedGib) reasons.push(`swap ${input.swapUsedGib.toFixed(1)} GiB`);
   if (input.diskFreeGib < gate.minDiskFreeGib) reasons.push(`disk free ${input.diskFreeGib.toFixed(0)} GiB`);
+  if (input.loadAverage15 > input.cores * gate.maxLoadPerCore) {
+    reasons.push(`load ${input.loadAverage15.toFixed(1)} on ${input.cores} cores`);
+  }
+  if (input.newSustainedCpuCount > 0) reasons.push(`${input.newSustainedCpuCount} new sustained CPU users`);
+  if (input.guardStops > 0) reasons.push(`${input.guardStops} CPU guard stops since last run`);
   if (input.newOrphanCount > 0) reasons.push(`${input.newOrphanCount} new orphaned agent processes`);
   if (input.memcapActionLines > 0) reasons.push(`${input.memcapActionLines} memcap actions since last run`);
   if (!input.memcapHealthy) reasons.push("memcap not healthy");
@@ -246,13 +260,15 @@ function xmlEscape(value: string): string {
   return value.replace(/[&<>"']/g, (character) => `&#${character.charCodeAt(0)};`);
 }
 
+/** `run` is the scheduled review; `guard` is the minute-by-minute CPU guard. */
 export function renderWatcherLaunchAgent(options: {
+  mode: "run" | "guard";
   paths: MacWatcherPaths;
   bun: string;
   script: string;
   home: string;
 }): string {
-  const { paths, bun, script, home } = options;
+  const { mode, paths, bun, script, home } = options;
   const path = [
     join(home, ".local/bin"),
     join(home, ".bun/bin"),
@@ -263,27 +279,35 @@ export function renderWatcherLaunchAgent(options: {
     "/usr/sbin",
     "/sbin",
   ].join(":");
-  const schedule = MAC_WATCHER.schedule.map(
-    ({ hour, minute }) =>
-      `    <dict><key>Hour</key><integer>${hour}</integer><key>Minute</key><integer>${minute}</integer></dict>`,
-  );
+  const timing =
+    mode === "run"
+      ? [
+          "  <key>StartCalendarInterval</key><array>",
+          ...MAC_WATCHER.schedule.map(
+            ({ hour, minute }) =>
+              `    <dict><key>Hour</key><integer>${hour}</integer><key>Minute</key><integer>${minute}</integer></dict>`,
+          ),
+          "  </array>",
+        ]
+      : [
+          `  <key>StartInterval</key><integer>${MAC_WATCHER.cpu.guard.intervalSeconds}</integer>`,
+          "  <key>RunAtLoad</key><true/>",
+        ];
   return [
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
     '<plist version="1.0"><dict>',
-    `  <key>Label</key><string>${MAC_WATCHER.label}</string>`,
+    `  <key>Label</key><string>${mode === "run" ? MAC_WATCHER.label : MAC_WATCHER.guardLabel}</string>`,
     "  <key>ProgramArguments</key><array>",
     `    <string>${xmlEscape(bun)}</string>`,
     `    <string>${xmlEscape(script)}</string>`,
-    "    <string>run</string>",
+    `    <string>${mode}</string>`,
     "  </array>",
     "  <key>EnvironmentVariables</key><dict>",
     `    <key>HOME</key><string>${xmlEscape(home)}</string>`,
     `    <key>PATH</key><string>${xmlEscape(path)}</string>`,
     "  </dict>",
-    "  <key>StartCalendarInterval</key><array>",
-    ...schedule,
-    "  </array>",
+    ...timing,
     "  <key>ProcessType</key><string>Background</string>",
     "  <key>LowPriorityIO</key><true/>",
     `  <key>StandardOutPath</key><string>${xmlEscape(paths.log)}</string>`,
@@ -324,7 +348,18 @@ export function isMemcapActionLine(line: string): boolean {
 
 export type MacWatcherInstallResult = { memcapInstalled: boolean };
 
-/** Installs memcap's managed config and background job, plus the watcher's LaunchAgent. */
+async function installLaunchAgent(label: string, path: string, plist: string): Promise<void> {
+  const plistChanged = await writeIfChanged(path, plist);
+  const loaded = await isLaunchAgentLoaded(label);
+  if (loaded && plistChanged) {
+    await execa("launchctl", ["bootout", `${launchdDomain()}/${label}`], { reject: false });
+  }
+  if (!loaded || plistChanged) {
+    await execa("launchctl", ["bootstrap", launchdDomain(), path]);
+  }
+}
+
+/** Installs memcap's managed config and background job, plus the watcher and CPU guard LaunchAgents. */
 export async function installMacWatcher(options: {
   home: string;
   rootDir: string;
@@ -341,20 +376,17 @@ export async function installMacWatcher(options: {
     await execa("memcap", ["service", "install"]);
   }
 
-  const plist = renderWatcherLaunchAgent({
-    paths,
-    bun,
-    script: join(rootDir, "src/commands/mac-watcher.ts"),
-    home,
-  });
-  const plistChanged = await writeIfChanged(paths.launchAgent, plist);
-  const loaded = await isLaunchAgentLoaded(MAC_WATCHER.label);
-  if (loaded && plistChanged) {
-    await execa("launchctl", ["bootout", `${launchdDomain()}/${MAC_WATCHER.label}`], { reject: false });
-  }
-  if (!loaded || plistChanged) {
-    await execa("launchctl", ["bootstrap", launchdDomain(), paths.launchAgent]);
-  }
+  const script = join(rootDir, "src/commands/mac-watcher.ts");
+  await installLaunchAgent(
+    MAC_WATCHER.label,
+    paths.launchAgent,
+    renderWatcherLaunchAgent({ mode: "run", paths, bun, script, home }),
+  );
+  await installLaunchAgent(
+    MAC_WATCHER.guardLabel,
+    paths.guardLaunchAgent,
+    renderWatcherLaunchAgent({ mode: "guard", paths, bun, script, home }),
+  );
   return { memcapInstalled };
 }
 
