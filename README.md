@@ -35,8 +35,15 @@ is missing, so a new machine never installs the wrong profile by default.
 ```
 
 - `personal` — this Mac: Claude Code through the Claude Pool, Codex, OpenCode, every skill, the zsh layer, and the Mac watcher.
-- `work` — the Windows work laptop: Claude Code with direct sign-in and Codex, only rules and skills that fit work, and no zsh layer, Pool, Mac
-  watcher, MCP servers, or personal secrets.
+- `work` — the Windows work laptop: Claude Code with direct sign-in and Codex, only rules and skills that fit work, PhpStorm shortcuts in VS Code,
+  and no zsh layer, Pool, Mac watcher, MCP servers, or personal secrets.
+
+## PhpStorm Shortcuts in VS Code
+
+Profiles with `vscodeKeymap` install the IntelliJ IDEA Keybindings extension for PhpStorm's default Windows keymap, then replace VS Code's user
+`keybindings.json` with my PhpStorm customizations from `config/vscode.ts`. Change shortcuts there, not in VS Code; the installer saves a replaced file
+that differs as `keybindings.json.bak`. If VS Code Settings Sync is on, turn off its keybindings sync so it does not fight the installer. The
+extension is skipped with a warning when the `code` CLI is not on PATH.
 
 ## Work Laptop on Windows
 
