@@ -170,33 +170,36 @@ describe("personal knowledge commands", () => {
     });
   });
 
-  test("runs qmd with its installation runtime first in PATH", async () => {
-    await withRepository(async (root) => {
-      const commandRoot = await mkdtemp(join(tmpdir(), "my-setup-qmd-runtime-"));
-      const conflictingBin = join(commandRoot, "conflicting-bin");
-      const qmdBin = join(commandRoot, "qmd-bin");
-      mkdirSync(conflictingBin);
-      mkdirSync(qmdBin);
-      writeFileSync(join(conflictingBin, "node"), "#!/bin/sh\nexit 1\n");
-      writeFileSync(join(qmdBin, "node"), "#!/bin/sh\nexit 0\n");
-      writeFileSync(
-        join(qmdBin, "qmd"),
-        `#!/bin/sh\n[ "$(command -v node)" = "${join(qmdBin, "node")}" ]\n`,
-      );
-      chmodSync(join(conflictingBin, "node"), 0o755);
-      chmodSync(join(qmdBin, "node"), 0o755);
-      chmodSync(join(qmdBin, "qmd"), 0o755);
+  test.skipIf(process.platform === "win32")(
+    "runs qmd with its installation runtime first in PATH (POSIX shell fixture)",
+    async () => {
+      await withRepository(async (root) => {
+        const commandRoot = await mkdtemp(join(tmpdir(), "my-setup-qmd-runtime-"));
+        const conflictingBin = join(commandRoot, "conflicting-bin");
+        const qmdBin = join(commandRoot, "qmd-bin");
+        mkdirSync(conflictingBin);
+        mkdirSync(qmdBin);
+        writeFileSync(join(conflictingBin, "node"), "#!/bin/sh\nexit 1\n");
+        writeFileSync(join(qmdBin, "node"), "#!/bin/sh\nexit 0\n");
+        writeFileSync(
+          join(qmdBin, "qmd"),
+          `#!/bin/sh\n[ "$(command -v node)" = "${join(qmdBin, "node")}" ]\n`,
+        );
+        chmodSync(join(conflictingBin, "node"), 0o755);
+        chmodSync(join(qmdBin, "node"), 0o755);
+        chmodSync(join(qmdBin, "qmd"), 0o755);
 
-      const originalPath = process.env.PATH;
-      process.env.PATH = [conflictingBin, qmdBin, originalPath].filter(Boolean).join(":");
-      try {
-        await personalKnowledgeFind("runtime consistency", { root, keyword: true });
-      } finally {
-        process.env.PATH = originalPath;
-        rmSync(commandRoot, { recursive: true, force: true });
-      }
-    });
-  });
+        const originalPath = process.env.PATH;
+        process.env.PATH = [conflictingBin, qmdBin, originalPath].filter(Boolean).join(":");
+        try {
+          await personalKnowledgeFind("runtime consistency", { root, keyword: true });
+        } finally {
+          process.env.PATH = originalPath;
+          rmSync(commandRoot, { recursive: true, force: true });
+        }
+      });
+    },
+  );
 
   test("sets up only the maintained wiki collection", async () => {
     await withRepository(async (root) => {

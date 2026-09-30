@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { chmod, mkdir } from "node:fs/promises";
-import { dirname, join, relative } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 
 import { CREDENTIAL_FILES, CREDENTIALS_ROOT } from "../../config/credentials";
 
@@ -14,7 +14,7 @@ export async function secureManagedCredentials(home: string): Promise<void> {
     if (!existsSync(path)) continue;
 
     let directory = root;
-    for (const segment of relative(root, dirname(path)).split("/").filter(Boolean)) {
+    for (const segment of relative(root, dirname(path)).split(sep).filter(Boolean)) {
       directory = join(directory, segment);
       await chmod(directory, 0o700);
     }

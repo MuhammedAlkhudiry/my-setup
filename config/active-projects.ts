@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { posix } from "node:path";
 
 const projectsRoot = "/Users/muhammed/PhpstormProjects";
 
@@ -16,13 +16,13 @@ export const ACTIVE_PROJECTS: ActiveProject[] = [
     name: "Awraq",
     remoteUrl: "https://github.com/MuhammedAlkhudiry/awraq-project.git",
     baseBranch: "main",
-    canonicalRoot: join(projectsRoot, "awraq-project"),
+    canonicalRoot: posix.join(projectsRoot, "awraq-project"),
   },
   {
     id: "harium",
     name: "Harium",
     remoteUrl: "https://github.com/MuhammedAlkhudiry/harium-project.git",
     baseBranch: "main",
-    canonicalRoot: join(projectsRoot, "harium-project"),
+    canonicalRoot: posix.join(projectsRoot, "harium-project"),
   },
 ];
