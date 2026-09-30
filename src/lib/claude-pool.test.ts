@@ -32,17 +32,19 @@ test("Claude Pool installation preserves local keys and OAuth files on repeat ru
     expect(original.config).toContain("disable-control-panel: false");
     expect(original.config).toContain("session-affinity-subagents: false");
 
-    for (const file of [
-      paths.config,
-      paths.clientKey,
-      paths.managementKey,
-      paths.claudeSettings,
-      paths.launchAgent,
-    ]) {
-      expect(statSync(file).mode & 0o777).toBe(0o600);
-    }
-    for (const dir of [join(home, ".cli-proxy-api"), paths.authDir, paths.claudeDir]) {
-      expect(statSync(dir).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") {
+      for (const file of [
+        paths.config,
+        paths.clientKey,
+        paths.managementKey,
+        paths.claudeSettings,
+        paths.launchAgent,
+      ]) {
+        expect(statSync(file).mode & 0o777).toBe(0o600);
+      }
+      for (const dir of [join(home, ".cli-proxy-api"), paths.authDir, paths.claudeDir]) {
+        expect(statSync(dir).mode & 0o777).toBe(0o700);
+      }
     }
   } finally {
     await rm(home, { recursive: true, force: true });
@@ -56,7 +58,11 @@ test("Claude Pool settings keep user keys and refresh the proxy credentials", as
     await mkdir(paths.claudeDir, { recursive: true });
     await writeFile(
       paths.claudeSettings,
-      JSON.stringify({ autoMemoryEnabled: false, hooks: { Stop: [] }, env: { POOL_ONLY: "1", ANTHROPIC_API_KEY: "stale" } }),
+      JSON.stringify({
+        autoMemoryEnabled: false,
+        hooks: { Stop: [] },
+        env: { POOL_ONLY: "1", ANTHROPIC_API_KEY: "stale" },
+      }),
     );
 
     await prepareClaudePoolFiles(home);
@@ -82,9 +88,17 @@ test("Retiring the old Claude config removes only the files my-setup managed the
     await writeFile(paths.legacyClaudeRules, "old rules\n");
     await writeFile(history, "history\n");
     await writeFile(join(home, ".claude/settings.json"), "{}\n");
-    await symlink(join(home, ".agents/skills"), paths.legacyClaudeSkills);
+    await mkdir(join(home, ".agents/skills"), { recursive: true });
+    await symlink(
+      join(home, ".agents/skills"),
+      paths.legacyClaudeSkills,
+      process.platform === "win32" ? "junction" : undefined,
+    );
 
-    expect(await retireLegacyClaudeFiles(home)).toEqual([paths.legacyClaudeRules, paths.legacyClaudeSkills]);
+    expect(await retireLegacyClaudeFiles(home)).toEqual([
+      paths.legacyClaudeRules,
+      paths.legacyClaudeSkills,
+    ]);
     expect(lstatSync(paths.legacyClaudeRules, { throwIfNoEntry: false })).toBeUndefined();
     expect(lstatSync(paths.legacyClaudeSkills, { throwIfNoEntry: false })).toBeUndefined();
     expect(readFileSync(history, "utf8")).toBe("history\n");

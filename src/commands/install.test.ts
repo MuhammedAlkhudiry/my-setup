@@ -120,7 +120,12 @@ test("skill sync skips skills the profile excludes and renders its profile block
       "---\nname: shared\ndescription: Shared.\n---\n\n<!-- profile:personal -->\nPublish.\n<!-- /profile -->\n<!-- profile:work -->\nKeep local.\n<!-- /profile -->\n",
     );
 
-    await syncManagedSkillsAsync({ src, dest, label: "test skills", profile: DEVICE_PROFILES.work });
+    await syncManagedSkillsAsync({
+      src,
+      dest,
+      label: "test skills",
+      profile: DEVICE_PROFILES.work,
+    });
 
     expect(existsSync(join(dest, "laravel"))).toBe(false);
     expect(readFileSync(join(dest, "shared/SKILL.md"), "utf8")).toBe(
@@ -135,7 +140,11 @@ test("skill reinstall replaces stale files, preserves custom skills, and omits s
     const source = join(src, "tools/example");
     mkdirSync(join(source, "references"));
     writeFileSync(join(source, "references/current.md"), "current contents\n");
-    symlinkSync("references/current.md", join(source, "linked.md"));
+    symlinkSync(
+      join(source, "references"),
+      join(source, "linked.md"),
+      process.platform === "win32" ? "junction" : "dir",
+    );
 
     const installed = join(dest, "example");
     mkdirSync(join(installed, "references"), { recursive: true });

@@ -160,7 +160,7 @@ function validateSkillLocalReferences(
 
   if (missingTargets.size > 0) {
     options.reportWarning?.(
-      `Skill references missing local files: ${relative(skillsRoot, skillPath)} ${formatList(
+      `Skill references missing local files: ${relative(skillsRoot, skillPath).split(sep).join("/")} ${formatList(
         Array.from(missingTargets).sort(),
       )}`,
     );
@@ -217,7 +217,9 @@ function validateCrossSkillReferences(
     for (const markdownPath of findMarkdownPaths(skill.dir)) {
       const content = readFileSync(markdownPath, "utf-8");
       for (const { line, name } of findUnknownSkillReferences(content, knownSkillNames)) {
-        unknownReferences.push(`${relative(skillsRoot, markdownPath)}:${line} references $${name}`);
+        unknownReferences.push(
+          `${relative(skillsRoot, markdownPath).split(sep).join("/")}:${line} references $${name}`,
+        );
       }
     }
   }
@@ -235,7 +237,7 @@ function validateSkillSize(
   content: string,
   options: SkillDiscoveryOptions,
 ): void {
-  const relativePath = relative(skillsRoot, skillPath);
+  const relativePath = relative(skillsRoot, skillPath).split(sep).join("/");
   const characterCount = content.length;
 
   if (characterCount > SKILL_CHARACTER_WARNING_LIMIT) {
@@ -292,9 +294,9 @@ function validateSkillSize(
 
 // Agents load one profile's rendering, so size a skill by its largest rendered variant.
 function largestProfileRendering(content: string, source: string): string {
-  return DEVICE_PROFILE_NAMES.map((profile) => renderProfileBlocks(content, profile, source)).reduce(
-    (largest, rendered) => (rendered.length > largest.length ? rendered : largest),
-  );
+  return DEVICE_PROFILE_NAMES.map((profile) =>
+    renderProfileBlocks(content, profile, source),
+  ).reduce((largest, rendered) => (rendered.length > largest.length ? rendered : largest));
 }
 
 export function discoverLocalSkills(
@@ -326,8 +328,13 @@ export function discoverLocalSkills(
   });
 
   for (const skill of skills) {
-    const source = relative(skillsRoot, skill.skillPath);
-    validateSkillSize(skillsRoot, skill.skillPath, largestProfileRendering(skill.content, source), options);
+    const source = relative(skillsRoot, skill.skillPath).split(sep).join("/");
+    validateSkillSize(
+      skillsRoot,
+      skill.skillPath,
+      largestProfileRendering(skill.content, source),
+      options,
+    );
     validateSkillLocalReferences(skillsRoot, skill.dir, skill.skillPath, skill.content, options);
   }
 
