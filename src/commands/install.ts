@@ -114,14 +114,7 @@ const USER_ZSHRC_IMPORT =
 const ACTIVE_PROJECTS_PLACEHOLDER = "{{ACTIVE_PROJECTS}}";
 const SETUP_ROOT_PLACEHOLDER = "{{SETUP_ROOT}}";
 
-const SHARED_BIN_COMMANDS = [
-  "my-setup",
-  "system-tools",
-  "hugeicons",
-  "doctor",
-  "pk",
-  "share-html",
-];
+const SHARED_BIN_COMMANDS = ["my-setup", "system-tools", "hugeicons", "doctor", "pk", "share-html"];
 
 // =============================================================================
 // Individual Operations
@@ -144,7 +137,7 @@ export function renderBaseRules(
   }
 
   const rules = renderProfileBlocks(template, profile.name, "content/base-rules.md");
-  const activeProjects = projects
+  const activeProjects = (profile.activeProjects ? projects : [])
     .map(
       ({ name, remoteUrl, baseBranch, canonicalRoot }) =>
         `- **ACTIVE-PROJECT** — **${name}**: repository [${remoteUrl}](${remoteUrl}), base branch \`${baseBranch}\`, canonical clone at \`${canonicalRoot}\`; task worktrees are harness-managed.`,
@@ -397,7 +390,11 @@ async function installClaudeMcpServers(configDir: string): Promise<void> {
   for (const [name, server] of Object.entries(MCP_SERVERS)) {
     const [command, ...args] = server.command;
     const env = { CLAUDE_CONFIG_DIR: configDir };
-    await execa("claude", ["mcp", "remove", "-s", "user", name], { env, reject: false, stdio: "pipe" });
+    await execa("claude", ["mcp", "remove", "-s", "user", name], {
+      env,
+      reject: false,
+      stdio: "pipe",
+    });
     await execa(
       "claude",
       ["mcp", "add-json", "-s", "user", name, JSON.stringify({ type: "stdio", command, args })],
@@ -927,7 +924,11 @@ export async function install(): Promise<DeviceProfile> {
     console.log(`    Rules:    ${CODEX_PATHS.rules}`);
     console.log(`    Config:   ${CODEX_PATHS.config} (managed merge)`);
     console.log();
-    console.log(colors.blue(`  Claude Code (${profile.claude === "pool" ? "Claude Pool" : "direct sign-in"}):`));
+    console.log(
+      colors.blue(
+        `  Claude Code (${profile.claude === "pool" ? "Claude Pool" : "direct sign-in"}):`,
+      ),
+    );
     console.log(`    Rules:    ${claude.rules}`);
     console.log(`    Settings: ${claude.settings} (merge)`);
     console.log(`    Skills:   ${claude.skills} -> ${SHARED_PATHS.skills}`);
@@ -963,7 +964,9 @@ export async function install(): Promise<DeviceProfile> {
         installClaudePool(HOME)
           .then(({ restartDeferred }) => {
             if (restartDeferred) {
-              print.warning("CLIProxyAPI update needs a restart after active Claude Pool agents finish");
+              print.warning(
+                "CLIProxyAPI update needs a restart after active Claude Pool agents finish",
+              );
             } else {
               print.success("Local Claude Pool proxy installed");
             }
@@ -971,13 +974,17 @@ export async function install(): Promise<DeviceProfile> {
           .then(() => installClaude(profile, rtk))
       : installClaude(profile, rtk),
     profile.macWatcher &&
-      installMacWatcher({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }).then(({ memcapInstalled }) => {
-        if (memcapInstalled) {
-          print.success("memcap config and Mac watcher installed");
-        } else {
-          print.warning("Mac watcher installed; install memcap with brew install alextitov19/memcap/memcap");
-        }
-      }),
+      installMacWatcher({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }).then(
+        ({ memcapInstalled }) => {
+          if (memcapInstalled) {
+            print.success("memcap config and Mac watcher installed");
+          } else {
+            print.warning(
+              "Mac watcher installed; install memcap with brew install alextitov19/memcap/memcap",
+            );
+          }
+        },
+      ),
   ]);
 
   if (!compactOutput) {
@@ -1000,10 +1007,15 @@ async function detectRtk(profile: DeviceProfile): Promise<boolean> {
   }
 
   // Native Codex hooks require RTK 0.50.0 or newer.
-  const hookSupport = await execa("rtk", ["hook", "codex", "--help"], { stdio: "pipe", reject: false });
+  const hookSupport = await execa("rtk", ["hook", "codex", "--help"], {
+    stdio: "pipe",
+    reject: false,
+  });
   if (hookSupport.exitCode === 0) return true;
   if (profile.rtk === "required") {
-    throw new Error("RTK needs native Codex hook support. Run brew upgrade rtk, then rerun mise run install.");
+    throw new Error(
+      "RTK needs native Codex hook support. Run brew upgrade rtk, then rerun mise run install.",
+    );
   }
   print.warning("RTK lacks native Codex hook support; skipped RTK hooks");
   return false;

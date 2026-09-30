@@ -4,7 +4,14 @@
  * Local hygiene checks used by `doctor`. Prints one `<level>\t<label>: <detail>` line per finding.
  */
 
-import { existsSync, lstatSync, readFileSync, readlinkSync, readdirSync, statfsSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  readFileSync,
+  readlinkSync,
+  readdirSync,
+  statfsSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
@@ -15,7 +22,13 @@ import { CLAUDE_POOL } from "../../config/claude-pool";
 import { mergeRtkHooks } from "../../config/rtk";
 import { MAC_WATCHER, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
 import { claudePoolPaths, findLegacyClaudeFiles } from "../lib/claude-pool";
-import { fileAgeSeconds, macWatcherPaths, readAlerts, readState, renderMemcapConfig } from "../lib/mac-watcher";
+import {
+  fileAgeSeconds,
+  macWatcherPaths,
+  readAlerts,
+  readState,
+  renderMemcapConfig,
+} from "../lib/mac-watcher";
 import { readDeviceProfile } from "../lib/device";
 import { claudePaths, renderBaseRules } from "./install";
 
@@ -28,7 +41,9 @@ const PROFILE = readDeviceProfile(HOME);
 const INSTALLED_RULES_FILES = [
   { label: "Claude Code", path: claudePaths(PROFILE).rules },
   { label: "Codex", path: join(HOME, ".codex/AGENTS.md") },
-  ...(PROFILE.opencode ? [{ label: "OpenCode", path: join(HOME, ".config/opencode/AGENTS.md") }] : []),
+  ...(PROFILE.opencode
+    ? [{ label: "OpenCode", path: join(HOME, ".config/opencode/AGENTS.md") }]
+    : []),
 ];
 
 interface Finding {
@@ -48,7 +63,10 @@ if (/^\s*(alias\s+zsh=|zsh\s*\(\)|function\s+zsh\b)/m.test(zshCustom)) {
   });
 }
 
-for (const root of [ROOT_DIR, ...ACTIVE_PROJECTS.map((project) => project.canonicalRoot)]) {
+for (const root of [
+  ROOT_DIR,
+  ...(PROFILE.activeProjects ? ACTIVE_PROJECTS.map((project) => project.canonicalRoot) : []),
+]) {
   if (!existsSync(join(root, ".git"))) continue;
   const result = execaSync("git", ["worktree", "list", "--porcelain"], {
     cwd: root,
@@ -145,13 +163,21 @@ for (const path of poolFiles) {
   if (!file) {
     findings.push({ level: "optional", label: "Claude pool file", detail: `${path} is missing` });
   } else if (!file.isFile() || (file.mode & 0o777) !== 0o600) {
-    findings.push({ level: "required", label: "Claude pool permissions", detail: `${path} must be a private mode-600 file` });
+    findings.push({
+      level: "required",
+      label: "Claude pool permissions",
+      detail: `${path} must be a private mode-600 file`,
+    });
   }
 }
 for (const path of [join(HOME, ".cli-proxy-api"), pool.authDir, pool.claudeDir]) {
   const dir = lstatSync(path, { throwIfNoEntry: false });
   if (!dir || !dir.isDirectory() || (dir.mode & 0o777) !== 0o700) {
-    findings.push({ level: "required", label: "Claude pool permissions", detail: `${path} must be a private mode-700 directory` });
+    findings.push({
+      level: "required",
+      label: "Claude pool permissions",
+      detail: `${path} must be a private mode-700 directory`,
+    });
   }
 }
 
@@ -169,7 +195,8 @@ if (existsSync(pool.config)) {
     findings.push({
       level: "required",
       label: "Claude pool configuration",
-      detail: "local routing, dashboard, or model aliases differ from the managed setup; run mise run install -- --compact",
+      detail:
+        "local routing, dashboard, or model aliases differ from the managed setup; run mise run install -- --compact",
     });
   }
 }
@@ -189,7 +216,8 @@ if (existsSync(pool.claudeSettings) && existsSync(pool.clientKey)) {
     findings.push({
       level: "required",
       label: "Claude pool credentials",
-      detail: "isolated Claude settings do not match the local client key; run mise run install -- --compact",
+      detail:
+        "isolated Claude settings do not match the local client key; run mise run install -- --compact",
     });
   }
 }
@@ -203,9 +231,13 @@ if (legacyClaudeFiles.length > 0) {
   });
 }
 
-const poolService = execaSync("launchctl", ["print", `gui/${process.getuid?.() ?? 0}/${CLAUDE_POOL.label}`], {
-  reject: false,
-});
+const poolService = execaSync(
+  "launchctl",
+  ["print", `gui/${process.getuid?.() ?? 0}/${CLAUDE_POOL.label}`],
+  {
+    reject: false,
+  },
+);
 if (poolService.exitCode !== 0 || !poolService.stdout.includes("state = running")) {
   findings.push({
     level: "optional",
@@ -229,7 +261,9 @@ if (
 }
 
 if (existsSync(pool.authDir)) {
-  const accounts = readdirSync(pool.authDir).filter((name) => /^claude-.+\.json$/.test(name)).length;
+  const accounts = readdirSync(pool.authDir).filter((name) =>
+    /^claude-.+\.json$/.test(name),
+  ).length;
   if (accounts < 2) {
     findings.push({
       level: "optional",
@@ -249,7 +283,8 @@ if (existsSync(t3SettingsPath)) {
       findings.push({
         level: "optional",
         label: "T3 default Claude",
-        detail: "disable the default Claude provider in T3 Code Settings > Providers; Claude runs only through Claude Pool",
+        detail:
+          "disable the default Claude provider in T3 Code Settings > Providers; Claude runs only through Claude Pool",
       });
     }
     if (
@@ -263,7 +298,8 @@ if (existsSync(t3SettingsPath)) {
     findings.push({
       level: "optional",
       label: "T3 Claude Pool",
-      detail: "add the Claude Pool instance in T3 Code Settings > Providers with CLAUDE_CONFIG_DIR ~/.claude_cliproxy",
+      detail:
+        "add the Claude Pool instance in T3 Code Settings > Providers with CLAUDE_CONFIG_DIR ~/.claude_cliproxy",
     });
   }
 } else {
@@ -300,8 +336,12 @@ if (
 
 const watcher = macWatcherPaths(HOME);
 const launchd = (label: string) =>
-  execaSync("launchctl", ["print", `gui/${process.getuid?.() ?? 0}/${label}`], { reject: false }).exitCode === 0;
-if (!existsSync(watcher.memcapConfig) || readFileSync(watcher.memcapConfig, "utf8") !== renderMemcapConfig()) {
+  execaSync("launchctl", ["print", `gui/${process.getuid?.() ?? 0}/${label}`], { reject: false })
+    .exitCode === 0;
+if (
+  !existsSync(watcher.memcapConfig) ||
+  readFileSync(watcher.memcapConfig, "utf8") !== renderMemcapConfig()
+) {
   findings.push({
     level: "required",
     label: "memcap config",
@@ -311,9 +351,17 @@ if (!existsSync(watcher.memcapConfig) || readFileSync(watcher.memcapConfig, "utf
 if (Bun.which("memcap")) {
   const memcapAge = fileAgeSeconds(watcher.memcapLastPass);
   if (!launchd(MEMCAP_LAUNCH_AGENT_LABEL)) {
-    findings.push({ level: "required", label: "memcap service", detail: "not loaded; run memcap service install" });
+    findings.push({
+      level: "required",
+      label: "memcap service",
+      detail: "not loaded; run memcap service install",
+    });
   } else if (existsSync(watcher.memcapPaused)) {
-    findings.push({ level: "optional", label: "memcap paused", detail: "cleanup is off; resume with memcap on" });
+    findings.push({
+      level: "optional",
+      label: "memcap paused",
+      detail: "cleanup is off; resume with memcap on",
+    });
   } else if (memcapAge !== undefined && memcapAge > 600) {
     findings.push({
       level: "required",

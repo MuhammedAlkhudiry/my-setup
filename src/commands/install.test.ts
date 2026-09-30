@@ -30,6 +30,12 @@ describe("renderBaseRules", () => {
     expect(rendered).toContain("`/projects/example-project`");
     expect(rendered).toContain("task worktrees are harness-managed");
     expect(rendered).not.toContain("{{ACTIVE_PROJECTS}}");
+
+    expect(
+      renderBaseRules("Before\n{{ACTIVE_PROJECTS}}\nAfter\n", {
+        profile: DEVICE_PROFILES.work,
+      }),
+    ).toBe("Before\n\nAfter\n");
   });
 
   test("fails when the base rules omit the injection point", () => {

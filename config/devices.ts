@@ -12,6 +12,7 @@ export interface DeviceProfile {
   // `pool` installs Claude Code into the Claude Pool config dir; `direct` uses the default `~/.claude`.
   claude: "pool" | "direct";
   opencode: boolean;
+  activeProjects: boolean;
   // Mac-only zsh layer: .zshrc/.zshenv, local secrets, shared bin commands, and `doctor`.
   shell: boolean;
   macWatcher: boolean;
@@ -35,6 +36,7 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
     name: "personal",
     claude: "pool",
     opencode: true,
+    activeProjects: true,
     shell: true,
     macWatcher: true,
     mcpServers: true,
@@ -58,6 +60,7 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
     name: "work",
     claude: "direct",
     opencode: false,
+    activeProjects: false,
     shell: false,
     macWatcher: false,
     mcpServers: false,
