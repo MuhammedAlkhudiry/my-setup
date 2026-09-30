@@ -10,8 +10,9 @@ Write the description only. Do not push, create, or edit the pull request; deliv
 Write them in this order. Omit a section that has nothing to say.
 
 1. **Needs you**
-   - **After merge:** every step a deploy does not perform, such as commands, asset uploads, environment variables, provider settings, and store
-     submissions.
+   - **After merge:** a link to the change's section in `RELEASE.md`, never a copy of its steps. When the change needs a step a deploy does not
+     perform, such as a command, asset upload, environment variable, provider setting, or store submission, and the branch does not record it
+     there, record it with $prepare-release first.
    - **Hard to change:** a checkbox per decision that is costly to reverse once merged or released: schema and migrations, API contracts used by
      released clients, stored enum values, permissions, queue and event payloads, URLs, environment variables, native modules, and provider
      choices. Give each the one fact needed to approve it.
@@ -26,7 +27,6 @@ Write them in this order. Omit a section that has nothing to say.
    such as memory, staleness, or complexity.
 6. **QA steps:** numbered steps with the exact route, account, and data to use.
 7. **Known gaps:** what was deliberately left out.
-8. **Independent review:** the reviewer's verdict and what it checked.
 
 ## Demo media
 
@@ -41,13 +41,7 @@ branch. Choose the editing tools yourself.
 - A video lasts under 30 seconds and stays under 10 MB. A screenshot is cropped to the changed region with the change marked.
 - The final cut is checked for wrong text, stale states, and private data.
 
-To get a GitHub-hosted URL, drop the file into a comment editor on the repository and copy the generated `user-attachments` link; do not submit
-the comment.
-
-## Independent review
-
-After the draft is complete, get a fresh review from the other agent through $ai-agents-cli: Codex when Claude implemented the work, Claude when
-Codex did. Run it read-only with no inherited context.
-
-- Give it the base, the branch, and the draft. It applies $code-review and checks every claim in the draft against the diff.
-- Fix its findings, update the draft, and rerun once. Report remaining findings to the user instead of looping.
+Include media only when it shows something a reviewer needs, such as a UI change, a visual bug, or output that is hard to read as text. Upload
+every media file yourself and embed it in the description by its GitHub-hosted URL. A local path, a placeholder, or a request for the user to
+upload is never an acceptable result, and a local file is never a reason to stop. To get the URL, drop the file into a comment editor on the
+repository with the browser and copy the generated `user-attachments` link; do not submit the comment.

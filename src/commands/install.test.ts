@@ -5,19 +5,25 @@ import { join } from "node:path";
 
 import { describe, expect, test } from "bun:test";
 
+import { DEVICE_PROFILES } from "../../config/devices";
 import { renderBaseRules, syncManagedSkillsAsync } from "./install";
+
+const personal = DEVICE_PROFILES.personal;
 
 describe("renderBaseRules", () => {
   test("injects the configured active projects", () => {
-    const rendered = renderBaseRules("Before\n{{ACTIVE_PROJECTS}}\nAfter\n", [
-      {
-        id: "example",
-        name: "Example",
-        remoteUrl: "https://github.com/example/project.git",
-        baseBranch: "main",
-        canonicalRoot: "/projects/example-project",
-      },
-    ]);
+    const rendered = renderBaseRules("Before\n{{ACTIVE_PROJECTS}}\nAfter\n", {
+      profile: personal,
+      projects: [
+        {
+          id: "example",
+          name: "Example",
+          remoteUrl: "https://github.com/example/project.git",
+          baseBranch: "main",
+          canonicalRoot: "/projects/example-project",
+        },
+      ],
+    });
 
     expect(rendered).toContain("**Example**");
     expect(rendered).toContain("[https://github.com/example/project.git]");
@@ -27,7 +33,7 @@ describe("renderBaseRules", () => {
   });
 
   test("fails when the base rules omit the injection point", () => {
-    expect(() => renderBaseRules("No placeholder\n", [])).toThrow(
+    expect(() => renderBaseRules("No placeholder\n", { profile: personal, projects: [] })).toThrow(
       "Base rules are missing {{ACTIVE_PROJECTS}}",
     );
   });
@@ -75,7 +81,7 @@ describe("syncManagedSkillsAsync", () => {
         "---\nname: custom-valid-skill\ndescription: Custom valid skill.\n---\n",
       );
 
-      await syncManagedSkillsAsync({ src, dest, label: "test skills" });
+      await syncManagedSkillsAsync({ src, dest, label: "test skills", profile: personal });
 
       expect(existsSync(join(src, "empty-category"))).toBe(false);
       expect(existsSync(join(src, "tools", "typescript", "empty-source-dir"))).toBe(false);
@@ -98,10 +104,28 @@ describe("syncManagedSkillsAsync", () => {
         "---\nname: docx\ndescription: Synced skill.\n---\n",
       );
 
-      await syncManagedSkillsAsync({ src, dest, label: "test skills" });
+      await syncManagedSkillsAsync({ src, dest, label: "test skills", profile: personal });
 
       expect(existsSync(join(dest, "synced", "docx", "SKILL.md"))).toBe(true);
     });
+  });
+});
+
+test("skill sync skips skills the profile excludes and renders its profile blocks", async () => {
+  await withTempDirs(async (src, dest) => {
+    writeSkill(src, "tools", "shared");
+    writeSkill(src, "tools", "laravel");
+    writeFileSync(
+      join(src, "tools/shared/SKILL.md"),
+      "---\nname: shared\ndescription: Shared.\n---\n\n<!-- profile:personal -->\nPublish.\n<!-- /profile -->\n<!-- profile:work -->\nKeep local.\n<!-- /profile -->\n",
+    );
+
+    await syncManagedSkillsAsync({ src, dest, label: "test skills", profile: DEVICE_PROFILES.work });
+
+    expect(existsSync(join(dest, "laravel"))).toBe(false);
+    expect(readFileSync(join(dest, "shared/SKILL.md"), "utf8")).toBe(
+      "---\nname: shared\ndescription: Shared.\n---\n\nKeep local.\n",
+    );
   });
 });
 
@@ -121,7 +145,7 @@ test("skill reinstall replaces stale files, preserves custom skills, and omits s
     mkdirSync(join(dest, "custom"));
     writeFileSync(join(dest, "custom/SKILL.md"), "custom skill\n");
 
-    await syncManagedSkillsAsync({ src, dest, label: "test skills" });
+    await syncManagedSkillsAsync({ src, dest, label: "test skills", profile: personal });
 
     expect(readFileSync(join(installed, "references/current.md"), "utf8")).toBe(
       "current contents\n",

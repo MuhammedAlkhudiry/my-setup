@@ -11,8 +11,7 @@
 
 ## Google Play
 
-- Use the Google Play Developer API through $mobile-app-infra. Keep Play Console browser tasks for explicit user-run account, policy, legal, payment,
-  or review work the API cannot perform.
-- Read the selected script's live help and installed environment template for credentials, then verify access with the read-only Android store-status
-  command.
+- Use the `gpc` CLI through $mobile-app-infra. Keep Play Console browser tasks for explicit user-run account, policy, legal, payment, or review work
+  the API cannot perform.
+- The project's `mobile-release.env` supplies the service account; verify access with `gpc --ci releases status --app <package>`.
 - Keep the service-account key in agent-managed credential storage. Pause when the user must create the key or grant Play Console access.

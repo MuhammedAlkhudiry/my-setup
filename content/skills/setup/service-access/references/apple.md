@@ -2,8 +2,8 @@
 
 ## App Store Connect
 
-- Use the App Store Connect API through $mobile-app-infra, not browser automation. Read the selected script's live help and installed environment
-  template for credentials, then verify access with the read-only iOS store-status command.
+- Use the `asc` CLI through $mobile-app-infra, not browser automation or `asc web` sessions. The project's `mobile-release.env` supplies the API key;
+  verify access with `ASC_READ_ONLY=1 asc apps list`.
 - Keep the API key in agent-managed credential storage. Pause when the user must create or download it.
 
 ## Sign in with Apple

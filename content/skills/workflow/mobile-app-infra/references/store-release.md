@@ -18,22 +18,36 @@ Keep `built`, `submitted`, `waiting for review`, `in review`, `rolling out`, and
 provisioning failures, version conflicts, policy rejection, or unresolved product decisions about rollout, compliance, pricing, privacy, or
 availability. When an authorized API cannot perform a required action, hand off that exact manual step.
 
-Routine store releases are API/CLI-only: use EAS for builds and submissions and provider APIs for status, rollout, listings, and other supported
-release operations. Never automate App Store Connect or Google Play Console through a browser. Treat API-unsupported account, policy, legal, payment,
+Routine store releases are API/CLI-only: use EAS for builds and submissions and the [store CLIs](store-clis.md) for status, rollout, listings, and
+other supported release operations. Never automate App Store Connect or Google Play Console through a browser. Treat API-unsupported account, policy, legal, payment,
 and review tasks as explicit manual blockers requiring fresh user intent.
 
 ## TestFlight Only
 
 When the user asks for TestFlight instead of a store release, the target state is a processed build available to testers, not waiting for review.
 
-- Build and upload through the established EAS path. Confirm the build's `processingState` is `VALID` with `scripts/mobile-store-status.ts`.
+- Build and upload through the established EAS path. Confirm the build's processing state is `VALID` with `asc builds info` or
+  `asc builds wait`.
 - Do not create or update an App Store version, and do not submit for App Review.
-- Make the build available to the tester group the user names. Internal groups need no review. An external group needs Beta App Review, which is a
-  submission; get the user's approval first.
+- Make the build available to the tester group the user names with $asc-testflight-orchestration. Internal groups need no review. An external group
+  needs Beta App Review, which is a submission; get the user's approval first.
 - Report the build number, processing state, and the groups that can install it.
 
 ## App Store Version Preparation
 
-Use the bundled `scripts/mobile-app-store-release.ts` for App Store version preparation and submission. Resolve it relative to this skill, read its
-live help, and treat the script as the authority for arguments, defaults, and API behavior. Use `scripts/mobile-store-status.ts` for read-only
-inspection; never use a preparation or submission action as a status check.
+Use `asc` through the [store CLIs](store-clis.md) and $asc-release-flow. Run each mutating command with `--dry-run` first, then `--confirm`.
+
+1. Resolve the processed build's ID with `asc builds list`, and the latest earlier App Store version.
+2. Stage the version with `asc release stage --app <id> --version <version> --build-id <build-id> --copy-metadata-from <previous-version>`. It creates
+   the version when missing, copies localized metadata, attaches the build, and runs readiness checks.
+3. Set the new release notes for each locale with `asc localizations update --version <version-id> --locale <locale> --whats-new <text>`.
+4. Run `asc review doctor --app <id>`. When App Review contact details are missing, copy them from the previous version with
+   `asc review details-for-version` and `asc review details-create`.
+5. Submit with `asc review submit --app <id> --version <version> --build-id <build-id>`. When App Review rejected the version, attach the fixed build
+   and resubmit the existing unresolved submission with `asc review submissions-submit --id <submission-id>`; follow $asc-submission-health.
+
+## Google Play Rollout
+
+EAS submits Android builds to the configured track. Use `gpc` for later promotion and rollout changes, such as
+`gpc releases promote --from <track> --to production --rollout <percent>` and `gpc releases rollout increase`. Rollout percentage is a product
+decision; do not choose it without the user's instruction or the project's release instructions.

@@ -1,6 +1,9 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 
+import { DEVICE_PROFILE_NAMES } from "../../config/devices";
+import { renderProfileBlocks } from "./profile-blocks";
+
 export interface LocalSkill {
   name: string;
   description: string;
@@ -228,7 +231,6 @@ function validateCrossSkillReferences(
 
 function validateSkillSize(
   skillsRoot: string,
-  skillDir: string,
   skillPath: string,
   content: string,
   options: SkillDiscoveryOptions,
@@ -286,8 +288,13 @@ function validateSkillSize(
       )}`,
     );
   }
+}
 
-  validateSkillLocalReferences(skillsRoot, skillDir, skillPath, content, options);
+// Agents load one profile's rendering, so size a skill by its largest rendered variant.
+function largestProfileRendering(content: string, source: string): string {
+  return DEVICE_PROFILE_NAMES.map((profile) => renderProfileBlocks(content, profile, source)).reduce(
+    (largest, rendered) => (rendered.length > largest.length ? rendered : largest),
+  );
 }
 
 export function discoverLocalSkills(
@@ -319,7 +326,9 @@ export function discoverLocalSkills(
   });
 
   for (const skill of skills) {
-    validateSkillSize(skillsRoot, skill.dir, skill.skillPath, skill.content, options);
+    const source = relative(skillsRoot, skill.skillPath);
+    validateSkillSize(skillsRoot, skill.skillPath, largestProfileRendering(skill.content, source), options);
+    validateSkillLocalReferences(skillsRoot, skill.dir, skill.skillPath, skill.content, options);
   }
 
   const seen = new Set<string>();

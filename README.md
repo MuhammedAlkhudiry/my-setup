@@ -25,6 +25,38 @@ drift.
 
 Make durable changes in the source directories, then use `mise run install` to render and sync the installed state.
 
+## Device Profiles
+
+Each machine installs one profile from `config/devices.ts`, chosen in the untracked `~/.config/my-setup/device.json`. The installer stops if the file
+is missing, so a new machine never installs the wrong profile by default.
+
+```json
+{ "profile": "personal" }
+```
+
+- `personal` — this Mac: Claude Code through the Claude Pool, Codex, OpenCode, every skill, the zsh layer, and the Mac watcher.
+- `work` — the Windows work laptop: Claude Code with direct sign-in and Codex, only rules and skills that fit work, and no zsh layer, Pool, Mac
+  watcher, MCP servers, or personal secrets.
+
+## Work Laptop on Windows
+
+Run these in PowerShell, not WSL:
+
+```powershell
+winget install --id Git.Git
+winget install --id Oven-sh.Bun
+winget install --id jdx.mise
+git clone https://github.com/MuhammedAlkhudiry/my-setup.git $HOME\dev\my-setup
+New-Item -ItemType Directory -Force $HOME\.config\my-setup
+Set-Content $HOME\.config\my-setup\device.json '{ "profile": "work" }'
+cd $HOME\dev\my-setup
+bun install
+mise run install
+```
+
+Then sign in to Claude Code (`claude`) and Codex (`codex`) with the work accounts. Claude Code on Windows runs its shell commands through Git Bash from
+Git for Windows. RTK is optional on this profile; the installer skips its hooks when RTK is missing.
+
 ## Claude Pool on a New Mac
 
 Claude Code runs only through the Claude Pool. `~/.claude_cliproxy` is the only managed Claude config: rules, skills, settings, and MCP servers are

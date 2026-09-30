@@ -9,7 +9,9 @@
 - `config/skills.ts` — Remote skill declarations fetched and installed by this repo.
 - `config/codex.ts`, `config/opencode.ts`, `config/claude.ts`, and `config/mcp.ts` — Source of truth for the managed Codex, OpenCode, Claude Code, and
   MCP configuration keys.
-- `config/permissions.ts` — Shared command and path allowlist rendered into OpenCode, Claude Code, and Codex permission surfaces.
+- `config/devices.ts` — Device profiles (`personal`, `work`): which agents, skills, features, secrets, and permission allowlists each machine gets.
+  Each machine picks its profile in the untracked `~/.config/my-setup/device.json`.
+- `config/permissions.ts` — Renders a profile's command and path allowlist into OpenCode, Claude Code, and Codex permission surfaces.
 - `src/cli.ts` and `src/commands/system-tools-cli.ts` — `my-setup` installation and external-tool maintenance CLI entrypoints.
 - `src/commands/install.ts` — Local installer that renders and syncs rules, config, permissions, skills, shell helpers, secrets, and shared bin
   commands.
@@ -21,6 +23,7 @@
 - **ACTIVE-PROJECTS** — Active project defaults are declared in `config/active-projects.ts` and rendered into the installed rules. Each project owns
   its own development services through its own commands; this repo holds no runtime environment state.
 - **MAIN-ONLY** — Work directly on `main`; do not create branches unless explicitly requested.
+- **NO-COMMITS** — Never commit in this repository. Leave every change uncommitted in the working tree; the owner reviews and commits.
 - **INSTALL** — Use `mise run install` as the only supported local sync/install command after changing content/config/generator behavior. Agents
   should use `mise run install -- --compact` so successful runs emit only the final result while warnings and failures remain visible.
 - **THIN-ZSHRC** — If user `~/.zshrc` contains anything beyond the managed `shell/zsh-custom.zsh` import, repair it directly instead of leaving
@@ -36,6 +39,8 @@
   and typos are validated.
 - **SKILL-PORTABLE** — Installed-facing skill files must not point back to source-only repo paths such as `content/skills/...` or local `my-setup`
   paths; use skill-relative references.
+- **PROFILE-BLOCKS** — Put content that only fits one device profile between `<!-- profile:<name> -->` and `<!-- /profile -->` lines in
+  `content/base-rules.md` or skill Markdown. Inside a list, indent the marker lines to the list item's text so the formatter leaves them alone.
 - **SKILL-GLOBAL** — Skill instructions are global capabilities; do not mention any project, repo, product, client, or local workspace by name.
 - **SKILL-INSTALL** — Never install skills with `npx skills add`; local skills live in this repo under `content/skills/<category>/*`, and remote
   skills must be declared in `config/skills.ts` for this repo's source/import logic.

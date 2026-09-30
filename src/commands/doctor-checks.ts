@@ -5,6 +5,7 @@
  */
 
 import { existsSync, lstatSync, readFileSync, readlinkSync, readdirSync, statfsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { execaSync } from "execa";
@@ -15,16 +16,19 @@ import { mergeRtkHooks } from "../../config/rtk";
 import { MAC_WATCHER, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
 import { claudePoolPaths, findLegacyClaudeFiles } from "../lib/claude-pool";
 import { fileAgeSeconds, macWatcherPaths, readAlerts, readState, renderMemcapConfig } from "../lib/mac-watcher";
-import { renderBaseRules } from "./install";
+import { readDeviceProfile } from "../lib/device";
+import { claudePaths, renderBaseRules } from "./install";
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
-const HOME = process.env.HOME || "";
+const HOME = homedir();
 const MIN_FREE_GIB = 20;
 
+const PROFILE = readDeviceProfile(HOME);
+
 const INSTALLED_RULES_FILES = [
-  { label: "Claude Code", path: claudePoolPaths(HOME).claudeRules },
+  { label: "Claude Code", path: claudePaths(PROFILE).rules },
   { label: "Codex", path: join(HOME, ".codex/AGENTS.md") },
-  { label: "OpenCode", path: join(HOME, ".config/opencode/AGENTS.md") },
+  ...(PROFILE.opencode ? [{ label: "OpenCode", path: join(HOME, ".config/opencode/AGENTS.md") }] : []),
 ];
 
 interface Finding {
@@ -67,6 +71,7 @@ for (const root of [ROOT_DIR, ...ACTIVE_PROJECTS.map((project) => project.canoni
 
 const expectedRules = renderBaseRules(
   readFileSync(join(ROOT_DIR, "content", "base-rules.md"), "utf-8"),
+  { profile: PROFILE },
 );
 const staleRules = INSTALLED_RULES_FILES.filter(
   ({ path }) => !existsSync(path) || readFileSync(path, "utf-8") !== expectedRules,
@@ -82,7 +87,7 @@ if (staleRules.length > 0) {
 }
 
 for (const [agent, path] of [
-  ["claude", claudePoolPaths(HOME).claudeSettings],
+  ["claude", claudePaths(PROFILE).settings],
   ["codex", join(HOME, ".codex/hooks.json")],
 ] as const) {
   try {

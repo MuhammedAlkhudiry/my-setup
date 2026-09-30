@@ -1,12 +1,16 @@
 #!/usr/bin/env bun
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join, relative } from "node:path";
 
 import { OPTIONAL_EXTERNAL_SKILL_NAMES, REMOTE_SKILL_SOURCES } from "../../config/skills";
+import { readDeviceProfile, selectRemoteSkillSources } from "../lib/device";
+import { renderProfileBlocks } from "../lib/profile-blocks";
 import { discoverLocalSkills } from "../lib/skills";
 
-const HOME = process.env.HOME || "";
+const HOME = homedir();
+const PROFILE = readDeviceProfile(HOME);
 const ROOT_DIR = join(import.meta.dir, "..", "..");
 const LOCAL_SKILLS_ROOT = join(ROOT_DIR, "content", "skills");
 const INSTALLED_SKILLS_ROOT = join(HOME, ".agents", "skills");
@@ -73,15 +77,12 @@ function compareSkillDirs(sourceDir: string, installedDir: string): string[] {
       continue;
     }
 
-    const sourceStat = statSync(sourcePath);
-    const installedStat = statSync(installedPath);
+    // Markdown is installed with this profile's blocks rendered, so compare against that output.
+    const expected = file.endsWith(".md")
+      ? Buffer.from(renderProfileBlocks(readFileSync(sourcePath, "utf-8"), PROFILE.name, file))
+      : readFileSync(sourcePath);
 
-    if (sourceStat.size !== installedStat.size) {
-      differences.push(`changed file ${file}`);
-      continue;
-    }
-
-    if (!readFileSync(sourcePath).equals(readFileSync(installedPath))) {
+    if (!expected.equals(readFileSync(installedPath))) {
       differences.push(`changed file ${file}`);
     }
   }
@@ -89,12 +90,16 @@ function compareSkillDirs(sourceDir: string, installedDir: string): string[] {
   return differences;
 }
 
-const remoteSkillNames = REMOTE_SKILL_SOURCES.flatMap((source) =>
+const declaredRemoteSkillNames = REMOTE_SKILL_SOURCES.flatMap((source) =>
   source.skills.map((skill) => skill.name),
-).sort();
+);
+const remoteSkillNames = selectRemoteSkillSources(REMOTE_SKILL_SOURCES, PROFILE)
+  .flatMap((source) => source.skills.map((skill) => skill.name))
+  .sort();
+const excludedSkills = new Set(PROFILE.excludedSkills);
 const localSkills = discoverLocalSkills(LOCAL_SKILLS_ROOT, {
-  additionalSkillNames: [...remoteSkillNames, ...OPTIONAL_EXTERNAL_SKILL_NAMES],
-});
+  additionalSkillNames: [...declaredRemoteSkillNames, ...OPTIONAL_EXTERNAL_SKILL_NAMES],
+}).filter((skill) => !excludedSkills.has(skill.name));
 const localSkillNames = localSkills.map((skill) => skill.name).sort();
 const remoteSkillNameSet = new Set(remoteSkillNames);
 const managedSkillNames = [...new Set([...localSkillNames, ...remoteSkillNames])].sort();

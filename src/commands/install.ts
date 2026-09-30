@@ -15,9 +15,11 @@ import {
   mkdtemp,
   symlink,
   readdir,
+  lstat,
+  unlink,
 } from "fs/promises";
-import { dirname, join } from "path";
-import { tmpdir } from "os";
+import { dirname, isAbsolute, join, relative, sep } from "path";
+import { homedir, tmpdir } from "os";
 import { execa } from "execa";
 import {
   OPTIONAL_EXTERNAL_SKILL_NAMES,
@@ -25,7 +27,8 @@ import {
   type RemoteSkill,
   type RemoteSkillSource,
 } from "../../config/skills";
-import { ACTIVE_PROJECTS } from "../../config/active-projects";
+import { ACTIVE_PROJECTS, type ActiveProject } from "../../config/active-projects";
+import type { DeviceProfile } from "../../config/devices";
 import { createClaudeManagedSettings } from "../../config/claude";
 import { CREDENTIALS_HOME_ENV, CREDENTIALS_ROOT } from "../../config/credentials";
 import { MCP_SERVERS } from "../../config/mcp";
@@ -40,8 +43,10 @@ import {
 import { replaceDirectory, ensureParentDir } from "../lib/fs";
 import { claudePoolPaths, installClaudePool, retireLegacyClaudeFiles } from "../lib/claude-pool";
 import { secureManagedCredentials } from "../lib/credentials";
+import { readDeviceProfile, selectRemoteSkillSources } from "../lib/device";
 import { installMacWatcher } from "../lib/mac-watcher";
 import { colors, compactOutput, print, printBox, printSeparator } from "../lib/print";
+import { renderProfileBlocks } from "../lib/profile-blocks";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
 import { discoverLocalSkills, findUnknownSkillReferences } from "../lib/skills";
 import { validateRemoteSkillSources } from "../lib/validation";
@@ -50,7 +55,7 @@ import { validateRemoteSkillSources } from "../lib/validation";
 // Constants
 // =============================================================================
 
-const HOME = process.env.HOME || "";
+const HOME = homedir();
 const ROOT_DIR = join(import.meta.dir, "..", "..");
 const STATE_HOME = process.env.XDG_STATE_HOME || join(HOME, ".local/state");
 
@@ -70,14 +75,26 @@ const CODEX_PATHS = {
   hooks: join(HOME, ".codex/hooks.json"),
 };
 
-// Claude Code runs only through the Claude Pool, so its config dir is the pool's CLAUDE_CONFIG_DIR.
-const CLAUDE_POOL_PATHS = claudePoolPaths(HOME);
-const CLAUDE_PATHS = {
-  configDir: CLAUDE_POOL_PATHS.claudeDir,
-  rules: CLAUDE_POOL_PATHS.claudeRules,
-  skills: CLAUDE_POOL_PATHS.claudeSkills,
-  settings: CLAUDE_POOL_PATHS.claudeSettings,
-};
+// With the Claude Pool, Claude Code's config dir is the pool's CLAUDE_CONFIG_DIR; direct sign-in uses the default.
+export function claudePaths(profile: DeviceProfile) {
+  if (profile.claude === "pool") {
+    const pool = claudePoolPaths(HOME);
+    return {
+      configDir: pool.claudeDir,
+      rules: pool.claudeRules,
+      skills: pool.claudeSkills,
+      settings: pool.claudeSettings,
+    };
+  }
+
+  const configDir = join(HOME, ".claude");
+  return {
+    configDir,
+    rules: join(configDir, "CLAUDE.md"),
+    skills: join(configDir, "skills"),
+    settings: join(configDir, "settings.json"),
+  };
+}
 
 const SHARED_PATHS = {
   skills: join(HOME, ".agents/skills"),
@@ -94,8 +111,8 @@ const REMOTE_SKILLS_STATE_PATH = join(STATE_HOME, "my-setup/remote-skills.json")
 const USER_ZSHRC_HEADER = "# Managed shell config lives in my-setup.";
 const USER_ZSHRC_IMPORT =
   '[ -f "$HOME/.config/zsh-sync/custom.zsh" ] && source "$HOME/.config/zsh-sync/custom.zsh"';
-const REQUIRED_SECRETS = ["POSTHOG_CLI_API_KEY", "HUGEICONS_TOKEN"] as const;
 const ACTIVE_PROJECTS_PLACEHOLDER = "{{ACTIVE_PROJECTS}}";
+const SETUP_ROOT_PLACEHOLDER = "{{SETUP_ROOT}}";
 
 const SHARED_BIN_COMMANDS = [
   "my-setup",
@@ -110,11 +127,23 @@ const SHARED_BIN_COMMANDS = [
 // Individual Operations
 // =============================================================================
 
-export function renderBaseRules(template: string, projects = ACTIVE_PROJECTS): string {
+// This repo's location, written the way rules show paths, such as `~/PhpstormProjects/my-setup`.
+export function setupRootForRules(home = HOME, root = ROOT_DIR): string {
+  const path = relative(home, root);
+  // Outside home, or on another Windows drive, relative() cannot express the path from `~`.
+  return path.startsWith("..") || isAbsolute(path) ? root : `~/${path.split(sep).join("/")}`;
+}
+
+export function renderBaseRules(
+  template: string,
+  options: { profile: DeviceProfile; setupRoot?: string; projects?: ActiveProject[] },
+): string {
+  const { profile, setupRoot = setupRootForRules(), projects = ACTIVE_PROJECTS } = options;
   if (!template.includes(ACTIVE_PROJECTS_PLACEHOLDER)) {
     throw new Error(`Base rules are missing ${ACTIVE_PROJECTS_PLACEHOLDER}`);
   }
 
+  const rules = renderProfileBlocks(template, profile.name, "content/base-rules.md");
   const activeProjects = projects
     .map(
       ({ name, remoteUrl, baseBranch, canonicalRoot }) =>
@@ -122,7 +151,9 @@ export function renderBaseRules(template: string, projects = ACTIVE_PROJECTS): s
     )
     .join("\n");
 
-  return template.replace(ACTIVE_PROJECTS_PLACEHOLDER, activeProjects);
+  return rules
+    .replace(ACTIVE_PROJECTS_PLACEHOLDER, activeProjects)
+    .replaceAll(SETUP_ROOT_PLACEHOLDER, setupRoot);
 }
 
 function knownSkillNames(): Set<string> {
@@ -150,10 +181,10 @@ function readBaseRulesTemplate(): string {
   return template;
 }
 
-function copyRules(destination: string, label: string): void {
+function copyRules(destination: string, label: string, profile: DeviceProfile): void {
   print.info(`Copying ${label} rules to ${destination}...`);
   mkdirSync(dirname(destination), { recursive: true });
-  writeFileSync(destination, renderBaseRules(readBaseRulesTemplate()));
+  writeFileSync(destination, renderBaseRules(readBaseRulesTemplate(), { profile }));
   print.success(`${label} rules copied`);
 }
 
@@ -220,8 +251,11 @@ async function assertThinUserZshrc(): Promise<void> {
 // Async install functions (for parallel execution)
 // =============================================================================
 
-async function installSharedSkills(): Promise<void> {
-  const remoteSkillSources = validateRemoteSkillSources(REMOTE_SKILL_SOURCES);
+async function installSharedSkills(profile: DeviceProfile): Promise<void> {
+  const remoteSkillSources = selectRemoteSkillSources(
+    validateRemoteSkillSources(REMOTE_SKILL_SOURCES),
+    profile,
+  );
   const src = join(ROOT_DIR, "content", "skills");
   if (!existsSync(src)) {
     print.error("Skills folder not found");
@@ -231,13 +265,15 @@ async function installSharedSkills(): Promise<void> {
     src,
     dest: SHARED_PATHS.skills,
     label: "shared skills",
+    profile,
     remoteSkillSources,
   });
 }
 
-async function installOpencode(): Promise<void> {
-  copyRules(OPENCODE_PATHS.rules, "OpenCode");
-  await mergeOpencodeConfigAsync();
+async function installOpencode(profile: DeviceProfile, rtk: boolean): Promise<void> {
+  copyRules(OPENCODE_PATHS.rules, "OpenCode", profile);
+  await mergeOpencodeConfigAsync(profile);
+  if (!rtk) return;
   // Use the plugin bundled with the installed RTK binary; leave agent rules alone.
   await execa("rtk", ["init", "--global", "--opencode", "--hook-only", "--no-trust-filters"], {
     stdio: "pipe",
@@ -245,9 +281,9 @@ async function installOpencode(): Promise<void> {
   print.success("RTK OpenCode plugin installed");
 }
 
-async function mergeOpencodeConfigAsync(): Promise<void> {
+async function mergeOpencodeConfigAsync(profile: DeviceProfile): Promise<void> {
   print.info(`Merging OpenCode config into ${OPENCODE_PATHS.config}...`);
-  const settings = createOpencodeConfig(HOME);
+  const settings = createOpencodeConfig(profile, HOME);
   await ensureParentDir(OPENCODE_PATHS.config);
   let existingConfig: Record<string, unknown> = {};
   if (existsSync(OPENCODE_PATHS.config)) {
@@ -284,11 +320,13 @@ async function mergeOpencodeConfigAsync(): Promise<void> {
   print.success("OpenCode config merged");
 }
 
-async function installCodex(): Promise<void> {
-  copyRules(CODEX_PATHS.rules, "Codex");
+async function installCodex(profile: DeviceProfile, rtk: boolean): Promise<void> {
+  copyRules(CODEX_PATHS.rules, "Codex", profile);
   await mergeCodexConfigAsync();
-  await mergeCodexMcpConfigAsync();
-  await writeCodexRules();
+  await mergeCodexMcpConfigAsync(profile);
+  await writeCodexRules(profile);
+  if (!rtk) return;
+
   const existing = existsSync(CODEX_PATHS.hooks)
     ? JSON.parse(await readFile(CODEX_PATHS.hooks, "utf-8"))
     : {};
@@ -299,56 +337,66 @@ async function installCodex(): Promise<void> {
   print.success("RTK Codex hook installed; new hooks require review in /hooks");
 }
 
-async function writeCodexRules(): Promise<void> {
+async function writeCodexRules(profile: DeviceProfile): Promise<void> {
   print.info(`Writing Codex execution rules to ${CODEX_PATHS.execRules}...`);
   await ensureParentDir(CODEX_PATHS.execRules);
-  await writeFile(CODEX_PATHS.execRules, renderCodexRules());
+  await writeFile(CODEX_PATHS.execRules, renderCodexRules(profile));
   print.success("Codex execution rules written");
 }
 
-async function installClaude(): Promise<void> {
-  for (const path of await retireLegacyClaudeFiles(HOME)) {
-    print.success(`Removed old Claude config file ${path}`);
+async function installClaude(profile: DeviceProfile, rtk: boolean): Promise<void> {
+  const paths = claudePaths(profile);
+
+  // The pool retires the default ~/.claude files; with direct sign-in they are the install target.
+  if (profile.claude === "pool") {
+    for (const path of await retireLegacyClaudeFiles(HOME)) {
+      print.success(`Removed old Claude config file ${path}`);
+    }
   }
-  copyRules(CLAUDE_PATHS.rules, "Claude Code");
-  await installManagedSymlink(SHARED_PATHS.skills, CLAUDE_PATHS.skills, "Claude Code skills");
-  await mergeClaudeSettingsAsync();
-  await installClaudeMcpServers();
+
+  copyRules(paths.rules, "Claude Code", profile);
+  await installManagedSymlink(SHARED_PATHS.skills, paths.skills, "Claude Code skills");
+  await mergeClaudeSettingsAsync(profile, paths.settings, rtk);
+  if (profile.mcpServers) await installClaudeMcpServers(paths.configDir);
 }
 
-async function mergeClaudeSettingsAsync(): Promise<void> {
-  print.info(`Merging Claude Code settings into ${CLAUDE_PATHS.settings}...`);
-  await ensureParentDir(CLAUDE_PATHS.settings);
+async function mergeClaudeSettingsAsync(
+  profile: DeviceProfile,
+  settingsPath: string,
+  rtk: boolean,
+): Promise<void> {
+  print.info(`Merging Claude Code settings into ${settingsPath}...`);
+  await ensureParentDir(settingsPath);
   let existing: Record<string, unknown> = {};
-  if (existsSync(CLAUDE_PATHS.settings)) {
+  if (existsSync(settingsPath)) {
     try {
-      existing = JSON.parse(await readFile(CLAUDE_PATHS.settings, "utf-8"));
+      existing = JSON.parse(await readFile(settingsPath, "utf-8"));
     } catch {
       print.warning("Failed to parse existing Claude Code settings, creating new file");
     }
   }
-  const { permissions, ...managedKeys } = createClaudeManagedSettings();
+  const { permissions, ...managedKeys } = createClaudeManagedSettings(profile);
   const merged = {
     ...existing,
     ...managedKeys,
-    hooks: mergeRtkHooks(existing.hooks, "claude"),
+    hooks: rtk ? mergeRtkHooks(existing.hooks, "claude") : existing.hooks,
     permissions: {
       ...(existing.permissions as Record<string, unknown> | undefined),
       allow: permissions.allow,
     },
   };
-  await writeFile(CLAUDE_PATHS.settings, JSON.stringify(merged, null, 2) + "\n");
+  await writeFile(settingsPath, JSON.stringify(merged, null, 2) + "\n");
   print.success("Claude Code settings merged");
 }
 
-async function installClaudeMcpServers(): Promise<void> {
+async function installClaudeMcpServers(configDir: string): Promise<void> {
   if (!Bun.which("claude")) {
     print.warning("claude CLI not found; skipped Claude Code MCP servers");
     return;
   }
   for (const [name, server] of Object.entries(MCP_SERVERS)) {
     const [command, ...args] = server.command;
-    const env = { CLAUDE_CONFIG_DIR: CLAUDE_PATHS.configDir };
+    const env = { CLAUDE_CONFIG_DIR: configDir };
     await execa("claude", ["mcp", "remove", "-s", "user", name], { env, reject: false, stdio: "pipe" });
     await execa(
       "claude",
@@ -429,9 +477,9 @@ async function mergeCodexConfigAsync(): Promise<void> {
   print.success("Codex config merged");
 }
 
-async function mergeCodexMcpConfigAsync(): Promise<void> {
+async function mergeCodexMcpConfigAsync(profile: DeviceProfile): Promise<void> {
   print.info(`Merging Codex MCP config into ${CODEX_PATHS.config}...`);
-  const managedContent = renderCodexMcpServersToml().trimEnd();
+  const managedContent = renderCodexMcpServersToml(profile.mcpServers ? MCP_SERVERS : {}).trimEnd();
   const startMarker = "# >>> my-setup mcp >>>";
   const endMarker = "# <<< my-setup mcp <<<";
   const managedBlock = `${startMarker}\n${managedContent}\n${endMarker}\n`;
@@ -456,8 +504,8 @@ async function mergeCodexMcpConfigAsync(): Promise<void> {
   print.success("Codex MCP config merged");
 }
 
-async function installShared(): Promise<void> {
-  await installLocalSecrets();
+async function installShared(profile: DeviceProfile): Promise<void> {
+  await installLocalSecrets(profile.requiredSecrets);
 
   const zshSource = join(ROOT_DIR, "shell", "zsh-custom.zsh");
   if (existsSync(zshSource)) {
@@ -525,12 +573,19 @@ async function installShared(): Promise<void> {
 async function installManagedSymlink(src: string, dest: string, label: string): Promise<void> {
   print.info(`Linking ${label} to ${dest}...`);
   await ensureParentDir(dest);
-  await rm(dest, { recursive: true, force: true });
-  await symlink(src, dest);
+  // Unlink an existing link itself so a recursive delete can never follow it into the linked folder.
+  const existing = await lstat(dest).catch(() => undefined);
+  if (existing?.isSymbolicLink()) {
+    await unlink(dest);
+  } else if (existing) {
+    await rm(dest, { recursive: true, force: true });
+  }
+  // Windows only links directories here; junctions need neither admin rights nor Developer Mode.
+  await symlink(src, dest, process.platform === "win32" ? "junction" : undefined);
   print.success(`${label} linked`);
 }
 
-async function installLocalSecrets(): Promise<void> {
+async function installLocalSecrets(requiredSecrets: readonly string[]): Promise<void> {
   const sourceFile = join(ROOT_DIR, "config", "secrets.default.zsh");
 
   if (!existsSync(sourceFile)) {
@@ -549,10 +604,10 @@ async function installLocalSecrets(): Promise<void> {
   }
 
   await chmod(SHARED_PATHS.secrets, 0o600);
-  await assertRequiredSecrets();
+  await assertRequiredSecrets(requiredSecrets);
 }
 
-async function assertRequiredSecrets(): Promise<void> {
+async function assertRequiredSecrets(requiredSecrets: readonly string[]): Promise<void> {
   try {
     const result = await execa(
       "zsh",
@@ -567,7 +622,7 @@ async function assertRequiredSecrets(): Promise<void> {
           "printf '%s\\n' \"${missing[@]}\"",
         ].join("\n"),
         "my-setup-secrets",
-        ...REQUIRED_SECRETS,
+        ...requiredSecrets,
       ],
       {
         env: {
@@ -623,6 +678,8 @@ interface ManagedSkillSyncOptions {
   src: string;
   dest: string;
   label: string;
+  // Local skills the profile excludes are skipped, and profile blocks in Markdown are rendered for it.
+  profile: DeviceProfile;
   remoteSkillSources?: RemoteSkillSource[];
 }
 
@@ -692,7 +749,7 @@ async function pruneEmptyDirs(dir: string): Promise<number> {
 }
 
 export async function syncManagedSkillsAsync(options: ManagedSkillSyncOptions): Promise<string[]> {
-  const { src, dest, label, remoteSkillSources = [] } = options;
+  const { src, dest, label, profile, remoteSkillSources = [] } = options;
   print.info(`Syncing ${label} to ${dest} (preserving valid custom skills)...`);
 
   const sourceEmptyDirCount = await pruneEmptyDirs(src);
@@ -713,10 +770,19 @@ export async function syncManagedSkillsAsync(options: ManagedSkillSyncOptions): 
   const remoteSkillNames = remoteSkillSources
     .flatMap((source) => source.skills.map((skill) => skill.name))
     .sort();
+  // Validate references against every declared skill, so a skill may mention one this profile excludes.
+  const declaredRemoteSkillNames = REMOTE_SKILL_SOURCES.flatMap((source) =>
+    source.skills.map((skill) => skill.name),
+  );
+  const excludedSkills = new Set(profile.excludedSkills);
   const skills = discoverLocalSkills(src, {
     reportWarning: console.warn,
-    additionalSkillNames: [...remoteSkillNames, ...OPTIONAL_EXTERNAL_SKILL_NAMES],
-  });
+    additionalSkillNames: [
+      ...remoteSkillNames,
+      ...declaredRemoteSkillNames,
+      ...OPTIONAL_EXTERNAL_SKILL_NAMES,
+    ],
+  }).filter((skill) => !excludedSkills.has(skill.name));
   const skillNames = skills.map((skill) => skill.name).sort();
   const managedSkillNames = [...new Set([...skillNames, ...remoteSkillNames])].sort();
   const manifestPath = join(dest, ".my-setup-managed-skills.json");
@@ -746,7 +812,9 @@ export async function syncManagedSkillsAsync(options: ManagedSkillSyncOptions): 
   }
 
   for (const skill of skills) {
-    await replaceDirectory(skill.dir, join(dest, skill.name));
+    await replaceDirectory(skill.dir, join(dest, skill.name), (content, sourcePath) =>
+      renderProfileBlocks(content, profile.name, relative(src, sourcePath)),
+    );
   }
 
   if (remoteSkillSources.length > 0) {
@@ -837,49 +905,48 @@ async function installRemoteSkill(
 // Main
 // =============================================================================
 
-export async function install(): Promise<void> {
-  if (!Bun.which("rtk")) {
-    throw new Error("RTK is required. Run brew install rtk, then rerun mise run install.");
-  }
-  // Native Codex hooks require RTK 0.50.0 or newer.
-  await execa("rtk", ["hook", "codex", "--help"], { stdio: "pipe" }).catch(() => {
-    throw new Error(
-      "RTK needs native Codex hook support. Run brew upgrade rtk, then rerun mise run install.",
-    );
-  });
+export async function install(): Promise<DeviceProfile> {
+  const profile = readDeviceProfile(HOME);
+  const claude = claudePaths(profile);
+  const rtk = await detectRtk(profile);
+
   if (!compactOutput) {
     console.log();
     printBox("My Setup - Installer");
     console.log();
     printSeparator();
-    console.log(colors.blue("Installing from local repo"));
+    console.log(colors.blue(`Installing from local repo for the ${profile.name} profile`));
     console.log();
-    console.log(colors.blue("  OpenCode:"));
-    console.log(`    Rules:    ${OPENCODE_PATHS.rules}`);
-    console.log(`    Config:   ${OPENCODE_PATHS.config} (merge)`);
-    console.log();
+    if (profile.opencode) {
+      console.log(colors.blue("  OpenCode:"));
+      console.log(`    Rules:    ${OPENCODE_PATHS.rules}`);
+      console.log(`    Config:   ${OPENCODE_PATHS.config} (merge)`);
+      console.log();
+    }
     console.log(colors.blue("  Codex:"));
     console.log(`    Rules:    ${CODEX_PATHS.rules}`);
     console.log(`    Config:   ${CODEX_PATHS.config} (managed merge)`);
     console.log();
-    console.log(colors.blue("  Claude Code (Claude Pool):"));
-    console.log(`    Rules:    ${CLAUDE_PATHS.rules}`);
-    console.log(`    Settings: ${CLAUDE_PATHS.settings} (merge)`);
-    console.log(`    Skills:   ${CLAUDE_PATHS.skills} -> ${SHARED_PATHS.skills}`);
+    console.log(colors.blue(`  Claude Code (${profile.claude === "pool" ? "Claude Pool" : "direct sign-in"}):`));
+    console.log(`    Rules:    ${claude.rules}`);
+    console.log(`    Settings: ${claude.settings} (merge)`);
+    console.log(`    Skills:   ${claude.skills} -> ${SHARED_PATHS.skills}`);
     console.log();
     console.log(colors.yellow("  Shared:"));
     console.log(
       `    Skills:   ${SHARED_PATHS.skills} (managed sync, prune invalid, preserve valid custom)`,
     );
-    console.log(`    Zsh:      ${SHARED_PATHS.zsh}`);
-    console.log(`    Zshenv:   ${SHARED_PATHS.zshenv}`);
-    console.log(`    Secrets:  ${SHARED_PATHS.secrets}`);
-    console.log(`    Bin:      ${SHARED_PATHS.binDir} (${SHARED_BIN_COMMANDS.join(", ")})`);
+    if (profile.shell) {
+      console.log(`    Zsh:      ${SHARED_PATHS.zsh}`);
+      console.log(`    Zshenv:   ${SHARED_PATHS.zshenv}`);
+      console.log(`    Secrets:  ${SHARED_PATHS.secrets}`);
+      console.log(`    Bin:      ${SHARED_PATHS.binDir} (${SHARED_BIN_COMMANDS.join(", ")})`);
+    }
     printSeparator();
     console.log();
   }
 
-  await assertThinUserZshrc();
+  if (profile.shell) await assertThinUserZshrc();
   await configureRepoGitHooks();
 
   if (!compactOutput) {
@@ -887,27 +954,30 @@ export async function install(): Promise<void> {
     console.log(colors.blue("Installing in parallel..."));
   }
   await Promise.all([
-    installSharedSkills(),
-    installOpencode(),
-    installCodex(),
-    installShared(),
-    // The pool creates the private config dir and its proxy settings before installClaude merges into them.
-    installClaudePool(HOME)
-      .then(({ restartDeferred }) => {
-        if (restartDeferred) {
-          print.warning("CLIProxyAPI update needs a restart after active Claude Pool agents finish");
+    installSharedSkills(profile),
+    profile.opencode && installOpencode(profile, rtk),
+    installCodex(profile, rtk),
+    profile.shell && installShared(profile),
+    profile.claude === "pool"
+      ? // The pool creates the private config dir and its proxy settings before installClaude merges into them.
+        installClaudePool(HOME)
+          .then(({ restartDeferred }) => {
+            if (restartDeferred) {
+              print.warning("CLIProxyAPI update needs a restart after active Claude Pool agents finish");
+            } else {
+              print.success("Local Claude Pool proxy installed");
+            }
+          })
+          .then(() => installClaude(profile, rtk))
+      : installClaude(profile, rtk),
+    profile.macWatcher &&
+      installMacWatcher({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }).then(({ memcapInstalled }) => {
+        if (memcapInstalled) {
+          print.success("memcap config and Mac watcher installed");
         } else {
-          print.success("Local Claude Pool proxy installed");
+          print.warning("Mac watcher installed; install memcap with brew install alextitov19/memcap/memcap");
         }
-      })
-      .then(() => installClaude()),
-    installMacWatcher({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }).then(({ memcapInstalled }) => {
-      if (memcapInstalled) {
-        print.success("memcap config and Mac watcher installed");
-      } else {
-        print.warning("Mac watcher installed; install memcap with brew install alextitov19/memcap/memcap");
-      }
-    }),
+      }),
   ]);
 
   if (!compactOutput) {
@@ -915,6 +985,28 @@ export async function install(): Promise<void> {
     printBox("Installation completed successfully!", "green");
     console.log();
   }
+
+  return profile;
+}
+
+// Returns whether RTK hooks can be installed; a profile that requires RTK fails without a hook-capable RTK.
+async function detectRtk(profile: DeviceProfile): Promise<boolean> {
+  if (!Bun.which("rtk")) {
+    if (profile.rtk === "required") {
+      throw new Error("RTK is required. Run brew install rtk, then rerun mise run install.");
+    }
+    print.warning("RTK not found; skipped RTK hooks");
+    return false;
+  }
+
+  // Native Codex hooks require RTK 0.50.0 or newer.
+  const hookSupport = await execa("rtk", ["hook", "codex", "--help"], { stdio: "pipe", reject: false });
+  if (hookSupport.exitCode === 0) return true;
+  if (profile.rtk === "required") {
+    throw new Error("RTK needs native Codex hook support. Run brew upgrade rtk, then rerun mise run install.");
+  }
+  print.warning("RTK lacks native Codex hook support; skipped RTK hooks");
+  return false;
 }
 
 if (import.meta.main) {

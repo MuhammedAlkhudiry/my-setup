@@ -1,14 +1,14 @@
 import { CODEX_CONFIG } from "../../config/codex";
 import { MCP_SERVERS } from "../../config/mcp";
 
-export function renderCodexMcpServersToml(): string {
+export function renderCodexMcpServersToml(servers = MCP_SERVERS): string {
   const lines = [
     "# Managed by my-setup. Do not edit by hand.",
     "# Source of truth: config/mcp.ts",
     "",
   ];
-  for (const serverName of Object.keys(MCP_SERVERS).sort()) {
-    const server = MCP_SERVERS[serverName];
+  for (const serverName of Object.keys(servers).sort()) {
+    const server = servers[serverName];
     const [command, ...args] = server.command;
     lines.push(
       `[mcp_servers.${serverName}]`,

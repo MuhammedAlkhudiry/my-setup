@@ -1,6 +1,6 @@
 ---
 name: verification
-description: Use to run a project's checks after a change, or to create or repair its `CHECKLIST.md`; to rate the setup use $verification-report.
+description: Use before reporting any code change as done (feature, bug fix, merge, or delegated task) to run the project's checks, or to create or repair its `CHECKLIST.md`; to rate the setup use $verification-report.
 ---
 
 ## Workflow

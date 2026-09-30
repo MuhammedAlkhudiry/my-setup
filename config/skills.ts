@@ -44,6 +44,32 @@ export const REMOTE_SKILL_SOURCES: RemoteSkillSource[] = [
     ],
   },
   {
+    repository: "https://github.com/rorkai/app-store-connect-cli-skills.git",
+    ref: "main",
+    skills: [
+      {
+        name: "asc-cli-usage",
+        sourcePath: "skills/asc-cli-usage",
+      },
+      {
+        name: "asc-release-flow",
+        sourcePath: "skills/asc-release-flow",
+      },
+      {
+        name: "asc-submission-health",
+        sourcePath: "skills/asc-submission-health",
+      },
+      {
+        name: "asc-testflight-orchestration",
+        sourcePath: "skills/asc-testflight-orchestration",
+      },
+      {
+        name: "asc-metadata-sync",
+        sourcePath: "skills/asc-metadata-sync",
+      },
+    ],
+  },
+  {
     repository: "https://github.com/PostHog/ai-plugin.git",
     ref: "main",
     skills: [

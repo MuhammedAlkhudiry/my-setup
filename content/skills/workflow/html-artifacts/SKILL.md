@@ -3,18 +3,38 @@ name: html-artifacts
 description: Use whenever you create any HTML page or file for the user, such as a report, review, audit, design options, a visual comparison, or a visual prototype.
 ---
 
+<!-- profile:personal -->
+
 Every HTML page for the user goes through this skill and ends as a published `share-html` URL. Never hand over a local file or local URL.
+
+<!-- /profile -->
+<!-- profile:work -->
+
+Every HTML page for the user goes through this skill and ends as a local file. Never upload it to any service; it may hold company data.
+
+<!-- /profile -->
 
 The page is disposable. Spend minutes, not polish: one `index.html` with inline CSS and JS, no build step, no framework. A visual prototype may
 add a shared stylesheet and font files next to `index.html`.
 
 ## Build
 
-- Create a fresh folder under the macOS temporary directory named `<project>-<topic>.XXXX`. `share-html` publishes every non-dot file in it, so keep
+<!-- profile:personal -->
+
+- Create a fresh folder under the system temporary directory named `<project>-<topic>.XXXX`. `share-html` publishes every non-dot file in it, so keep
   scripts, logs, and raw captures elsewhere.
+  <!-- /profile -->
+  <!-- profile:work -->
+- Create a fresh folder under the system temporary directory named `<project>-<topic>.XXXX`. Keep scripts, logs, and raw captures elsewhere.
+  <!-- /profile -->
 - Keep it self-contained: relative paths, inline data, and copies of any images it needs. Never link to `localhost`, `.test` hosts, or `file://`
   paths. Capture content from a running app as screenshots or inline data.
+  <!-- profile:personal -->
 - Save screenshots as WebP or JPEG at display width. `share-html` rejects artifacts over 20 MB.
+  <!-- /profile -->
+  <!-- profile:work -->
+- Save screenshots as WebP or JPEG at display width.
+  <!-- /profile -->
 - Add a viewport meta tag and a fluid layout so it reads on a phone. Use `dir="rtl"` for Arabic content.
 - When the user will respond to individual items, give each a stable ID, a checkbox, and a notes field, plus a **Copy selected** button that copies
   Markdown.
@@ -48,6 +68,8 @@ Show each item as it would look, not as text about it.
   fragment file per item, then assemble one page.
 - Check every mockup screenshot for clipping, overlap, and wrong text direction before publishing.
 
+<!-- profile:personal -->
+
 ## Publish
 
 - Open the page once and fix anything visibly broken.
@@ -55,3 +77,13 @@ Show each item as it would look, not as text about it.
 - Give the user the printed URL only.
 - When `share-html` reports that `cf` is not signed in, repair access with $service-access. When it reports that the host is not behind
   Cloudflare Access, stop and report it; never publish another way.
+
+<!-- /profile -->
+<!-- profile:work -->
+
+## Hand over
+
+- Open the page once and fix anything visibly broken.
+- Give the user the absolute path to `index.html` as a Markdown link. Never publish it with `share-html` or any other upload.
+
+<!-- /profile -->

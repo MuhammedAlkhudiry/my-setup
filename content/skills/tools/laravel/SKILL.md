@@ -33,6 +33,9 @@ Prefer, in order:
 2. A config value when a redeploy is an acceptable way to change it.
 3. An environment variable for runtime-specific values. Call `env()` only in config files; use `config()` everywhere else.
 
+Never add a feature flag or an on/off environment variable, such as `FEATURE_ENABLED`, unless the agreed plan includes it or an installed package
+already defines it. Ship the behavior directly.
+
 ## Eloquent
 
 Write queries that read like a sentence.

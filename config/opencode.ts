@@ -1,3 +1,4 @@
+import type { DeviceProfile } from "./devices";
 import { MODELS } from "./models";
 import { createOpencodeMcpConfig, createOpencodeMcpToolConfig } from "./mcp";
 import { createOpencodePermission } from "./permissions";
@@ -25,7 +26,7 @@ export interface OpencodeConfig {
   };
 }
 
-export function createOpencodeConfig(homeDir: string): OpencodeConfig {
+export function createOpencodeConfig(profile: DeviceProfile, homeDir: string): OpencodeConfig {
   return {
     $schema: "https://opencode.ai/config.json",
     instructions: [],
@@ -38,7 +39,7 @@ export function createOpencodeConfig(homeDir: string): OpencodeConfig {
     },
     model: MODELS.smart,
     small_model: MODELS.fast,
-    permission: createOpencodePermission(homeDir),
+    permission: createOpencodePermission(profile, homeDir),
     agent: {
       plan: {
         disable: true,

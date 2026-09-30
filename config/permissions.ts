@@ -1,37 +1,12 @@
 /**
- * Shared command and path allowlist rendered into every agent's permission surface:
+ * Renders a device profile's command and path allowlist into every agent's permission surface:
  * OpenCode `permission`, Claude Code `permissions.allow`, and Codex execpolicy rules.
+ * The allowlists themselves live in config/devices.ts.
  */
 
-// Commands agents may run without approval. Each entry is a command prefix.
-export const ALLOWED_COMMAND_PREFIXES = [
-  "git",
-  "grep",
-  "rg",
-  "find",
-  "ls",
-  "cat",
-  "head",
-  "tail",
-  "wc",
-  "herd",
-  "mise",
-  "bun",
-  "composer",
-  "pk",
-  "share-html",
-  "doctor",
-  "system-tools",
-] as const;
+import type { DeviceProfile } from "./devices";
 
-// Directories agents may read and edit outside the current project. `~` is expanded per agent.
-export const ALLOWED_DIRECTORIES = [
-  "~/PhpstormProjects/*",
-  "/tmp/*",
-  "/private/tmp/*",
-  "~/.config/*",
-  "~/.agents/*",
-] as const;
+type Allowlist = Pick<DeviceProfile, "allowedCommands" | "allowedDirectories">;
 
 // File patterns that are readable even when an agent would otherwise ask.
 export const ALLOWED_READ_PATTERNS = ["**/.env*"] as const;
@@ -40,7 +15,10 @@ export function expandHome(pattern: string, homeDir: string): string {
   return pattern.startsWith("~/") ? `${homeDir}/${pattern.slice(2)}` : pattern;
 }
 
-export function createOpencodePermission(homeDir: string): {
+export function createOpencodePermission(
+  profile: Allowlist,
+  homeDir: string,
+): {
   external_directory: Record<string, string>;
   read: Record<string, string>;
   bash: Record<string, string>;
@@ -49,31 +27,28 @@ export function createOpencodePermission(homeDir: string): {
     external_directory: {
       "*": "ask",
       ...Object.fromEntries(
-        ALLOWED_DIRECTORIES.map((directory) => [
-          directory.startsWith("~/") ? expandHome(directory, homeDir) : directory,
-          "allow",
-        ]),
+        profile.allowedDirectories.map((directory) => [expandHome(directory, homeDir), "allow"]),
       ),
     },
     read: Object.fromEntries(ALLOWED_READ_PATTERNS.map((pattern) => [pattern, "allow"])),
-    bash: Object.fromEntries(ALLOWED_COMMAND_PREFIXES.map((command) => [`${command} *`, "allow"])),
+    bash: Object.fromEntries(profile.allowedCommands.map((command) => [`${command} *`, "allow"])),
   };
 }
 
-export function createClaudePermissionAllowList(): string[] {
+export function createClaudePermissionAllowList(profile: Allowlist): string[] {
   return [
-    ...ALLOWED_DIRECTORIES.flatMap((directory) => [`Edit(${directory})`, `Read(${directory})`]),
+    ...profile.allowedDirectories.flatMap((directory) => [`Edit(${directory})`, `Read(${directory})`]),
     ...ALLOWED_READ_PATTERNS.map((pattern) => `Read(${pattern})`),
-    ...ALLOWED_COMMAND_PREFIXES.map((command) => `Bash(${command} *)`),
+    ...profile.allowedCommands.map((command) => `Bash(${command} *)`),
   ];
 }
 
-export function renderCodexRules(): string {
+export function renderCodexRules(profile: Allowlist): string {
   return [
     "# Managed by my-setup. Do not edit by hand.",
-    "# Source of truth: config/permissions.ts",
+    "# Source of truth: config/devices.ts",
     "",
-    ...ALLOWED_COMMAND_PREFIXES.map(
+    ...profile.allowedCommands.map(
       (command) => `prefix_rule(pattern=[${JSON.stringify(command)}], decision="allow")`,
     ),
     "",

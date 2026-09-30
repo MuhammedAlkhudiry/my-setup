@@ -293,6 +293,34 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
+        name: "asc",
+        level: "required",
+        why: "App Store Connect API CLI for TestFlight, App Store releases, screenshots, and store status in mobile-app-infra.",
+        versionArgs: ["version"],
+        latest: {
+          type: "homebrew",
+          formula: "asc",
+        },
+        update: {
+          commands: ["brew upgrade asc"],
+          note: "Install with brew install asc. The synced zsh config disables its telemetry and skill update checks.",
+        },
+      },
+      {
+        name: "gpc",
+        level: "required",
+        why: "Google Play Developer API CLI for releases, rollouts, listings, screenshots, and store status in mobile-app-infra.",
+        versionArgs: ["--version"],
+        latest: {
+          type: "homebrew",
+          formula: "yasserstudio/tap/gpc",
+        },
+        update: {
+          commands: ["brew upgrade yasserstudio/tap/gpc"],
+          note: "Install with brew install yasserstudio/tap/gpc.",
+        },
+      },
+      {
         name: "fzf",
         level: "optional",
         why: "Used by the zsh fzf plugin and the project picker.",

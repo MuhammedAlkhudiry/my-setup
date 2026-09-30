@@ -34,6 +34,12 @@ export PATH="$PATH:$ANDROID_HOME/emulator"
 export PATH="$PATH:$ANDROID_HOME/platform-tools"
 export JAVA_HOME="/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home"
 
+# --- Store CLIs --------------------------------------------------------------
+# Stops the App Store Connect CLI from sending usage telemetry. Its skills are
+# declared in config/skills.ts, so its own skill update checks stay off.
+export ASC_TELEMETRY_DISABLED=1
+export ASC_SKILLS_AUTO_CHECK=0
+
 # --- External SSD ------------------------------------------------------------
 # Names the external dev drive that holds Android emulators and archived projects.
 # `~ssd` works like `~` in zsh; `$SSD` is for scripts and other tools.

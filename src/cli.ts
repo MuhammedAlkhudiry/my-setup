@@ -30,8 +30,11 @@ cli
   .command("install", "Install generated rules, config, skills, and shell helpers locally")
   .option("--compact", "Print only warnings, failures, and the final result")
   .action(async (options: { compact?: boolean }) => {
-    await install();
-    await runScript("zsh", [join(ROOT_DIR, "shell", "doctor.zsh")], options.compact);
+    const profile = await install();
+    // `doctor` is part of the zsh layer, so only profiles with that layer run it.
+    if (profile.shell) {
+      await runScript("zsh", [join(ROOT_DIR, "shell", "doctor.zsh")], options.compact);
+    }
     if (options.compact) console.log("my-setup install: ok");
   });
 

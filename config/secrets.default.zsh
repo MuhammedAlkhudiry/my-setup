@@ -13,3 +13,6 @@ export GOOGLE_ADS_CLIENT_ID=""
 export GOOGLE_ADS_CLIENT_SECRET=""
 export GOOGLE_ADS_REFRESH_TOKEN=""
 export GOOGLE_ADS_API_VERSION="v24"
+
+# OpenRouter for occasional calls to models outside the installed agents.
+export OPENROUTER_API_KEY=""
