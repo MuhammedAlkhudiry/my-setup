@@ -17,6 +17,8 @@ export interface DeviceProfile {
   shell: boolean;
   macWatcher: boolean;
   mcpServers: boolean;
+  // PhpStorm shortcuts in VS Code: the IntelliJ keymap extension plus `config/vscode.ts` (Windows keys).
+  vscodeKeymap: boolean;
   // RTK hooks are installed whenever RTK is present; `required` fails the install without it.
   rtk: "required" | "optional";
   requiredSecrets: readonly string[];
@@ -40,6 +42,7 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
     shell: true,
     macWatcher: true,
     mcpServers: true,
+    vscodeKeymap: false,
     rtk: "required",
     requiredSecrets: ["POSTHOG_CLI_API_KEY", "HUGEICONS_TOKEN"],
     excludedSkills: [],
@@ -64,6 +67,7 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
     shell: false,
     macWatcher: false,
     mcpServers: false,
+    vscodeKeymap: true,
     rtk: "optional",
     requiredSecrets: [],
     excludedSkills: [

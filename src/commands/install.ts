@@ -50,6 +50,7 @@ import { renderProfileBlocks } from "../lib/profile-blocks";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
 import { discoverLocalSkills, findUnknownSkillReferences } from "../lib/skills";
 import { validateRemoteSkillSources } from "../lib/validation";
+import { installVscodeKeymap, vscodeKeybindingsPath } from "../lib/vscode";
 
 // =============================================================================
 // Constants
@@ -943,6 +944,11 @@ export async function install(): Promise<DeviceProfile> {
       console.log(`    Secrets:  ${SHARED_PATHS.secrets}`);
       console.log(`    Bin:      ${SHARED_PATHS.binDir} (${SHARED_BIN_COMMANDS.join(", ")})`);
     }
+    if (profile.vscodeKeymap) {
+      console.log(
+        `    VS Code:  ${vscodeKeybindingsPath(HOME)} (replace) + IntelliJ keymap extension`,
+      );
+    }
     printSeparator();
     console.log();
   }
@@ -981,6 +987,20 @@ export async function install(): Promise<DeviceProfile> {
           } else {
             print.warning(
               "Mac watcher installed; install memcap with brew install alextitov19/memcap/memcap",
+            );
+          }
+        },
+      ),
+    profile.vscodeKeymap &&
+      installVscodeKeymap({ home: HOME }).then(
+        ({ keybindingsPath, backupPath, extensionsInstalled }) => {
+          if (backupPath)
+            print.warning(`Replaced VS Code keybindings; previous file saved to ${backupPath}`);
+          if (extensionsInstalled) {
+            print.success(`VS Code keymap installed to ${keybindingsPath}`);
+          } else {
+            print.warning(
+              "VS Code keybindings installed; code CLI not found, so the IntelliJ keymap extension was skipped",
             );
           }
         },
