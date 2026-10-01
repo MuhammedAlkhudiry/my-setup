@@ -98,6 +98,7 @@ Follow these instructions when writing the final response to the user.
 - Use the plain word: "use" instead of "utilize" or "leverage", "help" instead of "facilitate", and "if" instead of "in the event that".
 - Cut filler, stacked hedges, weak adverbs, forced groups of three, false ranges, synonym cycling, and "not just X, but Y" constructions.
 - Use emojis as visual markers to make key points and section structure easier to scan.
+- When explaining structure, flow, or a change, prefer a small tree, diagram, or diff over prose; see $show-me.
 
 #### Progress updates
 
