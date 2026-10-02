@@ -66,7 +66,11 @@ async function collectFiles(root: string, dir = root): Promise<ArtifactFile[]> {
     if (entry.isDirectory()) {
       files.push(...(await collectFiles(root, path)));
     } else if (entry.isFile()) {
-      files.push({ path, key: relative(root, path).split("\\").join("/"), size: (await stat(path)).size });
+      files.push({
+        path,
+        key: relative(root, path).split("\\").join("/"),
+        size: (await stat(path)).size,
+      });
     }
   }
   return files;
@@ -128,34 +132,60 @@ async function assertAccessProtected(): Promise<void> {
     },
   );
   const location = response.headers.get("location") ?? "";
-  if (!(response.status >= 300 && response.status < 400 && location.includes("cloudflareaccess.com"))) {
+  if (
+    !(response.status >= 300 && response.status < 400 && location.includes("cloudflareaccess.com"))
+  ) {
     throw new Error(
       `${SHARE_HOST} is not behind Cloudflare Access (HTTP ${response.status}); refusing to publish.`,
     );
   }
 }
 
+/** Upload attempts per file; one dropped connection or timeout should not abort a large publish. */
+export const UPLOAD_ATTEMPTS = 3;
+
+/** Runs `task` up to `attempts` times, waiting longer before each retry, and throws the last error. */
+export async function withRetry<T>(
+  task: () => Promise<T>,
+  attempts: number,
+  delayMs: (attempt: number) => number = (attempt) => 1000 * 2 ** (attempt - 1),
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await task();
+    } catch (error) {
+      if (attempt >= attempts) throw error;
+      await Bun.sleep(delayMs(attempt));
+    }
+  }
+}
+
 async function uploadFile(prefix: string, file: ArtifactFile): Promise<void> {
   const contentType = Bun.file(file.path).type || "application/octet-stream";
-  await execa(
-    "cf",
-    [
-      "r2",
-      "objects",
-      "put",
-      `${prefix}/${file.key}`,
-      "--bucket-name",
-      SHARE_BUCKET,
-      "--file",
-      file.path,
-      "--content-type",
-      contentType,
-      "--quiet",
-    ],
-    // A neutral cwd keeps a project's Cloudflare config from redirecting the upload.
-    { cwd: tmpdir() },
-  ).catch((error: { stderr?: string; message: string }) => {
-    throw new Error(`Upload of ${file.key} failed: ${error.stderr?.trim() || error.message}`);
+  const put = () =>
+    execa(
+      "cf",
+      [
+        "r2",
+        "objects",
+        "put",
+        `${prefix}/${file.key}`,
+        "--bucket-name",
+        SHARE_BUCKET,
+        "--file",
+        file.path,
+        "--content-type",
+        contentType,
+        "--quiet",
+      ],
+      // A neutral cwd keeps a project's Cloudflare config from redirecting the upload.
+      { cwd: tmpdir() },
+    );
+
+  await withRetry(put, UPLOAD_ATTEMPTS).catch((error: { stderr?: string; message: string }) => {
+    throw new Error(
+      `Upload of ${file.key} failed after ${UPLOAD_ATTEMPTS} attempts: ${error.stderr?.trim() || error.message}`,
+    );
   });
 }
 

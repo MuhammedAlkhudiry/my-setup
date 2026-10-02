@@ -10,6 +10,7 @@ import {
   findRelativeReferences,
   shareHtml,
   slugify,
+  withRetry,
 } from "./share-html";
 
 async function withDir(run: (dir: string) => Promise<void>): Promise<void> {
@@ -73,11 +74,15 @@ describe("share-html", () => {
         console.log = originalLog;
       }
 
-      expect(output[0]).toMatch(/^Would publish 2 files .* to https:\/\/share\.harium\.app\/\d{4}-\d{2}-\d{2}-demo-<random>\/index\.html$/);
-      expect(output.slice(1).map((line) => line.trim().split(" ")[0]).sort()).toEqual([
-        "index.html",
-        "shots/a.png",
-      ]);
+      expect(output[0]).toMatch(
+        /^Would publish 2 files .* to https:\/\/share\.harium\.app\/\d{4}-\d{2}-\d{2}-demo-<random>\/index\.html$/,
+      );
+      expect(
+        output
+          .slice(1)
+          .map((line) => line.trim().split(" ")[0])
+          .sort(),
+      ).toEqual(["index.html", "shots/a.png"]);
     });
   });
 
@@ -96,5 +101,26 @@ describe("share-html", () => {
       await writeFile(join(dir, "index.html"), '<a href="http://localhost:5173/">app</a>');
       await expect(shareHtml(dir, { dryRun: true })).rejects.toThrow("only work on this Mac");
     });
+  });
+
+  test("withRetry retries a failing upload and gives up after the last attempt", async () => {
+    let calls = 0;
+    const flaky = () => {
+      calls++;
+      return calls < 3 ? Promise.reject(new Error("timeout")) : Promise.resolve("ok");
+    };
+
+    expect(await withRetry(flaky, 3, () => 0)).toBe("ok");
+    expect(calls).toBe(3);
+
+    calls = 0;
+    const failing = () => {
+      calls++;
+      return Promise.reject(new Error("still down"));
+    };
+
+    expect(withRetry(failing, 2, () => 0)).rejects.toThrow("still down");
+    await Bun.sleep(5);
+    expect(calls).toBe(2);
   });
 });
