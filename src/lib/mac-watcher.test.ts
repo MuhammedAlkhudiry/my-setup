@@ -3,30 +3,30 @@ import { expect, test } from "bun:test";
 import { MAC_WATCHER, MEMCAP_CONFIG } from "../../config/mac-watcher";
 import {
   type Alert,
-  type GateInput,
+  type AlertInput,
   isMemcapActionLine,
   macWatcherPaths,
   mergeAlerts,
   pruneAlerts,
   renderMemcapConfig,
   renderWatcherLaunchAgent,
-  reviewReasons,
+  thresholdAlerts,
 } from "./mac-watcher";
 
-const quiet: GateInput = {
-  freePercent: 60,
+const quiet: AlertInput = {
   pressureLevel: "normal",
   swapUsedGib: 1,
   diskFreeGib: 200,
-  newOrphanCount: 0,
+  largestTemp: [],
   loadAverage15: 6,
   cores: 14,
-  newSustainedCpuCount: 0,
-  guardStops: 0,
-  memcapActionLines: 0,
+  orphans: [],
+  sustainedCpu: [],
+  guardStops: [],
   memcapHealthy: true,
-  hoursSinceReview: 2,
 };
+
+const keys = (input: Partial<AlertInput>) => thresholdAlerts({ ...quiet, ...input }).map((alert) => alert.key);
 
 const leak = {
   key: "playwright-orphans",
@@ -36,31 +36,32 @@ const leak = {
   fix: "Update Playwright MCP",
 };
 
-test("a healthy machine skips the Codex review", () => {
-  expect(reviewReasons(quiet)).toEqual([]);
+test("a healthy machine raises no alerts", () => {
+  expect(thresholdAlerts(quiet)).toEqual([]);
 });
 
-test("pressure, low disk, new leaks, memcap trouble, and the daily refresh each trigger a review", () => {
-  expect(reviewReasons({ ...quiet, pressureLevel: "warning" })).toEqual([
-    "memory pressure warning",
-  ]);
-  expect(reviewReasons({ ...quiet, diskFreeGib: 12 })).toEqual(["disk free 12 GiB"]);
-  expect(reviewReasons({ ...quiet, loadAverage15: 21 })).toEqual(["load 21.0 on 14 cores"]);
-  expect(reviewReasons({ ...quiet, newSustainedCpuCount: 1 })).toEqual([
-    "1 new sustained CPU users",
-  ]);
-  expect(reviewReasons({ ...quiet, guardStops: 2 })).toEqual(["2 CPU guard stops since last run"]);
-  expect(reviewReasons({ ...quiet, newOrphanCount: 3 })).toEqual([
-    "3 new orphaned agent processes",
-  ]);
-  expect(reviewReasons({ ...quiet, memcapHealthy: false })).toEqual(["memcap not healthy"]);
-  expect(reviewReasons({ ...quiet, hoursSinceReview: undefined })).toEqual([
-    "daily memory refresh",
-  ]);
-  expect(reviewReasons({ ...quiet, hoursSinceReview: 25 })).toEqual(["daily memory refresh"]);
+test("each crossed threshold opens its own stable alert", () => {
+  const busy = { command: "qemu-system-aarch64 -avd Awraq_Main", ageMinutes: 600, cpuLifetime: 90 };
+
+  expect(keys({ diskFreeGib: 15 })).toEqual(["low-disk"]);
+  expect(keys({ pressureLevel: "warning" })).toEqual(["memory-pressure"]);
+  expect(keys({ swapUsedGib: 13 })).toEqual(["high-swap"]);
+  expect(keys({ loadAverage15: 21 })).toEqual(["cpu-overload"]);
+  expect(keys({ orphans: [busy] })).toEqual(["orphaned-agent-processes"]);
+  expect(keys({ sustainedCpu: [busy] })).toEqual(["sustained-cpu"]);
+  expect(keys({ guardStops: ["stopped pid 1"] })).toEqual(["cpu-guard-stops"]);
+  expect(keys({ memcapHealthy: false })).toEqual(["memcap-unhealthy"]);
 });
 
-test("an alert opens, stays open while seen, and closes after enough clear reviews", () => {
+test("disk alerts escalate when nearly full and name the largest temp entries", () => {
+  const [warning] = thresholdAlerts({ ...quiet, diskFreeGib: 15, largestTemp: [{ path: "~/tmp/qa", gib: 6 }] });
+  const [critical] = thresholdAlerts({ ...quiet, diskFreeGib: 5 });
+
+  expect(warning).toMatchObject({ severity: "warning", evidence: "largest temp entries: ~/tmp/qa 6G" });
+  expect(critical?.severity).toBe("critical");
+});
+
+test("an alert opens, stays open while seen, and closes after enough clear runs", () => {
   const first = mergeAlerts([], [leak], "t1", 2);
   expect(first.opened.map((alert) => alert.key)).toEqual(["playwright-orphans"]);
 

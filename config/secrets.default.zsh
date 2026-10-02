@@ -16,3 +16,6 @@ export GOOGLE_ADS_API_VERSION="v24"
 
 # OpenRouter for occasional calls to models outside the installed agents.
 export OPENROUTER_API_KEY=""
+
+# share-html --writable: Access Key ID (not the secret) of an R2 API token with Object Read & Write on the shared-html bucket.
+export SHARE_HTML_R2_PARENT_ACCESS_KEY_ID=""

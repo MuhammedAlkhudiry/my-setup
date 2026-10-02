@@ -2,9 +2,9 @@
  * Mac resource watcher managed by my-setup.
  *
  * memcap does the minute-by-minute memory cleanup with fixed rules, and the CPU guard does the same for leftover agent
- * tooling that burns CPU. The watcher is a scheduled review: it collects a snapshot without AI, and only asks Codex to
- * judge it when something looks wrong. Codex never kills processes; it records patterns and alerts that `doctor` shows
- * until they stop recurring.
+ * tooling that burns CPU. The watcher runs on a schedule with fixed rules and no AI: it prunes disk, takes a snapshot, and
+ * raises threshold alerts that `doctor` shows until the numbers recover. `mac-watcher review` asks Codex to diagnose the
+ * current snapshot on demand; it never kills processes or changes stored state.
  */
 export const MAC_WATCHER = {
   label: "com.muhammed.mac-watcher",
@@ -18,21 +18,20 @@ export const MAC_WATCHER = {
     { hour: 18, minute: 7 },
     { hour: 21, minute: 7 },
   ],
+  /** Used only by the manual `review` command. */
   codex: {
     model: "gpt-6.1-sol",
     reasoningEffort: "low",
     timeoutMs: 5 * 60 * 1000,
   },
-  /** Any of these makes a run worth a Codex review. */
-  gate: {
-    minFreePercent: 25,
-    /** macOS keeps swap long after pressure passes, so only heavy swap counts on its own. */
+  /** Crossing any of these opens an alert. */
+  thresholds: {
+    /** macOS keeps swap long after pressure passes, so only heavy swap counts. */
     maxSwapUsedGib: 12,
     minDiskFreeGib: 20,
-    /** Processes whose parent died, matching agent tooling, older than this, count as leaks; only new ones trigger a review. */
+    criticalDiskFreeGib: 10,
+    /** Processes whose parent died, matching agent tooling, older than this, count as leaks. */
     orphanMinAgeMinutes: 60,
-    /** Refresh Codex's memory and recheck open alerts at least this often, even on quiet days. */
-    maxHoursWithoutReview: 24,
   },
   cpu: {
     /** Leftover agent tooling (parent exited) is stopped after staying at this CPU for this long. Nothing else is. */
@@ -40,15 +39,37 @@ export const MAC_WATCHER = {
     /** Any process averaging this CPU over its life for this long is reported to the watcher, never stopped. */
     sustainedPercent: 80,
     sustainedMinMinutes: 30,
-    /** A 15-minute load average above cores times this triggers a review. */
+    /** A 15-minute load average above cores times this opens an alert. */
     maxLoadPerCore: 1,
   },
-  /** Consecutive Codex reviews without seeing an alert before it closes on its own. */
-  autoResolveAfterClearReviews: 3,
+  /**
+   * Disk cleanup that runs before every snapshot with fixed rules and no AI. Paths are relative to home. Archived files
+   * move to the external SSD and are skipped while it is unmounted; nothing a running process holds open is touched.
+   */
+  storage: {
+    archiveVolume: "/Volumes/DevSSD",
+    archiveRoot: "/Volumes/DevSSD/archive",
+    /** Each direct child older than `days` is deleted; `match` limits which children count. */
+    deleteChildren: [
+      { path: ".maestro/tests", days: 3 },
+      { path: "Library/Developer/Xcode/DerivedData", days: 14, match: /-[a-z]{28}$/ },
+    ],
+    /** Files older than `days` move to the same relative path under `archiveRoot/to`. */
+    archiveFiles: [
+      { path: ".codex/sessions", days: 14, to: "codex/sessions" },
+      { path: ".codex/generated_images", days: 14, to: "codex/generated_images" },
+    ],
+    /**
+     * Linked worktrees of active projects are removed once clean, unlocked, landed, and idle this long. Only worktrees
+     * under these agent-managed folders count; worktrees a person placed elsewhere are never touched.
+     */
+    worktreeIdleDays: 7,
+    agentWorktreeDirs: ["/.claude/worktrees/", "/.codex/worktrees/", "/.t3/worktrees/"],
+  },
+  /** Consecutive runs without seeing an alert before it closes on its own. */
+  autoResolveAfterClearRuns: 2,
   /** Runs kept in the watcher's history. */
   historyLimit: 60,
-  /** Learned patterns kept between runs. */
-  patternLimit: 15,
 } as const;
 
 /**

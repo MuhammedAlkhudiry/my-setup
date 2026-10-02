@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
 
 /**
- * Mac resource watcher. `run` is the scheduled review and `guard` the minute-by-minute CPU guard, each started by its own
- * LaunchAgent; `status` and `resolve` are for people.
+ * Mac resource watcher. `run` is the scheduled pass and `guard` the minute-by-minute CPU guard, each started by its own
+ * LaunchAgent; `status`, `resolve`, `prune`, and `review` are for people.
  *
- * Each run collects a snapshot without AI, and asks Codex for a fresh, read-only review only when something looks wrong,
- * alerts are open, or the daily memory refresh is due. Memory between runs lives in the watcher state directory.
+ * Each run frees disk with the fixed storage rules, takes a snapshot, and opens or closes threshold alerts, all without AI.
+ * `review` asks Codex for a read-only diagnosis of a fresh snapshot and stores nothing.
  */
 
 import { existsSync, readFileSync, statfsSync } from "node:fs";
@@ -27,7 +27,6 @@ import {
 } from "../lib/cpu-guard";
 import {
   type Alert,
-  type GateInput,
   type Review,
   REVIEW_JSON_SCHEMA,
   fileAgeSeconds,
@@ -38,10 +37,11 @@ import {
   pruneAlerts,
   readAlerts,
   readState,
-  reviewReasons,
   reviewSchema,
+  thresholdAlerts,
   writeJson,
 } from "../lib/mac-watcher";
+import { pruneStorage, summarizePrune } from "../lib/storage-prune";
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
 const HOME = process.env.HOME || "";
@@ -124,7 +124,7 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
   const swapUsedGib = Number(swapText.match(/used = ([\d.]+)M/)?.[1] ?? 0) / 1024;
   const disk = statfsSync(HOME);
   const diskFreeGib = (disk.bavail * disk.bsize) / GIB;
-  const largestTemp = diskFreeGib < MAC_WATCHER.gate.minDiskFreeGib ? await largestTempEntries() : [];
+  const largestTemp = diskFreeGib < MAC_WATCHER.thresholds.minDiskFreeGib ? await largestTempEntries() : [];
 
   const families = new Map<string, { processes: number; rssMib: number }>();
   for (const row of processes) {
@@ -139,7 +139,7 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
   const orphans = processes
     .filter(
       (row) =>
-        isOrphanedAgentTooling(row, uid) && row.ageSeconds >= MAC_WATCHER.gate.orphanMinAgeMinutes * 60,
+        isOrphanedAgentTooling(row, uid) && row.ageSeconds >= MAC_WATCHER.thresholds.orphanMinAgeMinutes * 60,
     )
     .map((row) => ({
       pid: row.pid,
@@ -244,13 +244,11 @@ function memcapHealthy(snapshot: Snapshot): boolean {
 // Codex review
 // =============================================================================
 
-async function reviewWithCodex(snapshot: Snapshot, patterns: string[], openAlerts: Alert[]): Promise<Review> {
+async function reviewWithCodex(snapshot: Snapshot, openAlerts: Alert[]): Promise<Review> {
   const instructions = readFileSync(join(ROOT_DIR, "config/mac-watcher-prompt.md"), "utf8");
   const prompt = [
     instructions,
-    "## Learned patterns",
-    patterns.length > 0 ? patterns.map((pattern) => `- ${pattern}`).join("\n") : "None yet.",
-    "## Open alerts",
+    "## Open threshold alerts",
     openAlerts.length > 0
       ? JSON.stringify(
           openAlerts.map(({ key, severity, title, evidence, fix, firstSeen, seenCount }) => ({
@@ -295,8 +293,7 @@ async function reviewWithCodex(snapshot: Snapshot, patterns: string[], openAlert
     ],
     { input: prompt, timeout: codex.timeoutMs, stdout: "ignore", stderr: "pipe" },
   );
-  const review = reviewSchema.parse(JSON.parse(readFileSync(paths.codexOutput, "utf8")));
-  return { ...review, patterns: review.patterns.slice(0, MAC_WATCHER.patternLimit) };
+  return reviewSchema.parse(JSON.parse(readFileSync(paths.codexOutput, "utf8")));
 }
 
 async function notify(alert: Alert): Promise<void> {
@@ -310,64 +307,46 @@ async function notify(alert: Alert): Promise<void> {
 // Commands
 // =============================================================================
 
-async function runOnce(force: boolean): Promise<void> {
+async function runOnce(): Promise<void> {
   const state = readState(paths);
   const now = new Date();
   const at = now.toISOString();
   state.lastRunAt = at;
 
   try {
-    const alerts = readAlerts(paths);
-    const openAlerts = alerts.filter((alert) => alert.status === "open");
+    // A failed cleanup must not cost the alerts, which still report low disk.
+    await prune(false, now).catch((error) => console.error(`[${at}] storage prune failed: ${String(error)}`));
+
     const { snapshot, memcapLogOffset, guardLogOffset } = await collectSnapshot(
       state.memcapLogOffset,
       state.guardLogOffset,
     );
     await writeJson(paths.lastSnapshot, snapshot);
 
-    const gate: GateInput = {
-      freePercent: snapshot.memory.freePercent,
+    const observed = thresholdAlerts({
       pressureLevel: snapshot.memory.pressureLevel,
       swapUsedGib: snapshot.memory.swapUsedGib,
       diskFreeGib: snapshot.diskFreeGib,
+      largestTemp: snapshot.largestTemp,
       loadAverage15: snapshot.cpu.loadAverage[2],
       cores: snapshot.cpu.cores,
-      newSustainedCpuCount: snapshot.cpu.sustained.filter((row) => !state.seenCpuPids.includes(row.pid)).length,
-      guardStops: snapshot.cpu.guardStops.length,
-      newOrphanCount: snapshot.orphans.filter((orphan) => !state.seenOrphanPids.includes(orphan.pid)).length,
-      memcapActionLines: snapshot.memcap.actionLineCount,
+      orphans: snapshot.orphans,
+      sustainedCpu: snapshot.cpu.sustained,
+      guardStops: snapshot.cpu.guardStops,
       memcapHealthy: memcapHealthy(snapshot),
-      hoursSinceReview: state.lastReviewAt
-        ? (now.getTime() - Date.parse(state.lastReviewAt)) / 3_600_000
-        : undefined,
-    };
-    const reasons = force ? ["manual run"] : reviewReasons(gate);
-
-    let note = "Quiet run; no review needed.";
-    if (reasons.length > 0) {
-      const review = await reviewWithCodex(snapshot, state.patterns, openAlerts);
-      const merged = mergeAlerts(alerts, review.alerts, at);
-      await writeJson(paths.alerts, pruneAlerts(merged.alerts, now));
-      for (const alert of merged.opened) {
-        if (alert.severity !== "info") await notify(alert);
-      }
-      state.patterns = review.patterns;
-      state.lastReviewAt = at;
-      note = review.runNote;
-      console.log(
-        `[${at}] reviewed (${reasons.join(", ")}): ${note} opened=${merged.opened.length} resolved=${merged.resolved.length}`,
-      );
-    } else {
-      console.log(`[${at}] ${note}`);
+    });
+    const merged = mergeAlerts(readAlerts(paths), observed, at);
+    await writeJson(paths.alerts, pruneAlerts(merged.alerts, now));
+    for (const alert of merged.opened) {
+      if (alert.severity !== "info") await notify(alert);
     }
+    console.log(
+      `[${at}] alerts: ${observed.map((alert) => alert.key).join(", ") || "none"} opened=${merged.opened.length} resolved=${merged.resolved.length}`,
+    );
 
     state.memcapLogOffset = memcapLogOffset;
-    state.seenOrphanPids = snapshot.orphans.map((orphan) => orphan.pid);
     state.guardLogOffset = guardLogOffset;
-    state.seenCpuPids = snapshot.cpu.sustained.map((row) => row.pid);
-    state.runs = [...state.runs, { at, reviewed: reasons.length > 0, reasons, note }].slice(
-      -MAC_WATCHER.historyLimit,
-    );
+    state.runs = [...state.runs, { at, alerts: observed.map((alert) => alert.key) }].slice(-MAC_WATCHER.historyLimit);
     state.lastSuccessAt = at;
     state.lastError = undefined;
   } catch (error) {
@@ -377,6 +356,34 @@ async function runOnce(force: boolean): Promise<void> {
   } finally {
     await writeJson(paths.state, state);
   }
+}
+
+/** On-demand Codex diagnosis of a fresh snapshot; prints its findings and leaves alerts and offsets untouched. */
+async function review(): Promise<void> {
+  const state = readState(paths);
+  const { snapshot } = await collectSnapshot(state.memcapLogOffset, state.guardLogOffset);
+  const open = readAlerts(paths).filter((alert) => alert.status === "open");
+  const result = await reviewWithCodex(snapshot, open);
+
+  console.log(result.runNote);
+  for (const alert of result.alerts) {
+    console.log(`\n[${alert.severity}] ${alert.title}\n  evidence: ${alert.evidence}\n  fix: ${alert.fix}`);
+  }
+}
+
+async function prune(dryRun: boolean, now = new Date()): Promise<void> {
+  const report = await pruneStorage({ home: HOME, now, dryRun });
+  if (!dryRun) await writeJson(paths.storagePrune, report);
+
+  console.log(`[${report.at}] storage: ${summarizePrune(report)}`);
+  if (!dryRun) return;
+  for (const entry of [...report.deleted, ...report.worktreesRemoved]) {
+    console.log(`  remove ${(entry.bytes / 1024 ** 3).toFixed(2)}G ${shortCommand(entry.path)}`);
+  }
+  for (const kept of report.worktreesKept) {
+    console.log(`  keep worktree ${shortCommand(kept.path)} (${kept.reason}, idle ${kept.idleDays}d)`);
+  }
+  for (const error of report.errors) console.log(`  error ${error}`);
 }
 
 function readGuardState(): GuardState {
@@ -419,18 +426,13 @@ function printStatus(): void {
   const open = alerts.filter((alert) => alert.status === "open");
   console.log(`Last run: ${state.lastRunAt ?? "never"}`);
   console.log(`Last success: ${state.lastSuccessAt ?? "never"}`);
-  console.log(`Last Codex review: ${state.lastReviewAt ?? "never"}`);
   if (state.lastError) console.log(`Last error: ${state.lastError}`);
   console.log(`\nOpen alerts (${open.length}):`);
   for (const alert of open) {
     console.log(`- [${alert.severity}] ${alert.key}: ${alert.title}\n  evidence: ${alert.evidence}\n  fix: ${alert.fix}`);
   }
-  console.log(`\nLearned patterns (${state.patterns.length}):`);
-  for (const pattern of state.patterns) console.log(`- ${pattern}`);
   console.log("\nRecent runs:");
-  for (const entry of state.runs.slice(-10)) {
-    console.log(`- ${entry.at} ${entry.reviewed ? "reviewed" : "quiet"}: ${entry.note}`);
-  }
+  for (const entry of state.runs.slice(-10)) console.log(`- ${entry.at}: ${entry.alerts.join(", ") || "no alerts"}`);
 }
 
 async function resolveAlert(key: string | undefined): Promise<void> {
@@ -448,7 +450,13 @@ async function resolveAlert(key: string | undefined): Promise<void> {
 const [command = "status", ...args] = process.argv.slice(2);
 switch (command) {
   case "run":
-    await runOnce(args.includes("--force"));
+    await runOnce();
+    break;
+  case "review":
+    await review();
+    break;
+  case "prune":
+    await prune(args.includes("--dry-run"));
     break;
   case "guard":
     await guardOnce();
@@ -460,6 +468,6 @@ switch (command) {
     await resolveAlert(args[0]);
     break;
   default:
-    console.error("usage: mac-watcher run [--force] | guard | status | resolve <alert-key>");
+    console.error("usage: mac-watcher run | review | prune [--dry-run] | guard | status | resolve <alert-key>");
     process.exitCode = 2;
 }

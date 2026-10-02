@@ -308,9 +308,11 @@ function assess(options: { cwd: string; remote: string; fetch: boolean }): {
     const head = ref(pr.head);
     const stack = stacks.get(pr.number) as { parent: number | null; root: number };
 
-    // A stacked PR's own changes: compare its head with its base branch already merged into the default branch.
+    // A stacked PR's own changes: when its head already contains the default branch, compare it with its base branch
+    // merged into the default branch; otherwise the default branch's newer changes would count as the PR's own.
+    const headHasMain = git(["merge-base", "--is-ancestor", mainRef, head]).ok;
     const mergedBase =
-      pr.base === defaultBranch
+      pr.base === defaultBranch || !headHasMain
         ? null
         : git(["merge-tree", "--write-tree", mainRef, ref(pr.base)])
             .out.split("\n")[0]

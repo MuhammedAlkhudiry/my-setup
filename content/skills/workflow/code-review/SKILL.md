@@ -27,7 +27,8 @@ Judge the change on its merits, not on how close it is to shipping; a major chan
 
 - **Standards** (high focus): Check correctness and handling of reasonable edge cases.
 - **Requirements** (high focus): Check that behavior matches the agreed requirements.
-- **Completeness** (high focus): Identify unfinished work, unusable tests, and shortcuts that make incomplete work appear finished.
+- **Completeness** (high focus): Identify unfinished work, unusable tests, and shortcuts that make incomplete work appear finished, including
+  weakened or deleted tests. Judge added tests with $test-writing and report the ones it rejects.
 - **Performance** (high focus): Identify unnecessary work, excessive resource use, and slowdowns caused by the changes.
 - **Security** (low focus): Check for exposed data and unauthorized access or actions.
 - **Backward compatibility** (high focus): Check that existing clients, integrations, and stored data still work.

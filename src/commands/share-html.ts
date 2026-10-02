@@ -1,16 +1,28 @@
 import { randomBytes } from "node:crypto";
-import { readFile, readdir, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { basename, join, relative, resolve } from "node:path";
+import { mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { basename, dirname, join, relative, resolve } from "node:path";
 
+import { S3Client } from "bun";
 import { execa } from "execa";
 
 // Cloudflare setup this command relies on: the R2 bucket has a lifecycle rule that deletes
 // objects after RETENTION_DAYS, and SHARE_HOST is its custom domain behind Cloudflare Access.
+// Writable pages also need a CORS rule on the bucket that allows PUT from SHARE_HOST, and an
+// R2 API token whose access key ID is in PARENT_KEY_ENV; only short-lived child keys leave this Mac.
 export const SHARE_BUCKET = "shared-html";
 export const SHARE_HOST = "share.harium.app";
+export const SHARE_ACCOUNT_ID = "79e2c6100c3c858bea905f9f200823b5";
 export const RETENTION_DAYS = 30;
 export const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
+
+export const FEEDBACK_KEY = "feedback.json";
+export const FEEDBACK_ENDPOINT_KEY = "feedback-endpoint.json";
+export const FEEDBACK_TTL_SECONDS = 7 * 24 * 60 * 60;
+export const PARENT_KEY_ENV = "SHARE_HTML_R2_PARENT_ACCESS_KEY_ID";
+const WRITABLE_INDEX = join(homedir(), ".local", "state", "share-html", "writable.json");
+const WRITABLE_INDEX_LIMIT = 50;
+const PREFIX_PATTERN = /^(?:https?:\/\/[^/]+\/)?(\d{4}-\d{2}-\d{2}-[a-z0-9-]+-[0-9a-f]{8})(?:\/|$)/;
 
 const UPLOAD_CONCURRENCY = 4;
 const LOCAL_ONLY_REFERENCE =
@@ -21,6 +33,18 @@ const EXTERNAL_PREFIX = /^(?:[a-z][a-z0-9+.-]*:|\/\/|#)/i;
 interface ShareOptions {
   name?: string;
   dryRun?: boolean;
+  writable?: boolean;
+}
+
+interface WritablePage {
+  prefix: string;
+  publishedAt: string;
+}
+
+interface TemporaryCredentials {
+  accessKeyId: string;
+  secretAccessKey: string;
+  sessionToken: string;
 }
 
 export interface ArtifactFile {
@@ -205,6 +229,104 @@ function formatBytes(bytes: number): string {
     : `${Math.ceil(bytes / 1024)} KB`;
 }
 
+const pageUrl = (prefix: string) => `https://${SHARE_HOST}/${prefix}/index.html`;
+
+/** Pulls the artifact prefix out of a share URL or a bare prefix. */
+export function prefixFromRef(ref: string): string | undefined {
+  return ref.trim().match(PREFIX_PATTERN)?.[1];
+}
+
+/** Finds the credentials in `cf r2 temporary-credentials create` output, whatever its envelope. */
+export function parseTemporaryCredentials(output: string): TemporaryCredentials {
+  const pick = (value: unknown): TemporaryCredentials | undefined => {
+    if (!value || typeof value !== "object") return undefined;
+    const record = value as Record<string, unknown>;
+    const field = (...names: string[]) => names.map((name) => record[name]).find((v) => typeof v === "string") as string | undefined;
+    const accessKeyId = field("accessKeyId", "access_key_id");
+    const secretAccessKey = field("secretAccessKey", "secret_access_key");
+    const sessionToken = field("sessionToken", "session_token");
+    if (accessKeyId && secretAccessKey && sessionToken) return { accessKeyId, secretAccessKey, sessionToken };
+    return Object.values(record).map(pick).find(Boolean);
+  };
+
+  const start = output.indexOf("{");
+  const credentials = start >= 0 ? pick(JSON.parse(output.slice(start))) : undefined;
+  if (!credentials) throw new Error("cf returned no temporary credentials");
+  return credentials;
+}
+
+/** Picks the page `share-html feedback` reads: a URL or prefix, else the newest page whose name matches, else the newest. */
+export function resolveWritablePage(pages: WritablePage[], ref?: string): string | undefined {
+  const direct = ref ? prefixFromRef(ref) : undefined;
+  if (direct) return direct;
+
+  const newestFirst = [...pages].sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
+  if (!ref) return newestFirst[0]?.prefix;
+
+  const slug = slugify(ref);
+  return newestFirst.find((page) => page.prefix.includes(slug))?.prefix;
+}
+
+async function readWritableIndex(): Promise<WritablePage[]> {
+  return JSON.parse(await readFile(WRITABLE_INDEX, "utf8").catch(() => "[]")) as WritablePage[];
+}
+
+async function rememberWritablePage(prefix: string): Promise<void> {
+  const pages = [{ prefix, publishedAt: new Date().toISOString() }, ...(await readWritableIndex())];
+  await mkdir(dirname(WRITABLE_INDEX), { recursive: true });
+  await writeFile(WRITABLE_INDEX, JSON.stringify(pages.slice(0, WRITABLE_INDEX_LIMIT), null, 2));
+}
+
+function parentAccessKeyId(): string {
+  const id = process.env[PARENT_KEY_ENV];
+  if (!id) {
+    throw new Error(
+      `${PARENT_KEY_ENV} is not set. Create an R2 API token with Object Read & Write on ${SHARE_BUCKET} ` +
+        "and put its Access Key ID in the local secrets file.",
+    );
+  }
+  return id;
+}
+
+/**
+ * Mints a presigned PUT URL that can write only this page's feedback file, and stores it in a file
+ * uploaded beside the page. The page itself is behind Cloudflare Access, so only the owner sees the URL.
+ */
+async function createFeedbackEndpoint(prefix: string, parentKeyId: string): Promise<ArtifactFile> {
+  const key = `${prefix}/${FEEDBACK_KEY}`;
+  const { stdout } = await execa(
+    "cf",
+    [
+      "r2",
+      "temporary-credentials",
+      "create",
+      "--bucket",
+      SHARE_BUCKET,
+      "--parent-access-key-id",
+      parentKeyId,
+      "--permission",
+      "object-read-write",
+      "--objects",
+      key,
+      "--ttl-seconds",
+      String(FEEDBACK_TTL_SECONDS),
+    ],
+    { cwd: tmpdir() },
+  );
+
+  const client = new S3Client({
+    ...parseTemporaryCredentials(stdout),
+    bucket: SHARE_BUCKET,
+    endpoint: `https://${SHARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  });
+  const put = client.presign(key, { method: "PUT", expiresIn: FEEDBACK_TTL_SECONDS });
+  const expires = new Date(Date.now() + FEEDBACK_TTL_SECONDS * 1000).toISOString();
+
+  const path = join(await mkdtemp(join(tmpdir(), "share-html-endpoint-")), FEEDBACK_ENDPOINT_KEY);
+  await writeFile(path, JSON.stringify({ put, expires }));
+  return { path, key: FEEDBACK_ENDPOINT_KEY, size: (await stat(path)).size };
+}
+
 export async function shareHtml(input: string, options: ShareOptions): Promise<void> {
   const { files, name } = await resolveArtifact(input);
   await assertPortable(files);
@@ -218,17 +340,47 @@ export async function shareHtml(input: string, options: ShareOptions): Promise<v
       `Would publish ${files.length} files (${formatBytes(total)}) to https://${SHARE_HOST}/${example}/index.html`,
     );
     for (const file of files) console.log(`  ${file.key} (${formatBytes(file.size)})`);
+    if (options.writable) console.log(`  + ${FEEDBACK_ENDPOINT_KEY} (lets the page save feedback for 7 days)`);
     return;
   }
 
+  const parentKeyId = options.writable ? parentAccessKeyId() : undefined;
   const prefix = artifactPrefix(options.name || name);
-  const url = `https://${SHARE_HOST}/${prefix}/index.html`;
   await assertAccessProtected();
-  await upload(prefix, files);
+
+  const endpoint = parentKeyId ? await createFeedbackEndpoint(prefix, parentKeyId) : undefined;
+  await upload(prefix, endpoint ? [...files, endpoint] : files);
+  if (endpoint) await rememberWritablePage(prefix);
 
   const expires = new Date(Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000);
-  console.log(url);
+  console.log(pageUrl(prefix));
   console.log(
     `${files.length} files, ${formatBytes(total)}. Deleted automatically after ${expires.toISOString().slice(0, 10)}.`,
   );
+  if (endpoint) console.log('Writable for 7 days. When the user says "see", run `share-html feedback`.');
+}
+
+/** Prints the feedback a writable page saved, for the agent to act on. */
+export async function readFeedback(ref?: string): Promise<void> {
+  const prefix = resolveWritablePage(await readWritableIndex(), ref);
+  if (!prefix) {
+    throw new Error(ref ? `No writable page matches "${ref}".` : "No writable page has been published from this Mac yet.");
+  }
+
+  const result = await execa(
+    "cf",
+    ["r2", "objects", "get", `${prefix}/${FEEDBACK_KEY}`, "--bucket-name", SHARE_BUCKET],
+    { cwd: tmpdir(), reject: false },
+  );
+  if (result.exitCode !== 0) {
+    if (/does not exist|10007/.test(result.stderr)) {
+      console.log(`No feedback saved yet on ${pageUrl(prefix)}`);
+      return;
+    }
+    throw new Error(`Reading feedback failed: ${result.stderr.trim()}`);
+  }
+
+  const saved = JSON.parse(result.stdout) as { markdown?: string; savedAt?: string };
+  console.log(`Saved ${saved.savedAt ?? "at an unknown time"} on ${pageUrl(prefix)}\n`);
+  console.log(saved.markdown?.trim() || "(The page saved no summary.)");
 }

@@ -369,10 +369,11 @@ async function mergeClaudeSettingsAsync(
       print.warning("Failed to parse existing Claude Code settings, creating new file");
     }
   }
-  const { permissions, ...managedKeys } = createClaudeManagedSettings(profile);
+  const { permissions, env, ...managedKeys } = createClaudeManagedSettings(profile);
   const merged = {
     ...existing,
     ...managedKeys,
+    env: { ...(existing.env as Record<string, unknown> | undefined), ...env },
     hooks: rtk ? mergeRtkHooks(existing.hooks, "claude") : existing.hooks,
     permissions: {
       ...(existing.permissions as Record<string, unknown> | undefined),

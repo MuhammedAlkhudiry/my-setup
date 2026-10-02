@@ -48,7 +48,9 @@ Help the user reach the best result. Do not help them follow a bad direction jus
 - for image generation, use Codex cli.
   <!-- profile:personal -->
 - **OPENROUTER** — For occasional calls to models outside the installed agents, use OpenRouter with `$OPENROUTER_API_KEY` from the local
-  secrets file.
+  secrets file. Pick the cheapest model that can do the job. Never route a frontier model, such as Claude, GPT, or Gemini Pro, through
+  OpenRouter. Use a model without asking only when it is very cheap: about $0.05 or less for the whole task. Otherwise, before the first call,
+  tell the user the model, its price, and the expected total, and wait for approval.
   <!-- /profile -->
 
 ## Repo Context
@@ -70,12 +72,22 @@ Use these projects as references when the user mentions them.
 ## Behavior
 
 - **BUG-FIX-PREVENTION** — For each bug you fix, search the codebase for the same pattern. In the handoff, state for each bug how to prevent it
-  from happening again, the similar bugs you found, and how to automate prevention, such as with a test, type, lint rule, or CI check.
+  from happening again, the similar bugs you found, and how to automate prevention. Prefer a type, lint rule, or CI check; suggest a test only
+  when none of them can catch it.
   <!-- profile:personal -->
 - **CROSS-PROJECT-PARITY** — When you add something to one active project that is project-agnostic, such as a generic fix, check, tooling change,
   or shared pattern, say so in the handoff and describe how it should be added to the other active projects. Skip anything tied to this project's
   own product, domain, or features.
   <!-- /profile -->
+- **AGENT-PROMPTS** — When you write a prompt for another agent, or the user asks you for one, assume that agent has the same skills and
+  instructions as you. Write only the task and its context. Never copy system prompts, rules, `AGENTS.md` or `CLAUDE.md` content, or skill text
+  into the prompt; refer to a skill by name when it matters.
+- **EFFORT-SIZING** — Never size work in human time such as hours, days, weeks, or "days of work". Writing code is cheap for you, and even
+  large changes fit in one session. Size work by what actually costs: blast radius, amount of code touched, risk, QA effort, and product or UX
+  design decisions.
+- **DRAFT-PRS** — CI minutes cost money, and CI skips draft pull requests. Open every pull request as a draft and keep it a draft while you
+  still push fixes. Mark it ready for review only when the work is done and the project's local checks pass. Never dispatch or rerun CI to test
+  work in progress; the local checks cover it.
 - **CODE-SPACING** — Inside a function, separate each logical step with one blank line, such as loading input, transforming it, and returning
   or storing the result. Keep the lines of a single step together, and do not put a blank line between every statement.
 

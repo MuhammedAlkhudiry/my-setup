@@ -37,5 +37,9 @@ Needs Bun, FFmpeg, ImageMagick, uv, Google Chrome, and an OpenRouter key capped 
 - Keep one protagonist identical in every scene; replace any character baked into background art.
 - Scale pixel art by whole numbers with nearest-neighbour sampling, and pre-resample backgrounds so push-ins do not shimmer.
 - Show every spoken line on screen, so the film works with sound off.
+- Keep all text, faces, and key action inside the safe area that TikTok, Reels, Shorts, and Snapchat leave clear of their own interface. On
+  a 1080 × 1920 frame, leave about 290 px at the top for the search bar and account header, 520 px at the bottom for the username,
+  caption, ad labels, and call-to-action button, 190 px on the right for the action buttons, and 70 px on the left. Draw this safe area over
+  every contact sheet and review frame, and fail any frame with text or a face outside it.
 - Quote religious text in the source's exact wording with its full attribution, and play only ambience under it.
 - Use no music unless it is licensed for the target platforms.

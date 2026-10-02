@@ -19,6 +19,7 @@ export function macWatcherPaths(home: string) {
     codexOutput: join(stateDir, "codex-last-output.json"),
     guardState: join(stateDir, "guard.json"),
     guardLog: join(stateDir, "guard.log"),
+    storagePrune: join(stateDir, "storage-prune.json"),
     launchAgent: join(home, "Library/LaunchAgents", `${MAC_WATCHER.label}.plist`),
     guardLaunchAgent: join(home, "Library/LaunchAgents", `${MAC_WATCHER.guardLabel}.plist`),
     log: join(home, "Library/Logs/mac-watcher.log"),
@@ -49,7 +50,6 @@ export type ObservedAlert = z.infer<typeof observedAlertSchema>;
 
 export const reviewSchema = z.object({
   runNote: z.string(),
-  patterns: z.array(z.string()),
   alerts: z.array(observedAlertSchema),
 });
 export type Review = z.infer<typeof reviewSchema>;
@@ -58,10 +58,9 @@ export type Review = z.infer<typeof reviewSchema>;
 export const REVIEW_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
-  required: ["runNote", "patterns", "alerts"],
+  required: ["runNote", "alerts"],
   properties: {
     runNote: { type: "string" },
-    patterns: { type: "array", items: { type: "string" } },
     alerts: {
       type: "array",
       items: {
@@ -93,22 +92,17 @@ export type Alert = z.infer<typeof alertSchema>;
 
 const runSchema = z.object({
   at: z.string(),
-  reviewed: z.boolean(),
-  reasons: z.array(z.string()),
-  note: z.string(),
+  /** Keys of the alerts this run observed. */
+  alerts: z.array(z.string()).default([]),
 });
 export type WatcherRun = z.infer<typeof runSchema>;
 
 const stateSchema = z.object({
   lastRunAt: z.string().optional(),
-  lastReviewAt: z.string().optional(),
   lastSuccessAt: z.string().optional(),
   lastError: z.string().optional(),
   memcapLogOffset: z.number().default(0),
-  seenOrphanPids: z.array(z.number()).default([]),
   guardLogOffset: z.number().default(0),
-  seenCpuPids: z.array(z.number()).default([]),
-  patterns: z.array(z.string()).default([]),
   runs: z.array(runSchema).default([]),
 });
 export type WatcherState = z.infer<typeof stateSchema>;
@@ -137,62 +131,126 @@ export async function writeJson(path: string, value: unknown): Promise<void> {
 }
 
 // =============================================================================
-// Review gate and alert lifecycle
+// Threshold alerts and alert lifecycle
 // =============================================================================
 
-export interface GateInput {
-  freePercent: number | undefined;
+export interface ProcessSummary {
+  command: string;
+  ageMinutes: number;
+  cpuLifetime?: number;
+}
+
+export interface AlertInput {
   pressureLevel: "normal" | "warning" | "critical" | "unknown";
   swapUsedGib: number;
   diskFreeGib: number;
-  newOrphanCount: number;
+  largestTemp: Array<{ path: string; gib: number }>;
   loadAverage15: number;
   cores: number;
-  newSustainedCpuCount: number;
-  guardStops: number;
-  memcapActionLines: number;
+  orphans: ProcessSummary[];
+  sustainedCpu: ProcessSummary[];
+  guardStops: string[];
   memcapHealthy: boolean;
-  hoursSinceReview: number | undefined;
 }
 
-/**
- * Returns why this run deserves a Codex review; an empty list means a quiet run that costs no AI usage. Known orphans and
- * open alerts wait for the daily refresh so the same issue does not buy a review on every run.
- */
-export function reviewReasons(input: GateInput): string[] {
-  const gate = { ...MAC_WATCHER.gate, maxLoadPerCore: MAC_WATCHER.cpu.maxLoadPerCore };
-  const reasons: string[] = [];
+function topCommands(rows: ProcessSummary[]): string {
+  return rows
+    .slice(0, 3)
+    .map((row) => `${row.command.slice(0, 80)} (${row.ageMinutes} min${row.cpuLifetime ? `, ${row.cpuLifetime}% CPU` : ""})`)
+    .join("; ");
+}
+
+/** Every alert this snapshot crosses a threshold for. Keys are stable so an issue stays one alert while it lasts. */
+export function thresholdAlerts(input: AlertInput): ObservedAlert[] {
+  const { thresholds } = MAC_WATCHER;
+  const alerts: ObservedAlert[] = [];
+
+  if (input.diskFreeGib < thresholds.minDiskFreeGib) {
+    const temp = input.largestTemp.map((entry) => `${entry.path} ${entry.gib}G`).join(", ");
+    alerts.push({
+      key: "low-disk",
+      severity: input.diskFreeGib < thresholds.criticalDiskFreeGib ? "critical" : "warning",
+      title: `Disk free ${input.diskFreeGib.toFixed(0)} GiB`,
+      evidence: temp ? `largest temp entries: ${temp}` : "below the free-space threshold",
+      fix: "Run mise run watcher -- prune --dry-run to see what the cleanup rules free, then remove large temp entries or archive to the SSD.",
+    });
+  }
   if (input.pressureLevel === "warning" || input.pressureLevel === "critical") {
-    reasons.push(`memory pressure ${input.pressureLevel}`);
+    alerts.push({
+      key: "memory-pressure",
+      severity: input.pressureLevel,
+      title: `Memory pressure ${input.pressureLevel}`,
+      evidence: "macOS reports memory pressure above normal",
+      fix: "Shut down simulators, emulators, or browsers you are not using.",
+    });
   }
-  if (input.freePercent !== undefined && input.freePercent < gate.minFreePercent) {
-    reasons.push(`memory free ${input.freePercent}%`);
+  if (input.swapUsedGib > thresholds.maxSwapUsedGib) {
+    alerts.push({
+      key: "high-swap",
+      severity: "warning",
+      title: `Swap ${input.swapUsedGib.toFixed(1)} GiB`,
+      evidence: `above ${thresholds.maxSwapUsedGib} GiB`,
+      fix: "Run fewer simulators, emulators, and heavy builds at once; a restart clears stale swap.",
+    });
   }
-  if (input.swapUsedGib > gate.maxSwapUsedGib) reasons.push(`swap ${input.swapUsedGib.toFixed(1)} GiB`);
-  if (input.diskFreeGib < gate.minDiskFreeGib) reasons.push(`disk free ${input.diskFreeGib.toFixed(0)} GiB`);
-  if (input.loadAverage15 > input.cores * gate.maxLoadPerCore) {
-    reasons.push(`load ${input.loadAverage15.toFixed(1)} on ${input.cores} cores`);
+  if (input.loadAverage15 > input.cores * MAC_WATCHER.cpu.maxLoadPerCore) {
+    alerts.push({
+      key: "cpu-overload",
+      severity: "warning",
+      title: `Load ${input.loadAverage15.toFixed(1)} on ${input.cores} cores`,
+      evidence: "15-minute load average above core count",
+      fix: "Run fewer builds, QA runs, and agents in parallel.",
+    });
   }
-  if (input.newSustainedCpuCount > 0) reasons.push(`${input.newSustainedCpuCount} new sustained CPU users`);
-  if (input.guardStops > 0) reasons.push(`${input.guardStops} CPU guard stops since last run`);
-  if (input.newOrphanCount > 0) reasons.push(`${input.newOrphanCount} new orphaned agent processes`);
-  if (input.memcapActionLines > 0) reasons.push(`${input.memcapActionLines} memcap actions since last run`);
-  if (!input.memcapHealthy) reasons.push("memcap not healthy");
-  if (input.hoursSinceReview === undefined || input.hoursSinceReview >= gate.maxHoursWithoutReview) {
-    reasons.push("daily memory refresh");
+  if (input.orphans.length > 0) {
+    alerts.push({
+      key: "orphaned-agent-processes",
+      severity: "warning",
+      title: `${input.orphans.length} orphaned agent processes`,
+      evidence: topCommands(input.orphans),
+      fix: "Make the tool that launched them stop its children on exit; memcap reaps them meanwhile.",
+    });
   }
-  return reasons;
+  if (input.sustainedCpu.length > 0) {
+    alerts.push({
+      key: "sustained-cpu",
+      severity: "warning",
+      title: `${input.sustainedCpu.length} processes busy for a long time`,
+      evidence: topCommands(input.sustainedCpu),
+      fix: "Stop the device or tool if it is not doing work you need.",
+    });
+  }
+  if (input.guardStops.length > 0) {
+    alerts.push({
+      key: "cpu-guard-stops",
+      severity: "info",
+      title: `CPU guard stopped ${input.guardStops.length} leftover processes`,
+      evidence: input.guardStops.at(-1) ?? "",
+      fix: "If the same tool keeps appearing, fix it so it exits with its parent.",
+    });
+  }
+  if (!input.memcapHealthy) {
+    alerts.push({
+      key: "memcap-unhealthy",
+      severity: "warning",
+      title: "memcap is not running normally",
+      evidence: "service not loaded, paused, or no recent pass",
+      fix: "Run memcap status, then mise run install -- --compact.",
+    });
+  }
+
+  return alerts;
 }
 
 /**
- * Applies one Codex review to the stored alerts. Observed issues open or reopen their alert; open alerts the review no
- * longer reports close after enough consecutive clear reviews.
+ * Applies one run's observed alerts to the stored ones. Observed issues open or reopen their alert; open alerts no longer
+ * observed close after enough consecutive clear runs.
  */
 export function mergeAlerts(
   existing: Alert[],
   observed: ObservedAlert[],
   now: string,
-  autoResolveAfter: number = MAC_WATCHER.autoResolveAfterClearReviews,
+  autoResolveAfter: number = MAC_WATCHER.autoResolveAfterClearRuns,
 ): { alerts: Alert[]; opened: Alert[]; resolved: Alert[] } {
   const observedByKey = new Map(observed.map((alert) => [alert.key, alert]));
   const opened: Alert[] = [];

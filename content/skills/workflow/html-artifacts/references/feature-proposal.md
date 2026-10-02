@@ -44,7 +44,8 @@ Follow this order. Drop a section only when it has nothing to say.
 ## Layout
 
 - One reading column about 70 characters wide for prose, 16–17 px body text, and generous line height. Mockups may break wider than the column.
-- Plenty of whitespace, one accent color, and the project's fonts and colors. Avoid walls of cards, chips, badges, and dense tables.
+- Start from the shared theme with the project's fonts and colors in `@theme`. Plenty of whitespace and one accent color. Avoid walls of cards,
+  chips, badges, and dense tables.
 - Section headings are plain questions or statements a reader would ask or expect, such as "Why this matters" or "What Sara sees".
 - Aim for a page that reads in about three minutes before the engineering block. Split a larger feature into several proposals rather than
   growing one page.

@@ -12,6 +12,17 @@ When the project already uses a consistent pattern, follow it instead.
   `useShallow` when the selector returns an object or array.
 - Pass a complete object as one prop instead of passing its fields separately.
 - When the project uses React Compiler, do not add `useMemo`, `useCallback`, or `memo` by habit.
+- When the project defines a `react:doctor` task, run it after React changes and fix what it reports before finishing. Suppress a finding
+  only with an inline `react-doctor-disable-next-line` comment that states why the fix would be wrong.
+
+## TanStack Query
+
+- Generate API types and fetch functions from the backend's OpenAPI spec and commit them; CI fails when they drift. Do not use generated
+  hooks or keys.
+- Keep each feature's queries and mutations in `<feature>.queries.ts` as `queryOptions` and `mutationOptions` factories with hierarchical
+  keys. Components and cache reads use the factories, never inline keys.
+- Declare what a mutation invalidates in `meta.invalidates`, and handle it in one global `MutationCache` handler.
+- In server-rendered pages, such as Inertia, take page data from page props.
 
 ## React Native
 

@@ -10,8 +10,8 @@ other deterministic checks that establish whether behavior works as expected.
 
 Use $verification and $test-writing for their workflows and quality criteria. Gather additional project context as needed.
 
-Aim for mission-critical rigor. Treat AI-assisted implementation as a reason to pursue comprehensive verification; do not accept 80% coverage as
-sufficient by default.
+Aim for mission-critical rigor: every important behavior and user journey has a check that would fail if it broke. Do not measure rigor by test count
+or line coverage; AI-written suites inflate both with tests that cannot catch regressions.
 
 ## Assessment and recommendations
 
@@ -31,7 +31,7 @@ remove.
   ones.
 - **Verification speed:** Profile and benchmark automated tests and other deterministic commands. Recommend actions to reduce feedback time.
 - **Test quality:** Apply $test-writing. Estimate the proportion of useful versus poor tests, state the reviewed scope, and identify tests to add,
-  improve, or remove.
+  improve, or remove. Report recent test growth and the share of assertions on mocks; both rise with low-value tests.
 - **CI quality and speed:** Assess CI independently of local verification. Profile and benchmark it, then recommend improvements. Creating a PR to
   obtain CI measurements is permitted when needed.
 - **Reliability:** Assess flakiness across tests and other checks; a higher score means more reliable verification. Recommend corrective actions.
@@ -40,5 +40,6 @@ remove.
 - **Formatting:** Identify the formatter and every file type it covers, including code, Markdown, styles, and configuration. Run its check command and
   report the number of unformatted files. Assess enforcement in the editor, in pre-commit hooks, and in CI, and report any rule that the formatter and
   the linter both own. Recommend a single formatter per file type and automatic enforcement over manual review.
-- **Test coverage:** If coverage measurement is missing, recommend adding it. Otherwise, recommend actions to reach at least 95% coverage and justify
-  exclusions for code that does not need testing.
+- **Test coverage:** Score the mutation score of modules that hold business rules and which core user journeys run end to end in CI. Treat line
+  coverage as a map of untested code. Recommend replacing a line-coverage CI floor with mutation gates on core modules; a floor rewards tests that
+  only execute lines.

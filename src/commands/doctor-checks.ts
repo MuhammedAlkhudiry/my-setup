@@ -30,6 +30,7 @@ import {
   renderMemcapConfig,
 } from "../lib/mac-watcher";
 import { readDeviceProfile } from "../lib/device";
+import { parsePruneReport } from "../lib/storage-prune";
 import { claudePaths, renderBaseRules } from "./install";
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
@@ -405,11 +406,29 @@ try {
     findings.push({
       level: "optional",
       label: `Mac watcher alert ${alert.key}`,
-      detail: `[${alert.severity}] ${alert.title}. Fix: ${alert.fix} Closes after ${MAC_WATCHER.autoResolveAfterClearReviews} clear reviews, or run mise run watcher -- resolve ${alert.key}`,
+      detail: `[${alert.severity}] ${alert.title}. Fix: ${alert.fix} Closes after ${MAC_WATCHER.autoResolveAfterClearRuns} clear runs, or run mise run watcher -- resolve ${alert.key}`,
     });
   }
 } catch (error) {
   findings.push({ level: "optional", label: "Mac watcher state", detail: String(error) });
+}
+try {
+  if (existsSync(watcher.storagePrune)) {
+    const prune = parsePruneReport(JSON.parse(readFileSync(watcher.storagePrune, "utf8")));
+    for (const problem of [...prune.skipped, ...prune.errors]) {
+      findings.push({ level: "optional", label: "Storage prune", detail: `${problem} (run ${prune.at})` });
+    }
+    // Idle worktrees the rules cannot remove safely need a person to decide.
+    for (const kept of prune.worktreesKept.filter((worktree) => worktree.idleDays >= MAC_WATCHER.storage.worktreeIdleDays)) {
+      findings.push({
+        level: "optional",
+        label: "Stale worktree",
+        detail: `${kept.path} idle ${kept.idleDays}d, kept because ${kept.reason}`,
+      });
+    }
+  }
+} catch (error) {
+  findings.push({ level: "optional", label: "Storage prune state", detail: String(error) });
 }
 
 if (findings.length === 0) {

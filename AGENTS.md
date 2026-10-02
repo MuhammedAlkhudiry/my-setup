@@ -24,6 +24,7 @@
   its own development services through its own commands; this repo holds no runtime environment state.
 - **MAIN-ONLY** — Work directly on `main`; do not create branches unless explicitly requested.
 - **NO-COMMITS** — Never commit in this repository. Leave every change uncommitted in the working tree; the owner reviews and commits.
+  Do not ask about commits or list uncommitted changes as pending work.
 - **INSTALL** — Use `mise run install` as the only supported local sync/install command after changing content/config/generator behavior. Agents
   should use `mise run install -- --compact` so successful runs emit only the final result while warnings and failures remain visible.
 - **THIN-ZSHRC** — If user `~/.zshrc` contains anything beyond the managed `shell/zsh-custom.zsh` import, repair it directly instead of leaving

@@ -1,19 +1,36 @@
 ---
 name: test-writing
-description: Use when a change may add, change, or remove tests, including a bug fix that needs a regression test, or when deciding what to test or judging tests; to rate the whole setup use $verification-report.
+description: Use when a change may add, change, or remove tests, including a bug fix that needs a regression test, or when deciding what to test, judging tests, or pruning a test suite; to rate the whole setup use $verification-report.
 ---
+
+## What earns a test
+
+- Prefer a type, lint rule, or static check when it can catch the failure; add a test only when none can.
+- Add a test only when it protects a business rule, an input boundary, authorization, persisted data, a contract that other code or released clients
+  rely on, user-visible state, or a fixed bug.
+- Never add a test to raise coverage. Coverage shows untested code; it is not a target.
+- Never commit tests for code users never reach, such as internal developer tools, development-only pages, and local or QA seeders. When verifying
+  that code during a task, build something temporary and keep it out of the test suite and out of Git.
 
 ## Test quality
 
-- Add tests when important behavior is untested.
 - Add a regression test only when it fails on the original bug and protects behavior that users or other code rely on.
 - Test behavior, not implementation details or the framework itself.
-- Use the simplest type of test that proves the expected behavior. Use integration tests when the behavior depends on components working together.
-- Mock external dependencies when needed, without reproducing the code's internal steps. Check function calls only when the call itself is required
-  behavior.
+- Test at the level where users or callers see the behavior. Prefer integration tests against the real database and framework over unit tests that
+  isolate code with mocks.
+- Mock only boundaries the project does not own, such as third-party services, time, randomness, and native platform modules. Do not mock the
+  project's own modules to isolate a unit. Check calls only when the call itself is required behavior.
 - Keep tests that catch the intended failure and survive internal changes that preserve behavior.
-- Never commit tests for code users never reach, such as internal developer tools, development-only pages, and local or QA seeders. When verifying
-  that code during a task, build something temporary and keep it out of the test suite and out of Git.
+
+## Tests to reject
+
+Do not write these, and remove them when found:
+
+- Tests that only check a component renders or a value exists when a real result can be asserted.
+- Tests that restate the implementation: styles, copy, asset paths, constants, enum labels, or formulas copied from the code.
+- Serializer or resource shape tests that an endpoint test already covers.
+- Tests whose assertions are mostly calls on mocks or internal call order.
+- Tests that cannot fail or repeat another test's case.
 
 ## Test volume
 
@@ -26,3 +43,9 @@ description: Use when a change may add, change, or remove tests, including a bug
 - Use the regression test itself to show the fix: run it once without the fix to see it fail. Do not add tests only to demonstrate a change.
 - When a test is too slow for the suite's time budget, make it faster or remove it; do not raise the budget for code users never reach.
 - When delegating work that may add tests, tell the agent to load $test-writing first.
+
+## Pruning
+
+When asked to prune a suite, remove tests that match [Tests to reject](#tests-to-reject) in small batches, one area per batch. Before removing a
+test, confirm its behavior is covered elsewhere or not worth protecting. Where the project runs mutation testing, keep any test whose removal lets a
+mutant survive. Run the suite after each batch and list each removed file with its reason.
