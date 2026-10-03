@@ -35,7 +35,8 @@ Disposable but designed: one `index.html` plus assets beside it, no build step.
 - Save screenshots as WebP or JPEG at display width.
   <!-- /profile -->
 - Add a viewport meta tag and a fluid layout so it reads on a phone. Use `dir="rtl"` for Arabic content.
-- When the user will respond, give items stable IDs and add [assets/feedback.js](assets/feedback.js); follow its header.
+- When the user will respond, give items stable IDs, add [assets/feedback.js](assets/feedback.js) and follow its header. Show choices as radio
+  buttons or pills, not dropdowns.
 
 ## Design
 
@@ -62,8 +63,6 @@ Minimal content, full design. Every element must earn its place; when unsure, cu
 - Fit the main content on one screen: dense cards, side-by-side panels, and collapsed detail instead of scrolling.
 
 ### Visual prototype
-
-Show each item as it would look, not as text about it.
 
 - Render every item as a realistic mockup of the real product screen, in a phone frame, a browser frame, or both, to match the platforms it
   affects. Use the project's design system, fonts, real copy, and text direction.

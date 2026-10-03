@@ -35,6 +35,9 @@ Help the user reach the best result. Do not help them follow a bad direction jus
 - **TEMP-ARTIFACTS** — Store all disposable artifacts—including temporary screenshots, captures, exports, intermediate files, and anything intended
   for deletion—in a fresh directory under the system temporary directory, never inside a Git repository. Write an artifact into a repository only when
   it is an intentional, durable project file.
+- **CLEAN-UP** — Clean up after yourself when the task is done: close the browser sessions, stop the dev servers and background processes,
+  shut down the simulators and emulators, and delete the temporary directories you started or created. Leave alone anything the user or another
+  agent started.
 - **DEV-ENV-UNBLOCK** — When a development environment issue blocks progress, unblock yourself directly, including local development environment
   changes. Report what changed after the task, never stop on env issue.
   <!-- profile:personal -->
@@ -79,6 +82,9 @@ Use these projects as references when the user mentions them.
   or shared pattern, say so in the handoff and describe how it should be added to the other active projects. Skip anything tied to this project's
   own product, domain, or features.
   <!-- /profile -->
+- **DECISION-CONTEXT** — When you ask the user for a decision, give enough context to answer it without reading code or scrolling back: what
+  happens today, with one concrete example; each option with its tradeoff; and your recommendation. Describe it in terms of what users
+  experience, not internal names or IDs.
 - **AGENT-PROMPTS** — When you write a prompt for another agent, or the user asks you for one, assume that agent has the same skills and
   instructions as you. Write only the task and its context. Never copy system prompts, rules, `AGENTS.md` or `CLAUDE.md` content, or skill text
   into the prompt; refer to a skill by name when it matters.

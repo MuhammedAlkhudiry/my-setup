@@ -11,8 +11,7 @@ description: Use before any browser, simulator, or emulator automation to pick t
 - Prefer text snapshots. For a screenshot, capture at 1x and crop it to the region you inspect.
 - Accept cookie banners and standard site terms that the task needs. Ask before accepting terms that cost money, sign a contract, or share personal
   data.
-- Run `playwright-cli` headless in a named session and close that session when done. When the user will QA the result, open it with `--headed`
-  and leave it running.
+- Run `playwright-cli` headless in a named session. Clean up after yourself: close every session you opened when the task is done.
 - Use the iOS simulator unless the work is Android-specific. Keep the device window visible; never run it headless.
 - Before signing in on a new simulator or emulator, set up local HTTPS trust with $mobile-app-infra.
 - Before starting long agent work on a simulator or emulator that is not slimmed, slim it with $mobile-app-infra.
