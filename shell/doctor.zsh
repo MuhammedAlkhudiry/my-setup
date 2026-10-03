@@ -262,6 +262,7 @@ main() {
   check_tool codex optional "Used by Codex workflows and as a configured agent target."
   check_tool claude optional "Used by Claude Code workflows and as a configured agent target."
   check_tool cliproxyapi optional "Pools Claude OAuth accounts for the local T3 Code Claude provider."
+  check_tool tailscale optional "Install the standalone app from tailscale.com so the phone and other Macs reach T3 Code."
   check_tool playwright-cli required "Fallback headless browser automation CLI."
   check_tool agent-device required "Default AI-agent mobile and device automation CLI."
   check_tool maestro required "Mobile E2E testing and bundled MCP server for agents."

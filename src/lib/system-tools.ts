@@ -209,6 +209,20 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
+        name: "tailscale",
+        level: "optional",
+        why: "Private network that lets the phone and other Macs reach T3 Code without T3 Connect.",
+        versionArgs: ["version"],
+        latest: {
+          type: "command",
+          command: "brew",
+          args: ["info", "--cask", "tailscale-app"],
+        },
+        update: {
+          note: "Install the standalone app from tailscale.com and enable its CLI; the app updates itself (menu bar > Check for Updates).",
+        },
+      },
+      {
         name: "playwright-cli",
         level: "required",
         why: "Fallback headless browser automation CLI.",

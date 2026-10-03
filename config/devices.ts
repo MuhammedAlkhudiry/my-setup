@@ -90,6 +90,7 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
       "sentry-cli",
       "querying-posthog-data",
       "investigate-metric",
+      "remote-agent-host",
     ],
     allowedCommands: [...BASE_COMMANDS, "mise", "bun", "dotnet"],
     allowedDirectories: ["~/dev/*", "~/AppData/Local/Temp/*", ...SHARED_DIRECTORIES],

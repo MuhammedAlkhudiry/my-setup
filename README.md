@@ -86,3 +86,12 @@ In T3 Code **Settings → Providers**, add a Claude instance named **Claude Pool
 default Claude provider. Claude Pool uses `--chrome` in **Launch arguments** for [Claude in Chrome](https://code.claude.com/docs/en/chrome). Install its Chrome extension
 when Claude Code prompts for it. The pool dashboard is at [localhost](http://127.0.0.1:8317/management.html); its management key stays in
 `~/.cli-proxy-api/management-key`.
+
+## Remote Agent Mac
+
+A spare Mac can run T3 Code as an always-on environment that the main Mac and the phone reach over Tailscale.
+
+1. Finish macOS setup. If a Remote Management screen appears, the Mac is still enrolled by its former owner; get it released first.
+2. Install Homebrew, clone this repo, set the profile to `personal`, and run `mise run install`.
+3. Install T3 Code Nightly, complete [Claude Pool on a New Mac](#claude-pool-on-a-new-mac), and sign in to Codex and `gh`.
+4. Ask an agent in T3 Code to set up this Mac as a remote agent host. The `remote-agent-host` skill covers Tailscale, naming, sleep, and pairing.
