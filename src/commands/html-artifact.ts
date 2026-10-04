@@ -179,11 +179,14 @@ export async function checkArtifact(folderArg: string): Promise<void> {
     hostname: "127.0.0.1",
     async fetch(request) {
       // Serve only real files inside the folder: canonical paths stop both `..` and symlinks from reaching out.
-      const requested = await realpath(join(folder, decodeURIComponent(new URL(request.url).pathname))).catch(() => null);
-      if (!requested || (requested !== folder && !requested.startsWith(folder + sep))) return new Response("Not found", { status: 404 });
+      const inside = async (path: string) => {
+        const real = await realpath(path).catch(() => null);
+        return real && (real === folder || real.startsWith(folder + sep)) ? real : null;
+      };
 
-      const path = (await stat(requested)).isDirectory() ? join(requested, "index.html") : requested;
-      return (await exists(path)) ? new Response(Bun.file(path)) : new Response("Not found", { status: 404 });
+      let path = await inside(join(folder, decodeURIComponent(new URL(request.url).pathname)));
+      if (path && (await stat(path)).isDirectory()) path = await inside(join(path, "index.html"));
+      return path ? new Response(Bun.file(path)) : new Response("Not found", { status: 404 });
     },
   });
 
