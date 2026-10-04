@@ -6,8 +6,7 @@ carry comfortably, or when the user asks for it. Keep short plans in chat.
 
 ## Build
 
-1. Copy [../assets/plan-review.html](../assets/plan-review.html) to `index.html` and paste [../assets/theme.html](../assets/theme.html) at its
-   `THEME` marker. Copy [../assets/feedback.js](../assets/feedback.js) beside it.
+1. Run `html-artifact new plan-review <topic>`; it builds `index.html` from [../assets/plan-review.html](../assets/plan-review.html).
 2. Replace only the JSON in `<script id="plan">`. The example in the template is the schema; keep every field name. Never edit the rest of the
    template for one plan.
 3. Give the plan an `id` that names it and its version, such as `plan-notif-prefs-v1`.

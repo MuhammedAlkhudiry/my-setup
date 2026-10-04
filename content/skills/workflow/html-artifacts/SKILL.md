@@ -18,40 +18,39 @@ Disposable but designed: one `index.html` plus assets beside it, no build step.
 
 ## Build
 
-<!-- profile:personal -->
-
-- Create a fresh folder under the system temporary directory named `<project>-<topic>.XXXX`. `share-html` publishes every non-dot file in it, so keep
-  scripts, logs, and raw captures elsewhere.
-  <!-- /profile -->
-  <!-- profile:work -->
-- Create a fresh folder under the system temporary directory named `<project>-<topic>.XXXX`. Keep scripts, logs, and raw captures elsewhere.
+- Start with `html-artifact new <options|plan-review|blank> <topic>` from the project root: a temp folder with theme, `feedback.js`, and the
+  project's `mockup-kit/`; `--images <names>` adds kit images. Keep scripts, logs, and raw captures elsewhere.
+  <!-- profile:personal -->
+- `share-html` publishes every non-dot file in that folder and rejects artifacts over 20 MB.
   <!-- /profile -->
 - Keep it self-contained: relative paths, inline data, and copies of any images it needs. Never link to `localhost`, `.test` hosts, or `file://`
   paths. Capture content from a running app as screenshots or inline data.
-  <!-- profile:personal -->
-- Save screenshots as WebP or JPEG at display width. `share-html` rejects artifacts over 20 MB.
-  <!-- /profile -->
-  <!-- profile:work -->
 - Save screenshots as WebP or JPEG at display width.
-  <!-- /profile -->
 - Add a viewport meta tag and a fluid layout so it reads on a phone. Use `dir="rtl"` for Arabic content.
-- When the user will respond, give items stable IDs, add [assets/feedback.js](assets/feedback.js) and follow its header. Show choices as radio
-  buttons or pills, not dropdowns.
+- When the user will respond, give items stable IDs, add [assets/feedback.js](assets/feedback.js) and follow its header. Put each choice
+  control in the header of the item it chooses, as a radio button or pill, so the user picks while looking at the item. Never gather the
+  choices into a separate form at the top or bottom of the page, and never use dropdowns. Only items that are alternatives to one another, such
+  as options of which the user picks one, share a radio group.
 
 ## Design
 
-- Paste [assets/theme.html](assets/theme.html) into `<head>`. Build with its classes (`page`, `card`, `chip`, `stat`, `table`, `pair`, `shot`)
+- Build with the classes of [assets/theme.html](assets/theme.html) (`page`, `card`, `chip`, `stat`, `table`, `pair`, `shot`)
   and Tailwind utilities; never ship browser defaults.
 - Aim for a well-made internal tool, not a document: a header with title and chips, cards on the tinted background, one accent, and status tones
   only for ok, warn, bad.
-- For design options in a project, override `@theme` with its colors and fonts.
+- Draw project screens with its `mockup-kit/` classes (see its `README.md`); add a missing component to the kit, not the page.
+- Avoid making the user scroll, vertically or sideways. Fit the main content on one screen with dense cards, side-by-side panels, and
+  collapsed detail.
 
 Pick one mode:
 
 - **Feature proposal** when the page proposes a feature, explains a product idea, or asks for a product decision. Follow
   [references/feature-proposal.md](references/feature-proposal.md); the minimal-page rules below do not apply.
+- **Options** when the user picks between alternatives: write only the template's JSON and one `options/<id>.html` per option; on
+  revision, rewrite only changed fragments.
 - **Plan review** for a plan to approve: [references/plan-review.md](references/plan-review.md).
-- **Visual prototype** when the user asks to visualize something or asks for a prototype or mockup.
+- **Visual prototype** when the user asks to visualize something or asks for a prototype or mockup:
+  [references/visual-prototype.md](references/visual-prototype.md).
 - **Minimal page** for everything else, such as reports, reviews, audits, and comparisons.
 
 ### Minimal page
@@ -60,35 +59,17 @@ Minimal content, full design. Every element must earn its place; when unsure, cu
 
 - Show only the page's subject. No intro, summary, recap, legend, or footer.
 - No sentences on the surface. Use labels, numbers, chips, and short phrases. Put any detail behind `<details>`.
-- Fit the main content on one screen: dense cards, side-by-side panels, and collapsed detail instead of scrolling.
 
-### Visual prototype
+## Hand over
 
-- Render every item as a realistic mockup of the real product screen, in a phone frame, a browser frame, or both, to match the platforms it
-  affects. Use the project's design system, fonts, real copy, and text direction.
-- Mark what is new with one to three short callouts on the mockup. Put the item's title and one-line detail beside it.
-- Put each item in a `card` with ID, title, and chips in its header. Show before and after with `pair`; use `shot-empty` for a missing capture.
-- For more than a few items, first write a shared CSS kit and a script that screenshots one mockup. Give each subagent a range of items, one
-  fragment file per item, then assemble one page.
-- Check every mockup screenshot for clipping, overlap, and wrong text direction before publishing.
-
-<!-- profile:personal -->
-
-## Publish
-
-- Open the page once and fix anything visibly broken.
+- Run `html-artifact check <folder>` and view its screenshots. Fix what it reports or what looks broken, run it once more, then stop.
+  <!-- profile:personal -->
 - Run `share-html <folder>`. Add `--name <words>` for a readable URL. The URL is private behind Cloudflare Access and expires after 30 days.
 - Add `--writable` for `feedback.js` pages; on "see", run `share-html feedback`.
 - Give the user the printed URL only.
 - When `share-html` reports that `cf` is not signed in, repair access with $service-access. When it reports that the host is not behind
   Cloudflare Access, stop and report it; never publish another way.
-
-<!-- /profile -->
-<!-- profile:work -->
-
-## Hand over
-
-- Open the page once and fix anything visibly broken.
+  <!-- /profile -->
+  <!-- profile:work -->
 - Give the user the absolute path to `index.html` as a Markdown link. Never publish it with `share-html` or any other upload.
-
-<!-- /profile -->
+  <!-- /profile -->

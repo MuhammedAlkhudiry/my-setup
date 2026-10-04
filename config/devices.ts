@@ -54,6 +54,7 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
       "composer",
       "pk",
       "share-html",
+      "html-artifact",
       "doctor",
       "system-tools",
     ],
