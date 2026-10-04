@@ -8,7 +8,10 @@
  * Two ways to use it, after `<script src="feedback.js"></script>`:
  *
  *   Feedback.auto()  Tracks every input, textarea, and select inside elements with `data-item="ID"` (title from
- *                    `data-title`), restores them on load, and writes the summary itself.
+ *                    `data-title`), restores them on load, and writes the summary itself. Radio buttons form one group
+ *                    per item, even when items reuse a name such as `choice`; to make several items share one group,
+ *                    give their radios the same `form="ID"` attribute and put that empty `<form id="ID" hidden>` before
+ *                    them, because the browser groups radios as it parses the page.
  *
  *   const saved = await Feedback.init()       For custom pages: returns the last saved state, or null.
  *   Feedback.save(state, markdown)            Call after every change with the full state and the summary to send.
@@ -105,8 +108,20 @@
     setTimeout(() => (ui.copy.textContent = 'Copy feedback for AI'), 2500);
   }
 
+  // Browsers group same-named radios across the whole page, so one pick would clear every other item's pick.
+  function scopeRadios(items) {
+    items.forEach((item) => {
+      const radios = [...item.querySelectorAll('input[type="radio"]:not([form])')];
+      if (!radios.length) return;
+      const form = Object.assign(document.createElement('form'), { id: `feedback-${item.dataset.item}`, hidden: true });
+      document.body.append(form);
+      radios.forEach((radio) => radio.setAttribute('form', form.id));
+    });
+  }
+
   async function auto() {
     const items = [...document.querySelectorAll('[data-item]')];
+    scopeRadios(items);
     const fields = (item) => [...item.querySelectorAll('input, textarea, select')];
     const nameOf = (field) => field.name || field.dataset.field || field.type;
     const titleOf = (item) => item.dataset.title || item.querySelector('h1, h2, h3, h4')?.textContent.trim() || '';

@@ -115,7 +115,7 @@ const USER_ZSHRC_IMPORT =
 const ACTIVE_PROJECTS_PLACEHOLDER = "{{ACTIVE_PROJECTS}}";
 const SETUP_ROOT_PLACEHOLDER = "{{SETUP_ROOT}}";
 
-const SHARED_BIN_COMMANDS = ["my-setup", "system-tools", "hugeicons", "doctor", "pk", "share-html"];
+const SHARED_BIN_COMMANDS = ["my-setup", "system-tools", "hugeicons", "doctor", "pk", "share-html", "html-artifact"];
 
 // =============================================================================
 // Individual Operations

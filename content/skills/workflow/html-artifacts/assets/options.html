@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Options</title>
+<!-- THEME: paste assets/theme.html here -->
+<!-- KIT -->
+<style type="text/tailwindcss">
+  @layer components {
+    .shell { @apply grid h-dvh grid-rows-[auto_1fr] md:grid-cols-[15rem_1fr] md:grid-rows-1; }
+    .switcher { @apply flex gap-1 overflow-hidden border-b border-line bg-surface p-2 md:flex-col md:gap-1.5 md:border-e md:border-b-0 md:p-3; }
+    .switcher-head { @apply hidden md:block md:px-2 md:pt-1 md:pb-3; }
+    .tab { @apply flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-sm text-muted hover:bg-subtle md:flex-none md:justify-start md:px-2.5 md:py-2; }
+    .tab[aria-current="true"] { @apply bg-accent-soft text-ink; }
+    .tab-title { @apply hidden truncate md:inline; }
+    .tab-mark { @apply text-xs; }
+    .view { @apply flex min-h-0 flex-col; }
+    .view-head { @apply flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line bg-surface px-4 py-2.5 md:px-6; }
+    .view-note { @apply text-sm text-muted; }
+    .pick { @apply inline-flex cursor-pointer items-center gap-1.5 rounded-full border border-line px-3 py-1 text-sm font-medium hover:bg-subtle; }
+    .pick:has(input:checked) { @apply border-accent bg-accent text-surface; }
+    .pick input { @apply sr-only; }
+    .notes { @apply w-40 rounded-lg border border-line bg-surface px-3 py-1 text-sm focus:outline-2 focus:outline-accent md:w-56; }
+    .stage { @apply flex min-h-0 flex-1 items-center justify-center gap-6 overflow-auto p-4 md:p-6; }
+    .stage-error { @apply grid min-h-40 w-full max-w-xl place-items-center rounded-lg border border-dashed border-line bg-subtle p-6 text-center text-sm text-muted; }
+  }
+</style>
+</head>
+<body>
+
+<!-- The AI writes only this JSON block and one fragment per option in options/<id>.html. -->
+<script id="options" type="application/json">
+{
+  "title": "Loader options",
+  "question": "Which loader replaces the spinner?",
+  "options": [
+    { "id": "O1", "title": "Lantern glow", "note": "Warm pulse, reads as waiting, not stuck", "chips": ["calm"], "rec": true },
+    { "id": "O2", "title": "Ink trail", "note": "Faster feel, busier on small screens", "chips": ["lively"] }
+  ]
+}
+</script>
+
+<form id="pick" hidden></form>
+<div class="shell">
+  <nav class="switcher" aria-label="Options">
+    <div class="switcher-head">
+      <p class="eyebrow" id="question"></p>
+      <h1 class="mt-1 text-base" id="title"></h1>
+    </div>
+  </nav>
+  <main id="views" class="min-h-0"></main>
+</div>
+<div data-feedback class="fixed bottom-3 end-3 z-20"></div>
+
+<script src="feedback.js"></script>
+<script type="module">
+  const data = JSON.parse(document.getElementById('options').textContent);
+  const nav = document.querySelector('.switcher');
+  const views = document.getElementById('views');
+  const esc = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+  document.title = data.title;
+  document.getElementById('title').textContent = data.title;
+  document.getElementById('question').textContent = data.question ?? '';
+
+  for (const option of data.options) {
+    nav.insertAdjacentHTML('beforeend', `
+      <button class="tab" data-tab="${esc(option.id)}" title="${esc(option.title)}">
+        <span class="id">${esc(option.id)}</span>
+        <span class="tab-title">${esc(option.title)}</span>
+        <span class="tab-mark" data-mark>${option.rec ? '★' : ''}</span>
+      </button>`);
+
+    views.insertAdjacentHTML('beforeend', `
+      <section class="view h-full" data-item="${esc(option.id)}" data-title="${esc(option.title)}" hidden>
+        <header class="view-head">
+          <span class="id">${esc(option.id)}</span>
+          <h2>${esc(option.title)}</h2>
+          ${option.rec ? '<span class="chip chip-accent">★ Recommended</span>' : ''}
+          ${(option.chips ?? []).map((chip) => `<span class="chip">${esc(chip)}</span>`).join('')}
+          <span class="view-note">${esc(option.note)}</span>
+          <span class="ms-auto flex items-center gap-2">
+            <input class="notes" name="notes" placeholder="Notes">
+            <label class="pick"><input type="radio" name="pick" form="pick" value="${esc(option.id)}">Pick</label>
+          </span>
+        </header>
+        <div class="stage" data-stage></div>
+      </section>`);
+  }
+
+  // A fragment comes from <template data-option="ID"> when the page inlines it, else from options/<ID>.html.
+  async function fill(section) {
+    const stage = section.querySelector('[data-stage]');
+    if (stage.dataset.filled) return;
+    stage.dataset.filled = '1';
+    const id = section.dataset.item;
+    const inline = document.querySelector(`template[data-option="${CSS.escape(id)}"]`);
+    if (inline) return stage.replaceChildren(inline.content.cloneNode(true));
+
+    try {
+      const response = await fetch(`options/${encodeURIComponent(id)}.html`);
+      if (!response.ok) throw new Error(String(response.status));
+      stage.innerHTML = await response.text();
+    } catch (error) {
+      stage.innerHTML = `<div class="stage-error">options/${esc(id)}.html did not load (${esc(error.message)}). Open the page over http, not file://.</div>`;
+    }
+  }
+
+  function show(id) {
+    const target = data.options.some((option) => option.id === id) ? id : data.options[0].id;
+    for (const section of views.children) section.hidden = section.dataset.item !== target;
+    for (const tab of nav.querySelectorAll('[data-tab]')) tab.setAttribute('aria-current', String(tab.dataset.tab === target));
+    fill(views.querySelector(`[data-item="${CSS.escape(target)}"]`));
+    if (location.hash.slice(1) !== target) history.replaceState(null, '', `#${target}`);
+  }
+
+  function markPicked() {
+    const picked = document.querySelector('input[name="pick"]:checked')?.value;
+    for (const tab of nav.querySelectorAll('[data-tab]')) {
+      const option = data.options.find((item) => item.id === tab.dataset.tab);
+      tab.querySelector('[data-mark]').textContent = tab.dataset.tab === picked ? '✓' : option.rec ? '★' : '';
+    }
+  }
+
+  nav.addEventListener('click', (event) => {
+    const tab = event.target.closest('[data-tab]');
+    if (tab) show(tab.dataset.tab);
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.target.closest('input, textarea')) return;
+    const ids = data.options.map((option) => option.id);
+    const index = ids.indexOf(location.hash.slice(1));
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key];
+    if (step) show(ids[(index + step + ids.length) % ids.length]);
+    else if (/^[1-9]$/.test(event.key) && ids[event.key - 1]) show(ids[event.key - 1]);
+  });
+
+  window.addEventListener('hashchange', () => show(location.hash.slice(1)));
+  document.addEventListener('change', markPicked);
+
+  await Feedback.auto();
+  markPicked();
+  show(location.hash.slice(1));
+</script>
+</body>
+</html>

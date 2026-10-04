@@ -26,10 +26,10 @@ Follow this order. Drop a section only when it has nothing to say.
 3. **How it works.** The rules the person experiences, in plain sentences: what triggers it, what they see, what they control, and what never
    happens. Describe behavior, not implementation.
 4. **Options.** When there are real alternatives, give each a small mockup and two sentences: what the person would see, and why to pick it. Mark
-   the recommended option and say why in one sentence.
+   the recommended option and say why in one sentence. Put the option's pick control in its own header.
 5. **Risks and open questions.** Each risk as a plain sentence about its effect on people, with the mitigation beside it.
-6. **Decisions needed.** The questions the owner must answer, each with a stable ID, a checkbox or choice, a notes field, and a **Copy selected**
-   button.
+6. **Decisions needed.** Only the questions that have no option or item of their own on the page, each with a stable ID, a checkbox or
+   choice, a notes field, and a **Copy selected** button.
 7. **For engineering.** One collapsed `<details>` block at the end: data, API, permissions, compatibility, rollout, analytics, effort, and code
    references.
 

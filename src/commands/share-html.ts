@@ -82,7 +82,7 @@ export function findRelativeReferences(html: string): string[] {
   return [...new Set(references.filter((reference) => !EXTERNAL_PREFIX.test(reference)))];
 }
 
-async function collectFiles(root: string, dir = root): Promise<ArtifactFile[]> {
+export async function collectFiles(root: string, dir = root): Promise<ArtifactFile[]> {
   const files: ArtifactFile[] = [];
   for (const entry of await readdir(dir, { withFileTypes: true })) {
     if (entry.name.startsWith(".")) continue;
@@ -125,7 +125,7 @@ async function resolveArtifact(input: string): Promise<{ files: ArtifactFile[]; 
   return { files, name: basename(path) };
 }
 
-async function assertPortable(files: ArtifactFile[]): Promise<void> {
+export async function assertPortable(files: ArtifactFile[]): Promise<void> {
   const problems: string[] = [];
   for (const file of files.filter((candidate) => /\.(?:html?|css|js)$/i.test(candidate.key))) {
     for (const reference of findLocalOnlyReferences(await readFile(file.path, "utf8"))) {
