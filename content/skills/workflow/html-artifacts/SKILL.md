@@ -20,6 +20,9 @@ Disposable but designed: one `index.html` plus assets beside it, no build step.
 
 - Start with `html-artifact new <options|plan-review|blank> <topic>` from the project root: a temp folder with theme, `feedback.js`, and the
   project's `mockup-kit/`; `--images <names>` adds kit images. Keep scripts, logs, and raw captures elsewhere.
+  <!-- profile:work -->
+- Without `html-artifact`, copy an [assets](assets/) template, fill its `THEME` and `KIT` markers, and check it in a browser.
+  <!-- /profile -->
   <!-- profile:personal -->
 - `share-html` publishes every non-dot file in that folder and rejects artifacts over 20 MB.
   <!-- /profile -->
