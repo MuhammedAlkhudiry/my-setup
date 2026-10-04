@@ -1,6 +1,6 @@
-import { copyFile, mkdir, mkdtemp, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, readdir, realpath, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
 import { execa } from "execa";
 import { chromium, type Page } from "playwright-core";
@@ -171,17 +171,19 @@ async function layoutIssues(page: Page, shot: Shot): Promise<string[]> {
 }
 
 export async function checkArtifact(folderArg: string): Promise<void> {
-  const folder = resolve(folderArg);
-  if (!(await exists(join(folder, "index.html")))) throw new Error(`${folder} has no index.html`);
+  if (!(await exists(join(resolve(folderArg), "index.html")))) throw new Error(`${resolve(folderArg)} has no index.html`);
+  const folder = await realpath(folderArg);
 
   const server = Bun.serve({
     port: 0,
     hostname: "127.0.0.1",
     async fetch(request) {
-      const path = join(folder, decodeURIComponent(new URL(request.url).pathname));
-      if (!path.startsWith(folder)) return new Response("Forbidden", { status: 403 });
-      const file = Bun.file((await stat(path).then((s) => s.isDirectory(), () => false)) ? join(path, "index.html") : path);
-      return (await file.exists()) ? new Response(file) : new Response("Not found", { status: 404 });
+      // Serve only real files inside the folder: canonical paths stop both `..` and symlinks from reaching out.
+      const requested = await realpath(join(folder, decodeURIComponent(new URL(request.url).pathname))).catch(() => null);
+      if (!requested || (requested !== folder && !requested.startsWith(folder + sep))) return new Response("Not found", { status: 404 });
+
+      const path = (await stat(requested)).isDirectory() ? join(requested, "index.html") : requested;
+      return (await exists(path)) ? new Response(Bun.file(path)) : new Response("Not found", { status: 404 });
     },
   });
 
@@ -207,6 +209,7 @@ export async function checkArtifact(folderArg: string): Promise<void> {
       const page = await context.newPage();
       const errors: string[] = [];
       page.on("pageerror", (error) => errors.push(`script error: ${error.message}`));
+      page.on("requestfailed", (failed) => errors.push(`failed to load ${failed.url()} (${failed.failure()?.errorText})`));
       // Failed loads arrive twice, as a console error and a response; keep the response, which names the path.
       page.on("console", (message) => {
         if (message.type() === "error" && !message.text().startsWith("Failed to load resource")) errors.push(`console: ${message.text()}`);
