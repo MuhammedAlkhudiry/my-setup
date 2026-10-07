@@ -5,7 +5,14 @@ description: Use when preparing, describing, or marking a pull request ready for
 
 A pull request stays a draft until the [checklist](#checklist) passes. Deliver the title and description in the reply and save them to a temporary
 file; do not create the pull request or edit its description. Besides checklist fixes on the branch, the only action on the pull request itself
-is [marking low-review files viewed](references/viewed-files.md) once it exists.
+is [marking files viewed](references/viewed-files.md) for GitHub PRs only.
+
+<!-- profile:work -->
+
+On the work laptop, follow WORK-GITLAB. WORK-APPROVAL requires user approval only to create a PR/MR, including drafts, not to edit files or fix
+checklist findings. Codex review approval does not authorize PR/MR creation.
+
+<!-- /profile -->
 
 ## Checklist
 
@@ -22,6 +29,20 @@ is [marking low-review files viewed](references/viewed-files.md) once it exists.
 Report the results in one line: `✅ $simplify, $laravel, docs · Sol approved in round 2` or `· Sol skipped: small, low risk`.
 
 ## Sections
+
+<!-- profile:work -->
+
+Include only these two sections, in this order:
+
+1. **What changes for users:** two to four sentences explaining what users experience before and after, and why it matters. Use the product's
+   words, without file, class, or function names.
+2. **Demo:** link an edited demo page showing the change; see [Demo media](references/demo-media.md). If a demo is unavailable, state that plainly.
+
+Report checklist results, review details, risks, and approval questions in the reply, outside the PR description.
+
+<!-- /profile -->
+
+<!-- profile:personal -->
 
 Write them in this order. Omit a section that has nothing to say.
 
@@ -43,9 +64,21 @@ Write them in this order. Omit a section that has nothing to say.
    such as memory, staleness, or complexity.
 6. **Checklist:** the [checklist](#checklist) results.
 
+<!-- /profile -->
+
 **Title:** the best-fit handoff result label, unbolded, then what the user notices: `[✨ FEAT] Rate finished sessions`.
 
 ## Emojis
 
+<!-- profile:work -->
+
+Use `✨ What changes for users` and `🎬 Demo` as the section headings.
+
+<!-- /profile -->
+
+<!-- profile:personal -->
+
 Start each section heading with an emoji, such as 📝 Description, 🙋 Needs you / risks, 🎬 Demo, 📏 Review size, ⚡ Performance, and ✅
 Checklist. Mark items too: 🚀 after-merge steps, 🔒 decisions hard to reverse, ⚠️ risks, and 🖥️ 🌐 📱 🧪 backend, frontend, mobile, and test rows.
+
+<!-- /profile -->

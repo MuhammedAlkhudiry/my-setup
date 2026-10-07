@@ -38,6 +38,10 @@ is missing, so a new machine never installs the wrong profile by default.
 - `work` — the Windows work laptop: Claude Code with direct sign-in and Codex, only rules and skills that fit work, PhpStorm shortcuts in VS Code,
   and no zsh layer, Pool, Mac watcher, MCP servers, or personal secrets.
 
+Keep `device.json` local to each machine; do not sync it. Work-specific rules and skill instructions belong inside `<!-- profile:work -->` and
+`<!-- /profile -->` blocks. The installer injects them only for the work laptop's `work` profile and removes them from the `personal` profile,
+including the GlobalProtect VPN rule.
+
 ## PhpStorm Shortcuts in VS Code
 
 Profiles with `vscodeKeymap` install the IntelliJ IDEA Keybindings extension for PhpStorm's default Windows keymap, then replace VS Code's user

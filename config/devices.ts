@@ -72,6 +72,7 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
     rtk: "optional",
     requiredSecrets: [],
     excludedSkills: [
+      "project-docs",
       "personal-knowledge",
       "manage-ad-accounts",
       "promo-video",

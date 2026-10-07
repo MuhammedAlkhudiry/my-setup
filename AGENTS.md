@@ -42,6 +42,9 @@
   paths; use skill-relative references.
 - **PROFILE-BLOCKS** — Put content that only fits one device profile between `<!-- profile:<name> -->` and `<!-- /profile -->` lines in
   `content/base-rules.md` or skill Markdown. Inside a list, indent the marker lines to the list item's text so the formatter leaves them alone.
+- **WORK-ONLY** — Keep work-specific instructions, including employer tooling and VPN requirements, inside `<!-- profile:work -->` blocks so they
+  are injected only on the work laptop. Keep device selection in the untracked local `~/.config/my-setup/device.json`; never sync it between machines.
+  Before installing a work-only change, verify that it appears in the `work` render and is absent from the `personal` render.
 - **SKILL-GLOBAL** — Skill instructions are global capabilities; do not mention any project, repo, product, client, or local workspace by name.
 - **SKILL-INSTALL** — Never install skills with `npx skills add`; local skills live in this repo under `content/skills/<category>/*`, and remote
   skills must be declared in `config/skills.ts` for this repo's source/import logic.
