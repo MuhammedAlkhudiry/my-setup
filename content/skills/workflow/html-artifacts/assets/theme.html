@@ -91,6 +91,8 @@
     .pair-label { @apply mb-2 flex h-6 items-center gap-2 text-xs font-medium uppercase tracking-wider text-muted; }
     .shot { @apply block w-full rounded-lg border border-line bg-subtle shadow-card; }
     .shot-empty { @apply grid place-items-center rounded-lg border border-dashed border-line bg-subtle text-sm text-muted min-h-40; }
+    /* Stand-in for untouched parts of a mockup screen; the current text color lets it fit any product surface. */
+    .skel { @apply rounded-md bg-current/10; }
 
     /* Controls */
     .btn { @apply inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3 py-1.5 text-sm font-medium hover:bg-subtle; }

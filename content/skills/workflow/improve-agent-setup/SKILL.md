@@ -1,6 +1,6 @@
 ---
 name: improve-agent-setup
-description: Use to audit the agent setup — context, skills, rules, install, projects, external tools — and recommend improvements.
+description: Use to audit the agent setup — context, task speed, skills, rules, install, projects, external tools — and recommend improvements.
 ---
 
 Recommend improvements without editing.
@@ -8,8 +8,8 @@ Recommend improvements without editing.
 ## Workflow
 
 1. Review every area below for a broad audit, or only the area the user names.
-2. Inspect source files, installed configuration, and recent tasks for repeated problems, avoidable work, and wasted context. For context, run
-   `scripts/analyze-sessions.ts --help` and use its current interface.
+2. Inspect source files, installed configuration, and recent tasks for repeated problems, avoidable work, wasted context, and slow tasks. For
+   context and task time, run `scripts/analyze-sessions.ts --help` and use its current interface.
 3. For external tools, search GitHub Trending and current GitHub results for agent tools that solve the observed problems.
 4. Rank ideas by lasting value, evidence, effort, and risk. Report the strongest first, each with its evidence, recurring benefit, and concrete
    direction. Mention rejected ideas only when the user is likely to consider them.
@@ -17,6 +17,7 @@ Recommend improvements without editing.
 ## Review areas
 
 - **Context:** instructions and output that add tokens or make tasks harder to follow.
+- **Task speed:** what tasks wait on, such as model responses, large prompts, polling loops, subagents, and failed requests.
 - **Skills:** gaps, duplication, outdated guidance, and work better handled by scripts.
 - **Rules:** scope, duplication, and whether each rule lives in the right place.
 - **Install and tooling:** `doctor` results and differences between source and installed configuration.

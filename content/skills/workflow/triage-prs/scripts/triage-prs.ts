@@ -40,6 +40,8 @@ export interface Assessment {
   pr: PullRequest;
   root: number;
   parent: number | null;
+  /** A stacked PR whose head lacks its parent's latest commits and needs a restack. */
+  behindParent: boolean;
   ci: "success" | "failure" | "pending" | "none";
   mainConflicts: string[];
   codeLines: number;
@@ -303,6 +305,7 @@ function assess(options: { cwd: string; remote: string; fetch: boolean }): {
       });
 
   const mainRef = ref(defaultBranch);
+  const headOf = new Map(prs.map((pr) => [pr.number, pr.head]));
 
   const assessments = prs.map((pr, index): Assessment => {
     const head = ref(pr.head);
@@ -324,6 +327,9 @@ function assess(options: { cwd: string; remote: string; fetch: boolean }): {
       pr,
       root: stack.root,
       parent: stack.parent,
+      behindParent:
+        stack.parent !== null &&
+        !git(["merge-base", "--is-ancestor", ref(headOf.get(stack.parent) as string), head]).ok,
       ci: ciState(pr, raw[index].statusCheckRollup ?? []),
       mainConflicts: conflictingPaths(mainRef, head),
       codeLines: files
@@ -408,7 +414,7 @@ function markdown(defaultBranch: string, assessments: Assessment[]): string {
       const notes: string[] = [];
 
       if (item.parent) {
-        notes.push(`stacked on ${link(item.parent)}`);
+        notes.push(`stacked on ${link(item.parent)}${item.behindParent ? ", behind it" : ""}`);
       }
 
       if (item.migrations > 0) {

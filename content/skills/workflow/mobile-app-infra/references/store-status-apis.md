@@ -9,4 +9,5 @@ Use the [store CLIs](store-clis.md) with read-only commands only; never use a pr
   vitals and recent reviews.
 - Keep project, artifact, signing identity, native version, track, processing, review, rollout, and availability distinct.
 - Never infer `live` from a build, upload, successful API request, or configured rollout.
-- Never automate App Store Connect or Google Play Console through a browser. Report API-unsupported store tasks as explicit manual blockers.
+- Never automate App Store Connect or Google Play Console through a browser, except a declaration form the API cannot edit when the owner asks for
+  that change. Report other API-unsupported store tasks as explicit manual blockers.

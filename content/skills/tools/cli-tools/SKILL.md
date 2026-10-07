@@ -14,6 +14,9 @@ Before you run a command, read that CLI's help for it. The help decides which co
     it with `PUT /accounts/{account_id}/workers/subdomain` using the `cf` OAuth token.
   - For sign-in, use $service-access.
 - **Hugeicons:** `hugeicons --help`.
-- **Laravel Forge:** `forge list` and `forge help <command>`. Herd installs this CLI. Before a command that changes a server or site, check the active
-  organization and server. Use the CLI instead of the Forge API or dashboard.
+- **Laravel Forge:** `forge list` and `forge help <command>`. Use the CLI Herd installs, which comes first on `PATH`; the Composer copy at
+  `~/.composer/vendor/bin/forge` (1.8.3) answers "not found" for every server and site. Before a command that changes a server or site, check
+  the active organization and server. Use the CLI instead of the Forge API or dashboard.
+  - Production output can hold customer data and secrets; never print or summarize `.env` values. Run `.env` pulls or pushes, deploys,
+    restarts, migrations, and `tinker` only when the task calls for them. Prefer `forge daemon:*` over `supervisorctl`, which needs `sudo`.
 - **PostHog:** `posthog-cli api --agent-help`. For sign-in or credentials, use $service-access.

@@ -1,6 +1,6 @@
 ---
 name: dependency-upgrade
-description: Use when upgrading project dependencies, auditing how current they are, or removing unused packages.
+description: Use before upgrading or removing project dependencies, such as running `composer update`, `bun update`, or `npm outdated`, or when auditing how current they are.
 ---
 
 ## Workflow
@@ -29,7 +29,7 @@ description: Use when upgrading project dependencies, auditing how current they 
 
 ## Report
 
-- Before changing versions, create the report with $saved-work as type `tracker`. Share its path early and update it after every dependency or
+- Before changing versions, create the report with $project-docs as type `tracker`. Share its path early and update it after every dependency or
   batch.
 - On resume, read the report before continuing. Link it in every final answer.
 - List every in-scope dependency, even when unchanged, with its old and new version, final status, reason, notable changes, and checks.

@@ -1,6 +1,6 @@
 ---
 name: writing-md-files
-description: Use when writing or editing Markdown documents, including agent skills and always-loaded instruction files.
+description: Use before creating or editing any Markdown file, such as a README, doc, plan, skill, `AGENTS.md`, or `CLAUDE.md`.
 ---
 
 Follow the shared response guidance.

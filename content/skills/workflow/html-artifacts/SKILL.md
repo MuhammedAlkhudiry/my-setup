@@ -41,7 +41,7 @@ Disposable but designed: one `index.html` plus assets beside it, no build step.
   and Tailwind utilities; never ship browser defaults.
 - Aim for a well-made internal tool, not a document: a header with title and chips, cards on the tinted background, one accent, and status tones
   only for ok, warn, bad.
-- Draw project screens with its `mockup-kit/` classes (see its `README.md`); add a missing component to the kit, not the page.
+- Draw product screens as [references/mockups.md](references/mockups.md) describes.
 - Avoid making the user scroll, vertically or sideways. Fit the main content on one screen with dense cards, side-by-side panels, and
   collapsed detail.
 

@@ -1,6 +1,6 @@
 ---
 name: test-writing
-description: Use when a change may add, change, or remove tests, including a bug fix that needs a regression test, or when deciding what to test, judging tests, or pruning a test suite; to rate the whole setup use $verification-report.
+description: Use before adding, editing, or deleting any test file, before fixing a bug, and when judging or pruning tests; to rate the whole setup use $verification-report.
 ---
 
 ## What earns a test

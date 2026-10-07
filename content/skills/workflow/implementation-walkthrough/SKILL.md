@@ -6,7 +6,7 @@ description: Use when guiding the user step by step through implemented work to 
 ## Saved progress
 
 1. Find the repository and its current PR, or the branch when no PR exists.
-2. Resume the $saved-work tracker `walkthrough-pr-<number>`, or `walkthrough-<branch-slug>` when no PR exists. Create it as type `tracker` when
+2. Resume the $project-docs tracker `walkthrough-pr-<number>`, or `walkthrough-<branch-slug>` when no PR exists. Create it as type `tracker` when
    none exists.
 3. Record the summary, target URL, resume notes, current part, and each part's `pending`, `completed`, `skipped`, or `stale` status. Reconstruct
    broader context from the repository on resume.

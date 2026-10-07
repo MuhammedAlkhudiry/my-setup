@@ -1,12 +1,12 @@
 ---
 name: manage-ad-accounts
-description: Use for advertising accounts, campaigns, conversions, and lead flow, and to maintain the project's `ADS.md` inventory.
+description: Use for advertising accounts, campaigns, conversions, and lead flow, and to maintain the project's `docs/ads.md` inventory.
 ---
 
 - Use $service-access for account access and provider sources.
-- Read `ADS.md` for the project's advertising setup. Create it if missing, or update it when the setup changes.
+- Read `docs/ads.md` for the project's advertising setup. Create it if missing, or update it when the setup changes.
 
-`ADS.md` contains:
+`docs/ads.md` contains:
 
 - **Scope:** purpose, destinations, promoted apps, and exclusions.
 - **Accounts:** platform, manager, name, ID, currency, timezone, access, and ownership.

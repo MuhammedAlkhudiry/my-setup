@@ -19,6 +19,6 @@ description: Use when the user asks for an interview or when linked decisions ne
 5. Follow up on answers that could change the outcome at the chosen depth. Use evidence to question important assumptions and explain why they matter.
    Leave harmless unknowns alone.
 6. Finish when every important topic required by the chosen depth is resolved, assumed, or deferred. Summarize the decisions, assumptions, open
-   issues, and next step the original task needs. Save the summary with $saved-work as type `interview` and status `done`, recording the depth; do
-   not turn it into a spec or plan. Then resume the original task.
-7. If the user stops, save the partial topic list with $saved-work as type `interview` and status `progress`, then return it.
+   issues, and next step the original task needs. Record each decision that already rules out a change with $project-docs. Save the summary
+   with $project-docs as type `interview` and status `done`, recording the depth; do not turn it into a spec or plan. Then resume the original task.
+7. If the user stops, save the partial topic list with $project-docs as type `interview` and status `progress`, then return it.

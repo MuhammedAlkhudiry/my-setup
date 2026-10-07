@@ -22,7 +22,9 @@
     .pick:has(input:checked) { @apply border-accent bg-accent text-surface; }
     .pick input { @apply sr-only; }
     .notes { @apply w-40 rounded-lg border border-line bg-surface px-3 py-1 text-sm focus:outline-2 focus:outline-accent md:w-56; }
-    .stage { @apply flex min-h-0 flex-1 items-center justify-center gap-6 overflow-auto p-4 md:p-6; }
+    .stage { @apply flex min-h-0 flex-1 gap-6 overflow-auto p-4 md:p-6; }
+    /* Auto margins centre a fragment that fits; flex centring would push a taller one's top out of scroll reach. */
+    .stage > * { margin: auto; }
     .stage-error { @apply grid min-h-40 w-full max-w-xl place-items-center rounded-lg border border-dashed border-line bg-subtle p-6 text-center text-sm text-muted; }
   }
 </style>

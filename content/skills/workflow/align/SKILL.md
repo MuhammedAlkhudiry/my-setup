@@ -6,6 +6,8 @@ description: Use when the user asks to align or recap, often in the middle of a 
 - Cover the whole thread by default, from its first message, not just the latest exchange. Narrow the scope only when the user asks for it.
 - Read the conversation and relevant evidence first, such as linked PRs, saved work, and the working tree, so the response reflects what the user said
   and what actually happened.
+- Check the current state of each PR the thread opened or worked on, such as merged, draft, CI failing, conflicting, or waiting on review. When four or
+  more are still open, or any of them form a stack, run $triage-prs on their repository and keep only the thread's PRs.
 - Derive the goal from the thread as a whole. When the goal shifted along the way, state the current goal and note what changed.
 - Restate in your own words, not the user's:
   - **Goal**: the outcome the user wants and why it matters to them.
@@ -23,21 +25,23 @@ description: Use when the user asks to align or recap, often in the middle of a 
 
 - Open with short bullets under `Goal`, `Problem`, and, when needed, `Proposed solution` and `Assumptions`.
 - When there is work to recap, follow with one tree rooted at the goal, with a status emoji on each group (`✅` done, `🔄` in progress, `⬜` next)
-  and PR references right-aligned on their lines:
+  and PR references right-aligned on their lines, each followed by the PR's current state in words:
 
   ```text
   Goal: <outcome in one line>
   │
   ├─ ✅ <group> (live)
-  │   ├─ <result> ................ #12
-  │   └─ <result> ................ #13 → regression fixed in #15
+  │   ├─ <result> ................ #12 merged
+  │   └─ <result> ................ #13 merged → regression fixed in #15
   │
-  ├─ 🔄 <group> (<owner>, <state>) ...... #16
-  │   └─ <result>
+  ├─ 🔄 <group> (<owner>, <state>)
+  │   └─ <result> ................ #16 CI failing
   │
   └─ ⬜ Next
       ├─ <step>
       └─ (paused) <step>
   ```
+
+- When $triage-prs ran, follow the tree with its table, limited to the thread's PRs.
 
 - Keep each line to one idea. Prefer concrete wording over abstract summaries.

@@ -19,8 +19,12 @@ provisioning failures, version conflicts, policy rejection, or unresolved produc
 availability. When an authorized API cannot perform a required action, hand off that exact manual step.
 
 Routine store releases are API/CLI-only: use EAS for builds and submissions and the [store CLIs](store-clis.md) for status, rollout, listings, and
-other supported release operations. Never automate App Store Connect or Google Play Console through a browser. Treat API-unsupported account, policy, legal, payment,
-and review tasks as explicit manual blockers requiring fresh user intent.
+other supported release operations. Never automate App Store Connect or Google Play Console through a browser, except a declaration form the API
+cannot edit, such as Play's App content, when the owner asks for that change. Treat other API-unsupported account, policy, legal, payment, and
+review tasks as explicit manual blockers requiring fresh user intent.
+
+Ship every change in a store build. Publish an over-the-air update only when the owner asks for one, and keep the update tooling working so
+it is ready when they do.
 
 ## TestFlight Only
 

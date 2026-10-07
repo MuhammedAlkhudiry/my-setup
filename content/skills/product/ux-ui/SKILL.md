@@ -1,6 +1,6 @@
 ---
 name: ux-ui
-description: Use when designing, implementing, or reviewing an interface, or when the user asks for visual options to compare.
+description: Use before building or changing what users see, such as a screen, layout, component, or style, when reviewing a design, or when the user asks for visual options to compare.
 ---
 
 ## Design workflow
@@ -9,6 +9,7 @@ description: Use when designing, implementing, or reviewing an interface, or whe
 - Follow the established design system, theme, and visual character. Add components, tokens, or patterns for authorized work when they preserve those
   conventions.
 - Favor calm, rich, professional, distinctive minimalism: clear hierarchy, balanced spacing, restrained color, and subtle depth.
+- Never add eyebrow labels, the small text above a heading, or pill badges and chips. Let the heading and layout carry the hierarchy.
 - Make the next useful action clear at each stage of the journey. For example, offer resource creation in an empty state and contextual editing in a
   resource list.
 

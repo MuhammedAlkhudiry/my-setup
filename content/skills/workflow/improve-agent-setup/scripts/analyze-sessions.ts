@@ -113,7 +113,50 @@ type ClaudeSession = {
   toolOutputBytes: number;
   largestToolOutput: number;
   unmatchedToolOutputs: number;
+  time: ClaudeTime;
 };
+type TimeCategory =
+  | "model"
+  | "tool"
+  | "subagent"
+  | "background"
+  | "compaction"
+  | "retry"
+  | "hook"
+  | "stall"
+  | "user"
+  | "idle";
+type ClaudeTime = Record<TimeCategory, number> & { active: number; tasks: number };
+type ClaudeToolTime = {
+  scope: "main" | "subagent";
+  tool: string;
+  label: string;
+  calls: number;
+  wallMs: number;
+  totalMs: number;
+  maxMs: number;
+  errors: number;
+  errorMs: number;
+  timeouts: number;
+  durations: number[];
+  slowest: string;
+  slowestFile: string;
+};
+type ClaudeTask = {
+  file: string;
+  trigger: "human" | "wake";
+  prompt: string;
+  start: number;
+  activeMs: number;
+  modelMs: number;
+  toolMs: number;
+  backgroundMs: number;
+  otherMs: number;
+  requests: number;
+  toolCalls: number;
+  toolShare: Map<string, number>;
+};
+type ClaudeRequest = { model: string; ms: number; input: number; output: number };
 type ClaudeTree = {
   sessionId: string;
   project: string;
@@ -169,7 +212,8 @@ if (args.has("help") || args.has("h")) {
   analyze-sessions.ts [options]
 
 Audits recorded agent sessions for context waste. Covers Codex rollouts and
-Claude Code transcripts.
+Claude Code transcripts. For Claude Code it also shows where task time goes:
+model responses, tools, subagents, background work, and model latency.
 
 Options:
   --harness <name>      codex, claude, or all. Default: every root that exists,
@@ -866,8 +910,306 @@ function addTool(map: Map<string, ClaudeTool>, call: { tool: string; label: stri
   map.set(call.label, existing);
 }
 
+// An active gap this long is a sleeping machine or a hung run, not tool or model work.
+const stallMs = 2 * 3_600_000;
+const userWaitTool = /(^|_)(AskUserQuestion|ExitPlanMode)$/;
+const waitLoop = /(^|[\s;&|(])(sleep\s+\d|until\s)|\s--watch\b/;
+const toolTimeout = /did not complete within its \d+s timeout|Command timed out/;
+const emptyTime = (): ClaudeTime => ({
+  model: 0,
+  tool: 0,
+  subagent: 0,
+  background: 0,
+  compaction: 0,
+  retry: 0,
+  hook: 0,
+  stall: 0,
+  user: 0,
+  idle: 0,
+  active: 0,
+  tasks: 0,
+});
+type ClaudeKind =
+  | "human"
+  | "wake"
+  | "subagent"
+  | "background"
+  | "interrupt"
+  | "result"
+  | "assistant"
+  | "failure"
+  | "stop-hook"
+  | "compact"
+  | "api-error";
+function claudeKind(event: Obj): ClaudeKind | undefined {
+  const type = string(event.type),
+    content = object(event.message).content;
+  if (type === "assistant")
+    return object(event.message).model === "<synthetic>" && text(content).startsWith("API Error")
+      ? "failure"
+      : "assistant";
+  if (type === "system") {
+    const subtype = string(event.subtype);
+    if (subtype === "stop_hook_summary") return "stop-hook";
+    if (subtype === "compact_boundary") return "compact";
+    return subtype === "api_error" ? "api-error" : undefined;
+  }
+  if (type !== "user" || event.isCompactSummary === true) return;
+  if (Array.isArray(content) && content.some((block) => object(block).type === "tool_result"))
+    return "result";
+  const body = text(content),
+    origin = string(object(event.origin).kind);
+  // Work stopped by an ended session is reported on resume, after the user was away.
+  if (origin === "task-notification" || body.startsWith("<task-notification>")) {
+    if (body.includes("<status>stopped</status>")) return "wake";
+    return /<summary>(Background )?agent /i.test(body) ? "subagent" : "background";
+  }
+  if (body.startsWith("[Request interrupted by user")) return "interrupt";
+  if (origin || event.isMeta === true || (body && !classify(body).human)) return "wake";
+  return "human";
+}
+function claudeToolDetail(input: Obj): string {
+  for (const key of ["command", "description", "url", "query", "file_path", "pattern", "skill"]) {
+    const value = string(input[key]);
+    if (value) return short(value, 60);
+  }
+  return "";
+}
+// Splits session wall time into what the agent was waiting on between consecutive events.
+function claudeTimeline(file: string) {
+  const time = emptyTime(),
+    tools = new Map<string, ClaudeToolTime>(),
+    tasks: ClaudeTask[] = [],
+    requests: ClaudeRequest[] = [],
+    open = new Map<string, { tool: string; label: string; start: number; detail: string }>();
+  let prev: { at: number; kind: ClaudeKind; ended: boolean; messageId: string } | undefined,
+    task: ClaudeTask | undefined,
+    request: (ClaudeRequest & { id: string; start: number; end: number }) | undefined,
+    requestStart = 0;
+
+  const toolTime = (call: { tool: string; label: string }): ClaudeToolTime => {
+    const existing = tools.get(call.label);
+    if (existing) return existing;
+    const created: ClaudeToolTime = {
+      scope: "main",
+      tool: call.tool,
+      label: call.label,
+      calls: 0,
+      wallMs: 0,
+      totalMs: 0,
+      maxMs: 0,
+      errors: 0,
+      errorMs: 0,
+      timeouts: 0,
+      durations: [],
+      slowest: "",
+      slowestFile: "",
+    };
+    tools.set(call.label, created);
+    return created;
+  };
+  const spend = (category: TimeCategory, ms: number, label = ""): void => {
+    time[category] += ms;
+    if (category === "idle" || category === "user" || category === "stall") return;
+    time.active += ms;
+    if (!task) return;
+    task.activeMs += ms;
+    if (category === "model") task.modelMs += ms;
+    else if (category === "tool") {
+      task.toolMs += ms;
+      task.toolShare.set(label, (task.toolShare.get(label) || 0) + ms);
+    } else if (category === "subagent" || category === "background") task.backgroundMs += ms;
+    else task.otherMs += ms;
+  };
+  const closeRequest = (): void => {
+    if (request && request.start >= since && request.end >= request.start)
+      requests.push({
+        model: request.model,
+        ms: request.end - request.start,
+        input: request.input,
+        output: request.output,
+      });
+    request = undefined;
+  };
+  const closeTask = (): void => {
+    if (task && task.start >= since) tasks.push(task);
+    task = undefined;
+  };
+  const attribute = (gap: number, kind: ClaudeKind, messageId: string): void => {
+    if (!prev) return;
+    const working = [...open.values()].filter((call) => !userWaitTool.test(call.tool));
+    if (open.size && !working.length) return spend("user", gap);
+    if ((working.length || !prev.ended) && gap >= stallMs) return spend("stall", gap);
+    if (open.size) {
+      const share = gap / open.size;
+      for (const call of open.values()) {
+        if (userWaitTool.test(call.tool)) spend("user", share);
+        else {
+          spend("tool", share, call.label);
+          toolTime(call).wallMs += share;
+        }
+      }
+      return;
+    }
+    if (kind === "assistant" && prev.kind === "assistant" && messageId === prev.messageId)
+      return spend("model", gap);
+    if (prev.ended)
+      return spend(
+        kind === "subagent" || kind === "background"
+          ? gap >= stallMs
+            ? "stall"
+            : kind
+          : kind === "stop-hook"
+            ? "hook"
+            : "idle",
+        gap,
+      );
+    spend(
+      kind === "stop-hook"
+        ? "hook"
+        : kind === "compact"
+          ? "compaction"
+          : kind === "api-error" || kind === "failure" || prev.kind === "api-error"
+            ? "retry"
+            : "model",
+      gap,
+    );
+  };
+
+  return {
+    time,
+    tools,
+    tasks,
+    requests,
+    step(event: Obj, at: number): void {
+      const kind = claudeKind(event);
+      if (!kind || !at) return;
+      const message = object(event.message),
+        messageId = string(message.id),
+        usage = object(message.usage);
+
+      if (prev && prev.at >= since && at >= prev.at) attribute(at - prev.at, kind, messageId);
+
+      if ((kind === "human" || kind === "wake") && (!task || prev?.ended)) {
+        closeTask();
+        task = {
+          file,
+          trigger: kind,
+          prompt: "",
+          start: at,
+          activeMs: 0,
+          modelMs: 0,
+          toolMs: 0,
+          backgroundMs: 0,
+          otherMs: 0,
+          requests: 0,
+          toolCalls: 0,
+          toolShare: new Map(),
+        };
+      }
+      // Injected context can land just before the human prompt it belongs to.
+      if (task && kind === "human" && task.trigger === "wake" && !task.requests) {
+        task.trigger = "human";
+        task.prompt = "";
+      }
+      if (task && !task.prompt && (kind === "human" || kind === "wake"))
+        task.prompt = classify(text(message.content)).human || text(message.content);
+
+      if (kind === "assistant") {
+        if (request?.id !== messageId) {
+          closeRequest();
+          // A new request needs every earlier result, so calls still open never returned one.
+          open.clear();
+          if (messageId && message.model !== "<synthetic>") {
+            request = {
+              id: messageId,
+              model: string(message.model) || "(unknown)",
+              start: requestStart || -1,
+              end: at,
+              input:
+                number(usage.input_tokens) +
+                number(usage.cache_read_input_tokens) +
+                number(usage.cache_creation_input_tokens),
+              output: number(usage.output_tokens),
+              ms: 0,
+            };
+            requestStart = 0;
+            if (task) task.requests++;
+          }
+        } else {
+          request.end = at;
+          request.output = Math.max(request.output, number(usage.output_tokens));
+        }
+        for (const block of Array.isArray(message.content) ? message.content : []) {
+          const item = object(block);
+          if (item.type !== "tool_use" || !string(item.id)) continue;
+          const tool = string(item.name) || "(unnamed tool)",
+            input = object(item.input);
+          open.set(string(item.id), {
+            tool,
+            label:
+              tool === "Bash" && waitLoop.test(string(input.command))
+                ? "Bash wait loop"
+                : claudeToolLabel(tool, input),
+            start: at,
+            detail: claudeToolDetail(input),
+          });
+          if (task) task.toolCalls++;
+        }
+      } else {
+        closeRequest();
+        if (kind === "interrupt") open.clear();
+        if (kind === "result" && Array.isArray(message.content))
+          for (const block of message.content) {
+            const item = object(block),
+              call = open.get(string(item.tool_use_id));
+            if (item.type !== "tool_result" || !call) continue;
+            open.delete(string(item.tool_use_id));
+            if (call.start < since || userWaitTool.test(call.tool)) continue;
+            const ms = Math.max(0, at - call.start),
+              stats = toolTime(call);
+            stats.calls++;
+            stats.totalMs += ms;
+            stats.durations.push(ms);
+            if (ms > stats.maxMs) {
+              stats.maxMs = ms;
+              stats.slowest = call.detail;
+              stats.slowestFile = file;
+            }
+            if (item.is_error === true) {
+              stats.errors++;
+              stats.errorMs += ms;
+            }
+            if (toolTimeout.test(outputText(item.content))) stats.timeouts++;
+          }
+        requestStart = ["stop-hook", "api-error", "failure", "interrupt"].includes(kind) ? 0 : at;
+      }
+
+      const stop = string(message.stop_reason);
+      prev = {
+        at,
+        kind,
+        messageId,
+        ended:
+          kind === "stop-hook" ||
+          kind === "interrupt" ||
+          kind === "failure" ||
+          (kind === "assistant" && !open.size && stop !== "tool_use"),
+      };
+    },
+    finish(): void {
+      closeRequest();
+      closeTask();
+      time.tasks = tasks.filter((item) => item.trigger === "human").length;
+    },
+  };
+}
+
 const claudeSessions: ClaudeSession[] = [],
-  claudeTools = new Map<string, ClaudeTool>();
+  claudeTools = new Map<string, ClaudeTool>(),
+  claudeToolTimes = new Map<string, ClaudeToolTime>(),
+  claudeTasks: ClaudeTask[] = [],
+  claudeRequests: ClaudeRequest[] = [];
 let claudeCandidates: string[] = [];
 if (harnesses.has("claude")) {
   if (!existsSync(claudeRoot)) die(`Claude projects directory not found: ${claudeRoot}`);
@@ -913,9 +1255,11 @@ if (harnesses.has("claude")) {
       toolOutputBytes: 0,
       largestToolOutput: 0,
       unmatchedToolOutputs: 0,
+      time: emptyTime(),
     };
     const calls = new Map<string, { tool: string; label: string }>(),
-      countedRequests = new Set<string>();
+      countedRequests = new Set<string>(),
+      timeline = claudeTimeline(relativePath);
     let active = false;
     for await (const line of lines(file)) {
       if (!line) continue;
@@ -942,6 +1286,7 @@ if (harnesses.has("claude")) {
       summary.parentId ||= string(object(event.forkedFrom).sessionId);
       if (event.isSidechain === true) summary.sidechain = true;
       if (at) summary.createdAt ||= at;
+      timeline.step(event, at);
       if (type === "assistant" && Array.isArray(message.content))
         for (const block of message.content) {
           const item = object(block);
@@ -1038,6 +1383,40 @@ if (harnesses.has("claude")) {
         ? "resumed"
         : "created";
     claudeSessions.push(summary);
+
+    timeline.finish();
+    summary.time = timeline.time;
+    claudeRequests.push(...timeline.requests);
+    if (!summary.sidechain) claudeTasks.push(...timeline.tasks);
+    for (const item of timeline.tools.values()) {
+      const scope = summary.sidechain ? "subagent" : "main",
+        key = `${scope}\0${item.label}`;
+      const aggregate = claudeToolTimes.get(key) || {
+        ...item,
+        scope,
+        calls: 0,
+        wallMs: 0,
+        totalMs: 0,
+        maxMs: 0,
+        errors: 0,
+        errorMs: 0,
+        timeouts: 0,
+        durations: [],
+      };
+      aggregate.calls += item.calls;
+      aggregate.wallMs += item.wallMs;
+      aggregate.totalMs += item.totalMs;
+      aggregate.errors += item.errors;
+      aggregate.errorMs += item.errorMs;
+      aggregate.timeouts += item.timeouts;
+      aggregate.durations.push(...item.durations);
+      if (item.maxMs > aggregate.maxMs) {
+        aggregate.maxMs = item.maxMs;
+        aggregate.slowest = item.slowest;
+        aggregate.slowestFile = item.slowestFile;
+      }
+      claudeToolTimes.set(key, aggregate);
+    }
   }
 }
 function claudeTrees(): ClaudeTree[] {
@@ -1068,6 +1447,77 @@ function claudeTrees(): ClaudeTree[] {
     .sort((a, b) => b.totalInput - a.totalInput);
 }
 const claudeTaskTrees = claudeTrees();
+
+function quantiles(values: number[]): { p50: number; p90: number } {
+  const sorted = values.slice().sort((a, b) => a - b),
+    at = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] || 0;
+  return { p50: at(0.5), p90: at(0.9) };
+}
+function duration(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
+  if (seconds < 60) return `${seconds}s`;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${pad(seconds % 60)}s`;
+  return `${Math.floor(seconds / 3600)}h ${pad(Math.floor((seconds % 3600) / 60))}m`;
+}
+const percent = (part: number, whole: number): string =>
+  `${Math.round((100 * part) / Math.max(1, whole))}%`;
+function sumTime(items: ClaudeSession[]): ClaudeTime {
+  const total = emptyTime();
+  for (const item of items)
+    for (const key of Object.keys(total) as Array<keyof ClaudeTime>) total[key] += item.time[key];
+  return total;
+}
+const topTool = (task: ClaudeTask): [string, number] | undefined =>
+  [...task.toolShare].sort((a, b) => b[1] - a[1])[0];
+const contextBuckets: Array<[number, string]> = [
+  [50_000, "under 50k"],
+  [150_000, "50k-150k"],
+  [300_000, "150k-300k"],
+  [600_000, "300k-600k"],
+  [Infinity, "600k+"],
+];
+function latencyRows(group: (request: ClaudeRequest) => string) {
+  const groups = new Map<string, ClaudeRequest[]>();
+  for (const request of claudeRequests) {
+    const name = group(request);
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name)!.push(request);
+  }
+  return [...groups].map(([name, items]) => {
+    const totalMs = items.reduce((sum, item) => sum + item.ms, 0),
+      output = items.reduce((sum, item) => sum + item.output, 0);
+    return {
+      group: name,
+      requests: items.length,
+      totalMs,
+      ...quantiles(items.map((item) => item.ms)),
+      meanOutput: Math.round(output / items.length),
+      outputPerSecond: Math.round(output / Math.max(1, totalMs / 1000)),
+    };
+  });
+}
+
+const claudeMainTime = sumTime(claudeSessions.filter((item) => !item.sidechain)),
+  claudeSubagentTime = sumTime(claudeSessions.filter((item) => item.sidechain)),
+  claudeHumanTasks = claudeTasks.filter((item) => item.trigger === "human" && item.activeMs > 0),
+  claudeTaskSpread = {
+    ...quantiles(claudeHumanTasks.map((item) => item.activeMs)),
+    max: Math.max(0, ...claudeHumanTasks.map((item) => item.activeMs)),
+  },
+  claudeToolRows = [...claudeToolTimes.values()].map(({ durations, ...item }) => ({
+    ...item,
+    ...quantiles(durations),
+  })),
+  claudeModelRows = latencyRows((item) => item.model).sort((a, b) => b.totalMs - a.totalMs),
+  claudeContextRows = latencyRows(
+    (item) => contextBuckets.find(([limit]) => item.input < limit)![1],
+  ).sort(
+    (a, b) =>
+      contextBuckets.findIndex(([, name]) => name === a.group) -
+      contextBuckets.findIndex(([, name]) => name === b.group),
+  );
 
 const totals = {
   candidateFiles: candidates.length,
@@ -1118,6 +1568,18 @@ const report = {
     sessions: claudeSessions,
     tools: [...claudeTools.values()],
     subagentTrees: claudeTaskTrees,
+    time: {
+      main: claudeMainTime,
+      subagents: claudeSubagentTime,
+      taskSpread: claudeTaskSpread,
+      tasks: claudeTasks.map(({ toolShare, ...task }) => ({
+        ...task,
+        topTool: topTool({ ...task, toolShare })?.[0] || "",
+      })),
+      tools: claudeToolRows,
+      models: claudeModelRows,
+      contexts: claudeContextRows,
+    },
   },
 };
 if (args.has("json")) {
@@ -1125,7 +1587,7 @@ if (args.has("json")) {
   process.exit(0);
 }
 
-console.log("# Agent Session Context Audit\n");
+console.log("# Agent Session Audit\n");
 console.log(`Harnesses: ${[...harnesses].join(", ")}`);
 console.log(`Activity window: since ${new Date(since).toISOString()} (event timestamps)`);
 if (sinceMtime !== undefined)
@@ -1281,6 +1743,92 @@ if (harnesses.has("claude")) {
       ["file", (x) => short(x.file, 64)],
     ],
   );
+  console.log("\n### Where Claude Time Goes\n");
+  console.log(
+    `Human tasks in main sessions: ${claudeHumanTasks.length}; active time median ${duration(claudeTaskSpread.p50)}, p90 ${duration(claudeTaskSpread.p90)}, longest ${duration(claudeTaskSpread.max)}\n`,
+  );
+  const categories: Array<[keyof ClaudeTime, string]> = [
+    ["active", "Active total"],
+    ["model", "Model responses"],
+    ["tool", "Foreground tool calls, including foreground subagents"],
+    ["subagent", "Background subagents after the turn ended"],
+    ["background", "Background commands and monitors after the turn ended"],
+    ["compaction", "Compaction"],
+    ["retry", "Failed API requests and retries"],
+    ["hook", "Hooks"],
+    ["stall", "Stalls: working gaps over 2h (excluded)"],
+    ["user", "Waiting for answers to agent questions (excluded)"],
+    ["idle", "Idle between turns (excluded)"],
+  ];
+  table(categories, [
+    ["main sessions", ([key]) => duration(claudeMainTime[key])],
+    ["main share", ([key]) =>
+      ["user", "idle", "stall"].includes(key)
+        ? "-"
+        : percent(claudeMainTime[key], claudeMainTime.active)],
+    ["subagents", ([key]) => duration(claudeSubagentTime[key])],
+    ["category", ([, label]) => label],
+  ]);
+  console.log("\n### Slowest Claude Tasks\n");
+  table(
+    claudeHumanTasks
+      .slice()
+      .sort((a, b) => b.activeMs - a.activeMs)
+      .slice(0, limit),
+    [
+      ["active", (x) => duration(x.activeMs)],
+      ["model", (x) => duration(x.modelMs)],
+      ["tools", (x) => duration(x.toolMs)],
+      ["background", (x) => duration(x.backgroundMs)],
+      ["requests", (x) => x.requests],
+      ["tool calls", (x) => x.toolCalls],
+      ["top tool", (x) => {
+        const top = topTool(x);
+        return top ? `${short(top[0], 32)} (${duration(top[1])})` : "-";
+      }],
+      ["task", (x) => short(x.prompt, 56)],
+      ["file", (x) => short(x.file, 48)],
+    ],
+  );
+  for (const scope of ["main", "subagent"] as const) {
+    const heading = scope === "main" ? "Main Sessions" : "Subagents";
+    console.log(`\n### Slowest Claude Tools in ${heading}\n`);
+    table(
+      claudeToolRows
+        .filter((x) => x.scope === scope)
+        .sort((a, b) => b.wallMs - a.wallMs)
+        .slice(0, limit),
+      [
+        ["wall time", (x) => duration(x.wallMs)],
+        ["share", (x) =>
+          percent(x.wallMs, scope === "main" ? claudeMainTime.active : claudeSubagentTime.active)],
+        ["calls", (x) => x.calls],
+        ["p50", (x) => duration(x.p50)],
+        ["p90", (x) => duration(x.p90)],
+        ["max", (x) => duration(x.maxMs)],
+        ["errors", (x) => x.errors],
+        ["timeouts", (x) => x.timeouts],
+        ["call", (x) => short(x.label, 40)],
+        ["slowest example", (x) => short(x.slowest, 48)],
+      ],
+    );
+  }
+  console.log("\n### Claude Model Latency\n");
+  for (const [rows, label] of [
+    [claudeModelRows, "model"],
+    [claudeContextRows, "prompt size"],
+  ] as const) {
+    table(rows, [
+      ["requests", (x) => x.requests],
+      ["total", (x) => duration(x.totalMs)],
+      ["p50", (x) => duration(x.p50)],
+      ["p90", (x) => duration(x.p90)],
+      ["mean output tokens", (x) => x.meanOutput],
+      ["output tok/s", (x) => x.outputPerSecond],
+      [label, (x) => x.group],
+    ]);
+    console.log("");
+  }
 }
 console.log("\n## Limits\n");
 if (harnesses.has("codex")) {
@@ -1309,5 +1857,11 @@ if (harnesses.has("claude")) {
   );
   console.log(
     "- Subagent transcripts are stored under the parent session directory and are grouped by the parent session ID.",
+  );
+  console.log(
+    "- Claude time splits the wall time between consecutive transcript events by what the agent was waiting on. Parallel tool calls share a gap evenly, and a response is timed from the last input before it to its last written block. Bash commands with sleep, until, or --watch are grouped as wait loops.",
+  );
+  console.log(
+    "- A task starts at a human prompt after the previous turn ended. Idle gaps and answers to AskUserQuestion or ExitPlanMode are excluded from active time. Background time is a gap that ends in a task notification after the turn ended. Working gaps over 2 hours count as stalls and are excluded too.",
   );
 }

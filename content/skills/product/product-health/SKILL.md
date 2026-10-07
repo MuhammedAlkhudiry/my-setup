@@ -5,12 +5,12 @@ description: Use to check a live product's health or investigate anomalies in er
 
 ## Workflow
 
-1. Establish the scope and comparison window from `PRODUCT_SETUP.md`, recent git history, project documentation, and available health sources.
+1. Establish the scope and comparison window from `docs/product-setup.md`, recent git history, project documentation, and available health sources.
 2. Deliver the ranked health report.
 
 ## Evaluation
 
-- Report missing or stale `PRODUCT_SETUP.md` context as an observability gap.
+- Report missing or stale `docs/product-setup.md` context as an observability gap.
 - Compare the current window with both the previous window and usual baseline. Treat recent commits as investigation leads, not proof.
 - Assess only relevant product journeys, jobs, data integrity, performance, observability, AI usage, and cost or capacity.
 - Prefer structured CLI or API output over dashboards.
@@ -18,12 +18,12 @@ description: Use to check a live product's health or investigate anomalies in er
 
 ## Source routing
 
-Use `PRODUCT_SETUP.md` to identify the relevant sources and access routes.
+Use `docs/product-setup.md` to identify the relevant sources and access routes.
 
 - **Sentry:** Use $sentry-cli.
 - **PostHog:** Use $cli-tools for PostHog source access, $querying-posthog-data before writing any HogQL query, and $investigate-metric for material
   metric changes.
-- **Queues, schedulers, and servers:** Follow `PRODUCT_SETUP.md`. Use $cli-tools for Laravel Forge or SSH as applicable. Measure live backlog, job
+- **Queues, schedulers, and servers:** Follow `docs/product-setup.md`. Use $cli-tools for Laravel Forge or SSH as applicable. Measure live backlog, job
   age, retries, failures, execution, service health, and capacity.
 - **Caches, databases, managed services, and full-text search:** Use $service-access or SSH. For DigitalOcean managed databases, use `doctl` and read
   the narrowest relevant live help before acting.

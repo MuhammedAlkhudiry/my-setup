@@ -33,6 +33,7 @@ describe("triage-prs", () => {
       (item): Assessment => ({
         pr: item,
         ...(stacks.get(item.number) as { parent: number | null; root: number }),
+        behindParent: false,
         ci: "success",
         mainConflicts: item.number === 4 ? ["a.ts"] : [],
         codeLines: 10,

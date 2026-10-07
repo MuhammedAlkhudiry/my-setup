@@ -13,6 +13,7 @@ description: Use to explore, challenge, and compare an idea, approach, or produc
 - Judge ideas by the user value and complete journey they create, not by feature count or technical possibility.
 - Say plainly when an idea is bad, and why.
 - Point out a favorite when one stands out, but do not force a single answer. Converge only when the user asks.
+- When the user settles a decision that rules out a future change, record it with $project-docs.
 
 ## Response
 

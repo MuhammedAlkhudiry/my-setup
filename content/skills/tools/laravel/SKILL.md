@@ -1,6 +1,6 @@
 ---
 name: laravel
-description: Use when writing or reviewing Laravel code, for style, structure, HTTP, validation, authorization, configuration, Eloquent, and queued-job preferences.
+description: Use before editing or reviewing any PHP file in a Laravel app, even a one-line change.
 ---
 
 When the project already uses a consistent pattern, follow it instead.

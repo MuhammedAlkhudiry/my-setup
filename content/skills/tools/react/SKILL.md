@@ -1,6 +1,6 @@
 ---
 name: react
-description: Use when writing or reviewing React or React Native code, for component order, server data, store access, and props preferences.
+description: Use before editing or reviewing React or React Native code, including any `.tsx` or `.jsx` file, hook, or query file, even a one-line change.
 ---
 
 When the project already uses a consistent pattern, follow it instead.

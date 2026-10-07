@@ -2,11 +2,13 @@
 
 ## Defaults
 
-- Write concise, natural فصحى مبسطة. Use a more formal register for legal, privacy, payment, government, and policy text.
+- Write all Arabic copy in concise, natural Modern Standard Arabic (فصحى مبسطة), never dialect, unless the project's `AGENTS.md` or
+  decisions set another register for the whole product or a named part of it, such as a chat persona. Use a more formal register for legal,
+  privacy, payment, government, and policy text.
 - Match the product's currency, punctuation, terminology, and system-action voice.
 - Keep the product's gender strategy. If none exists, use masculine imperative for direct actions, masdar labels for neutral or formal menus, and
   personalized gender only with reliable data and rendering support.
-- Avoid diacritics unless needed for clarity. Use dialect only when the product voice intentionally does so.
+- Avoid diacritics unless needed for clarity.
 - Check placeholder order, plural forms, and mixed RTL/LTR rendering.
 
 ## Arabic-specific corrections

@@ -1,6 +1,6 @@
 ---
 name: promo-video
-description: Use when making or revising a narrated promo, ad, or explainer video for a product as code-rendered animation.
+description: Use before making or revising a product promo, ad, trailer, or explainer video, or any part of one, such as its story, voice-over, animation, or sound.
 ---
 
 A film is a canvas animation rendered frame by frame in headless Chrome, with AI voice-over and effects, mixed with FFmpeg. It lives in the

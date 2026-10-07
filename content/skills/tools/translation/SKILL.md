@@ -1,6 +1,6 @@
 ---
 name: translation
-description: Use when translating or localizing interface copy, reviewing existing translations, or writing Arabic interface copy.
+description: Use before adding or changing user-facing text, editing locale or translation files, writing Arabic copy, or reviewing translations.
 ---
 
 For Arabic copy, also read [Arabic UX copy](references/arabic-ux-copy.md).
@@ -17,7 +17,7 @@ Always render Latin digits, including numbers produced by locale formatters.
 
 ## Review
 
-For a review that spans sessions, save progress with $saved-work as type `tracker`.
+For a review that spans sessions, save progress with $project-docs as type `tracker`.
 
 Report each finding as:
 

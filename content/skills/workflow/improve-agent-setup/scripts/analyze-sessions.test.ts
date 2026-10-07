@@ -530,6 +530,80 @@ test("counts each Claude API response once and attributes tool output to the cal
   expect(report.totals.sessions).toBe(0);
 });
 
+test("splits Claude task time by what the agent waited on", () => {
+  const ts = (seconds: number) =>
+    new Date(Date.parse("2026-09-01T00:00:00Z") + seconds * 1000).toISOString();
+  const base = { sessionId: "main", cwd: "/projects/example", isSidechain: false };
+  const user = (seconds: number, content: unknown, extra: Record<string, unknown> = {}) => ({
+    ...base,
+    type: "user",
+    timestamp: ts(seconds),
+    uuid: `u${seconds}`,
+    message: { role: "user", content },
+    ...extra,
+  });
+  const reply = (
+    seconds: number,
+    id: string,
+    content: unknown[],
+    stop: string,
+    model = "claude-opus-5",
+  ) => ({
+    ...base,
+    type: "assistant",
+    timestamp: ts(seconds),
+    uuid: `a${seconds}`,
+    message: { id, model, role: "assistant", content, stop_reason: stop, usage: { input_tokens: 1 } },
+  });
+  const notification = (status: string, summary: string) => ({
+    ...user(0, `<task-notification>\n<status>${status}</status>\n<summary>${summary}</summary>`),
+    origin: { kind: "task-notification" },
+  });
+  const { root } = claudeFixture({
+    "example/main.jsonl": [
+      user(0, "Fix the build"),
+      reply(10, "msg-1", [
+        { type: "tool_use", id: "test", name: "Bash", input: { command: "bun test" } },
+        { type: "tool_use", id: "ci", name: "Bash", input: { command: "sleep 30; gh pr checks" } },
+      ], "tool_use"),
+      user(30, [{ type: "tool_result", tool_use_id: "test", content: "pass" }]),
+      user(50, [{ type: "tool_result", tool_use_id: "ci", content: "green" }]),
+      reply(60, "msg-2", [{ type: "text", text: "Started the audit" }], "end_turn"),
+      { ...base, type: "system", subtype: "stop_hook_summary", timestamp: ts(60.5), uuid: "s1" },
+      { ...notification("completed", 'Agent "Audit" finished'), timestamp: ts(360) },
+      reply(370, "msg-3", [{ type: "text", text: "Done" }], "end_turn"),
+      user(1000, "Next"),
+      reply(1010, "failed", [{ type: "text", text: "API Error: 429" }], "stop", "<synthetic>"),
+      { ...notification("stopped", "Background agent did not finish"), timestamp: ts(2000) },
+    ],
+  });
+  const time = JSON.parse(runClaude(root, "--since", "2026-09-01").stdout.toString()).claude.time;
+  expect(time.main).toMatchObject({
+    model: 30_000,
+    tool: 40_000,
+    hook: 500,
+    subagent: 299_500,
+    retry: 10_000,
+    idle: 1_620_000,
+    active: 380_000,
+    tasks: 2,
+  });
+  expect(time.tasks.filter((task: any) => task.trigger === "human")).toMatchObject([
+    { prompt: "Fix the build", activeMs: 370_000, topTool: "Bash wait loop" },
+    { prompt: "Next", activeMs: 10_000 },
+  ]);
+  expect(time.tools.find((tool: any) => tool.label === "Bash wait loop")).toMatchObject({
+    calls: 1,
+    wallMs: 30_000,
+    p50: 40_000,
+  });
+  expect(time.tools.find((tool: any) => tool.label === "Bash bun test")).toMatchObject({
+    wallMs: 10_000,
+    p50: 20_000,
+  });
+  expect(time.models).toMatchObject([{ group: "claude-opus-5", requests: 3, p50: 10_000 }]);
+});
+
 test("an unknown harness fails clearly", () => {
   const { root } = claudeFixture({ "example/main.jsonl": [] });
   const result = runClaude(root, "--harness", "wat");
