@@ -48,6 +48,29 @@ print_missing() {
   fi
 }
 
+check_gh_extension() {
+  local name="$1"
+  local level="$2"
+  local note="$3"
+
+  if command -v gh >/dev/null 2>&1 && gh extension list 2>/dev/null | grep -q "^gh $name\b"; then
+    print_ok "gh $name" "gh extension"
+    if [[ "$level" == "required" ]]; then
+      (( required_ok++ ))
+    else
+      (( optional_ok++ ))
+    fi
+    return 0
+  fi
+
+  print_missing "$level" "gh $name" "$note"
+  if [[ "$level" == "required" ]]; then
+    (( required_missing++ ))
+  else
+    (( optional_missing++ ))
+  fi
+}
+
 print_summary() {
   printf '\n'
   if has_gum; then
@@ -291,6 +314,7 @@ main() {
 
   print_header "Git workflow helpers"
   check_tool gh optional "Used to open GitHub pull requests from the command line."
+  check_gh_extension signoff optional "Install with gh extension install basecamp/gh-signoff; posts the local sign-off status that replaces pull request CI."
   check_tool glab optional "Used to open GitLab merge requests from the command line."
 
   print_header "My Setup links"

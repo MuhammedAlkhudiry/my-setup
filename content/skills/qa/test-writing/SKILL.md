@@ -41,8 +41,18 @@ Do not write these, and remove them when found:
 - Keep the test diff in proportion to the fix. When added test lines exceed about one and a half times the changed production lines, trim them or
   state the reason in the pull request.
 - Use the regression test itself to show the fix: run it once without the fix to see it fail. Do not add tests only to demonstrate a change.
-- When a test is too slow for the suite's time budget, make it faster or remove it; do not raise the budget for code users never reach.
 - When delegating work that may add tests, tell the agent to load $test-writing first.
+
+## Test speed
+
+Speed is a requirement: every later task runs the suite locally and in CI.
+
+- Keep a unit test to milliseconds and an integration test under about half a second.
+- Never sleep or call a real network; use fake timers and fakes. Seed only the data the test reads.
+- Keep tests independent so they run in parallel. Time each new or changed test file before reporting.
+- When a suite exceeds its stage budget in $verification, speed up or remove its slowest tests or record a follow-up with $project-docs; never
+  raise the budget.
+- Run end-to-end journeys, device flows, mutation testing, and coverage only as manual commands before a release.
 
 ## Pruning
 

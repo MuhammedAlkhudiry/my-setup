@@ -13,11 +13,11 @@ is [marking low-review files viewed](references/viewed-files.md) once it exists.
    $test-writing for tests, $translation for user-facing text, and $ux-ui for UI changes.
 2. **Docs:** fix every doc the branch made wrong, and record its decisions and follow-ups, through $project-docs.
 3. **Codex approval:** only for a medium or large pull request ($triage-prs tiers: 300 or more app-code lines, a migration counting 300) or a
-   risky one: auth, payments, privacy, deleted data, or a decision under Needs you. Review with GPT Sol through $ai-agents-cli:
-   `codex exec -s read-only -m gpt-6.1-sol -c model_reasoning_effort=high -o <file> "<prompt>"`. The prompt names the base branch and asks for
-   findings that should block merging, or `APPROVED` when none remain. Fix valid findings, rerun the project's local checks, and review again
-   with earlier findings and your responses in the prompt; answer a rejected finding with your reason. After three rounds without approval, stop
-   and bring the user the open disagreements.
+   risky one: auth, payments, privacy, deleted data, or a decision under Needs you. Run GPT Sol through $ai-agents-cli in the background
+   during Docs: `codex exec -s read-only -m gpt-6.1-sol -c model_reasoning_effort=high -o <file> "<prompt>"`. The prompt names the base branch
+   and asks for findings that should block merging, or `APPROVED` when none remain. Fix valid findings, rerun local checks, and review new
+   commits at medium effort with earlier findings and your replies; answer rejected ones with a reason. After three rounds without
+   approval, bring the user the open disagreements.
 
 Report the results in one line: `✅ $simplify, $laravel, docs · Sol approved in round 2` or `· Sol skipped: small, low risk`.
 

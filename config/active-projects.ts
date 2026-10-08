@@ -26,3 +26,12 @@ export const ACTIVE_PROJECTS: ActiveProject[] = [
     canonicalRoot: posix.join(projectsRoot, "harium-project"),
   },
 ];
+
+/**
+ * Active projects verify changes the same way: these files match byte for byte on each base branch, and these mise tasks
+ * carry the same description. `doctor` reports any drift. Only each project's areas and checks differ.
+ */
+export const SHARED_VERIFICATION = {
+  files: ["scripts/check.ts", ".github/scripts/changed-files.sh", ".github/scripts/test-mysql.sh"],
+  tasks: ["check", "signoff", "premerge", "hooks:install"],
+};

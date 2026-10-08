@@ -511,14 +511,14 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "gh",
         level: "optional",
-        why: "Used to open GitHub pull requests from the command line.",
+        why: "Used to open GitHub pull requests from the command line, and through the basecamp/gh-signoff extension to post the local sign-off status that replaces pull request CI.",
         versionArgs: ["--version"],
         latest: {
           type: "homebrew",
           formula: "gh",
         },
         update: {
-          commands: ["brew upgrade gh"],
+          commands: ["brew upgrade gh", "gh extension upgrade signoff"],
         },
       },
       {

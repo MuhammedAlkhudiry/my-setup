@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { isDeepStrictEqual } from "node:util";
 import { execaSync } from "execa";
 
-import { ACTIVE_PROJECTS } from "../../config/active-projects";
+import { ACTIVE_PROJECTS, SHARED_VERIFICATION } from "../../config/active-projects";
 import { CLAUDE_POOL } from "../../config/claude-pool";
 import { mergeRtkHooks } from "../../config/rtk";
 import { MAC_WATCHER, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
@@ -429,6 +429,43 @@ try {
   }
 } catch (error) {
   findings.push({ level: "optional", label: "Storage prune state", detail: String(error) });
+}
+
+// Reads each project's last fetched base branch, so it needs no network and reports drift as of the last fetch.
+if (PROFILE.activeProjects) {
+  const show = (project: (typeof ACTIVE_PROJECTS)[number], path: string) => {
+    const result = execaSync("git", ["show", `origin/${project.baseBranch}:${path}`], {
+      cwd: project.canonicalRoot,
+      reject: false,
+    });
+
+    return result.exitCode === 0 ? result.stdout : null;
+  };
+  const projects = ACTIVE_PROJECTS.filter((project) => existsSync(join(project.canonicalRoot, ".git")));
+  const [reference, ...others] = projects;
+
+  for (const project of reference ? others : []) {
+    const drift = SHARED_VERIFICATION.files.filter((path) => show(project, path) !== show(reference, path));
+    const descriptions = (target: typeof project) => {
+      const manifest = Bun.TOML.parse(show(target, "mise.toml") ?? "") as {
+        tasks?: Record<string, { description?: string }>;
+      };
+      const tasks = manifest.tasks;
+
+      return SHARED_VERIFICATION.tasks.map((task) => tasks?.[task]?.description ?? null);
+    };
+    const theirs = descriptions(project);
+    const ours = descriptions(reference);
+    drift.push(...SHARED_VERIFICATION.tasks.filter((task, index) => theirs[index] !== ours[index]).map((task) => `mise task ${task}`));
+
+    if (drift.length > 0) {
+      findings.push({
+        level: "optional",
+        label: "Verification parity",
+        detail: `${project.name} differs from ${reference.name} in ${drift.join(", ")}; copy the shared version to both`,
+      });
+    }
+  }
 }
 
 if (findings.length === 0) {

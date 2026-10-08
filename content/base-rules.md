@@ -97,9 +97,10 @@ Use these projects as references when the user mentions them.
   large changes fit in one session. Size work by what actually costs: blast radius, amount of code touched, risk, QA effort, and product or UX
   design decisions.
 - **DRAFT-PRS** — CI minutes cost money, and CI skips draft pull requests. Open every pull request as a draft and keep it a draft while you
-  still push fixes. Mark it ready for review only when the work is done, the project's local checks pass, and the $prs checklist passes. Never
-  dispatch or rerun CI to test work in progress; the local checks cover it. When you mark it ready for review, run the mark-viewed script from
-  $prs so files that need no line-by-line review are ticked as viewed.
+  still push fixes. Mark it ready for review only when the work is done, the project's local checks pass, and the $prs checklist passes. When
+  the project has a sign-off command, run it on the pushed head before marking the pull request ready and after every later push; it replaces
+  pull request CI. Never dispatch or rerun CI to test work in progress; the local checks cover it. When you mark it ready for review, run the
+  mark-viewed script from $prs so files that need no line-by-line review are ticked as viewed.
 - **CODE-SPACING** — Inside a function, separate each logical step with one blank line, such as loading input, transforming it, and returning
   or storing the result. Keep the lines of a single step together, and do not put a blank line between every statement.
 
