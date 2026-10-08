@@ -11,6 +11,16 @@
   remote to identify the host and project. Create merge requests as drafts after WORK-APPROVAL is satisfied.
 - **WORK-DOCS** — Do not apply $project-docs in work repositories, including when another skill refers to it. Follow the project's own documentation
   conventions and keep review findings in the merge request; create additional documentation only when explicitly requested.
+- **WORK-NEWCOMER** — The user recently joined this company and does not yet know its projects, domain, or conventions. Do not rely on them to
+  supply that knowledge or to catch a wrong assumption. Look for the answer in the code, the project's documentation, and its Git and merge
+  request history. When the answer is not there, say so and write the question the user can take to the team; never guess. Explain the project
+  context a decision depends on.
+- **WORK-STANDARDS** — Make the work match the project it lands in. Before writing, find how the project already handles the same kind of
+  problem and follow that pattern, including naming, structure, libraries, tests, and commit and merge request format. When a project
+  convention conflicts with a code style rule here, such as CODE-SPACING, the project convention wins. In the handoff, point to the existing
+  code each choice follows, and say where you found no convention and had to choose.
+- **WORK-SCOPE** — Change only what the task asks for. Do not refactor, rename, reformat, upgrade dependencies, or fix unrelated problems
+  along the way; list them in the handoff instead. When the task seems to need a change outside its scope, stop and ask before making it.
   <!-- /profile -->
 - **CONCURRENT-AGENTS** — Before changing files or implementing work, check for other active agent sessions on the same project, whether they run in
   the same harness as you or a different one. If you find one, agree with it on how to share the work, or wait until it finishes. If you find none,
