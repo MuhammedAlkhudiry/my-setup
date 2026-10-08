@@ -4,6 +4,14 @@
   you both agree on the goal and the approach, and start work only after the user gives the go-ahead. Rushing into work before that agreement is a
   major violation. Unless the user already gave the go-ahead, end the reply before any work with a short summary of the goal and the approach,
   then ask: "Are we aligned? Should I start?"
+  <!-- profile:work -->
+- **WORK-APPROVAL** — Obtain separate explicit user approval before creating a pull request or merge request, including a draft. This rule does
+  not require approval for editing files; approval to edit files or prepare a description does not authorize PR/MR creation.
+- **WORK-GITLAB** — Work repositories use GitLab. Prefer `glab` or the GitLab API for merge request operations without a browser; use the Git
+  remote to identify the host and project. Create merge requests as drafts after WORK-APPROVAL is satisfied.
+- **WORK-DOCS** — Do not apply $project-docs in work repositories, including when another skill refers to it. Follow the project's own documentation
+  conventions and keep review findings in the merge request; create additional documentation only when explicitly requested.
+  <!-- /profile -->
 - **CONCURRENT-AGENTS** — Before changing files or implementing work, check for other active agent sessions on the same project, whether they run in
   the same harness as you or a different one. If you find one, agree with it on how to share the work, or wait until it finishes. If you find none,
   proceed. If you later suspect that another agent is editing the same project, stop and coordinate with it before you continue. If you cannot reach
@@ -46,6 +54,8 @@ Help the user reach the best result. Do not help them follow a bad direction jus
   <!-- profile:work -->
 - **SELF-SERVE-TOOLS** — You have access to browsers. Operate them yourself, or through Codex as CODEX-WORK says, to inspect, verify, and
   complete work. If task depend on browser never ask user to do it.
+- **WORK-VPN** — The work laptop uses GlobalProtect VPN. Disconnecting it can break access to work APIs used by locally running apps. When local
+  development shows empty data, CORS errors, or failed requests, check GlobalProtect connectivity before treating the issue as an application bug.
   <!-- /profile -->
 - **CODEX-WORK** — Give Codex three kinds of work: image generation, computer use (operating desktop apps on the Mac), and browser work that is
   not QA, such as using a provider dashboard, filling a web form, or reading a signed-in page. If you are Codex, do it yourself; otherwise
@@ -100,7 +110,7 @@ Use these projects as references when the user mentions them.
   still push fixes. Mark it ready for review only when the work is done, the project's local checks pass, and the $prs checklist passes. When
   the project has a sign-off command, run it on the pushed head before marking the pull request ready and after every later push; it replaces
   pull request CI. Never dispatch or rerun CI to test work in progress; the local checks cover it. When you mark it ready for review, run the
-  mark-viewed script from $prs so files that need no line-by-line review are ticked as viewed.
+  mark-viewed script from $prs for GitHub PRs so files that need no line-by-line review are ticked as viewed; that script does not support GitLab MRs.
 - **CODE-SPACING** — Inside a function, separate each logical step with one blank line, such as loading input, transforming it, and returning
   or storing the result. Keep the lines of a single step together, and do not put a blank line between every statement.
 
