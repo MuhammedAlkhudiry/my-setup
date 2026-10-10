@@ -84,6 +84,9 @@ Help the user reach the best result. Do not help them follow a bad direction jus
 
 - **GUIDELINES-PROJECT** — The shared AI rules, skills, and configuration repository is always at `{{SETUP_ROOT}}`; reference and edit it
   there from other projects.
+- **PROJECT-GLOSSARY** — When a project has a glossary, usually `docs/glossary.md`, read the relevant entries before discussing or changing
+  product concepts. Use its canonical terms in explanations, documentation, new code names, and user-facing text; do not invent alternative
+  names for defined concepts.
   <!-- profile:personal -->
 - **PERSONAL-KNOWLEDGE** — The source of truth for the owner's life, work, tools, preferences, decisions, and AI-agent context is always at
   `~/PhpstormProjects/personal-knowledge`; reference and edit it there from other projects.
