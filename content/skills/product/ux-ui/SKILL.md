@@ -10,6 +10,9 @@ description: Use before building or changing what users see, such as a screen, l
   conventions.
 - Favor calm, rich, professional, distinctive minimalism: clear hierarchy, balanced spacing, restrained color, and subtle depth.
 - Never add eyebrow labels, the small text above a heading, or pill badges and chips. Let the heading and layout carry the hierarchy.
+- Never pair a pale accent fill with a flat border, icon, or text in the same color, such as a yellow-tinted row with a yellow edge or an icon
+  in a yellow circle; it reads as a stock web notice. Use the design system's tinted surface, or a neutral one, and let one element carry the
+  accent. When an icon stands for something with its own art, such as an avatar or emblem, show that art.
 - Make the next useful action clear at each stage of the journey. For example, offer resource creation in an empty state and contextual editing in a
   resource list.
 
@@ -20,12 +23,13 @@ description: Use before building or changing what users see, such as a screen, l
 - Present options in a new HTML preview or visualization built with $html-artifacts by default. If the user requests options inside the app or website, present them there. In
   either format, include an option switcher.
 - Loop animated previews when repetition helps compare the options.
-- When the user selects an option without requesting implementation, acknowledge the selection and ask whether to integrate it.
-- When the user selects multiple options or parts of different options, revise the design to combine the selected elements.
+- Always let the user pick several options at once, on the options page and when asking in chat.
+- When the user selects one option without requesting implementation, acknowledge the selection and ask whether to integrate it.
+- When the user selects several options or parts of different options, treat them as the chosen direction: combine the selected elements and
+  generate new options from them.
 - Keep an options page focused on the options. Under each option, write two plain sentences: what the person would see, and why to pick it.
   Keep short labels for secondary detail only. When options belong to a feature proposal, summarize them in the proposal's options section and link the full options page.
 - When the user asks for changes, create a new HTML file instead of editing the previous one.
-- When the user points to one or more options, treat them as the chosen direction and generate new options from them.
 
 ## Design checks
 

@@ -66,6 +66,44 @@ export function decideWorktree(facts: WorktreeFacts, now: number, idleDays: numb
   return { remove: true };
 }
 
+export interface TestDatabaseFacts {
+  name: string;
+  /** The checkouts the suite recorded when it built the database; empty when it recorded none. */
+  checkouts: string[];
+  touchedMs: number;
+  bytes: number;
+}
+
+/** A parallel worker's copy is named after the database it was made from. */
+export function testDatabaseFamily(name: string): string {
+  return name.replace(/_test_\d+$/, "");
+}
+
+/**
+ * Test databases whose checkout is gone, with their workers' copies. A family without a recorded checkout goes only when
+ * it belongs to an active project, whose suite rebuilds a missing database, and none of it was touched for `unmarkedDays`.
+ */
+export function testDatabasesToDrop(
+  databases: TestDatabaseFacts[],
+  options: { now: number; unmarkedDays: number; prefixes: string[]; checkoutExists: (path: string) => boolean },
+): TestDatabaseFacts[] {
+  const families = new Map<string, TestDatabaseFacts[]>();
+  for (const database of databases) {
+    const family = testDatabaseFamily(database.name);
+    families.set(family, [...(families.get(family) ?? []), database]);
+  }
+
+  return [...families.entries()].flatMap(([family, members]) => {
+    // A family stays while any checkout recorded in it still exists.
+    const checkouts = members.flatMap((member) => member.checkouts);
+    if (checkouts.length > 0) return checkouts.some(options.checkoutExists) ? [] : members;
+
+    const owned = options.prefixes.some((prefix) => family.startsWith(prefix));
+    const touched = Math.max(...members.map((member) => member.touchedMs));
+    return owned && options.now - touched > options.unmarkedDays * DAY_MS ? members : [];
+  });
+}
+
 // =============================================================================
 // Report
 // =============================================================================
@@ -78,6 +116,7 @@ const reportSchema = z.object({
   archived: z.object({ files: z.number(), bytes: z.number() }),
   worktreesRemoved: z.array(z.object({ path: z.string(), bytes: z.number() })),
   worktreesKept: z.array(z.object({ path: z.string(), reason: z.string(), idleDays: z.number() })),
+  testDatabasesDropped: z.array(z.object({ name: z.string(), bytes: z.number() })).default([]),
   skipped: z.array(z.string()),
   errors: z.array(z.string()),
 });
@@ -94,6 +133,7 @@ export function summarizePrune(report: PruneReport): string {
     `deleted ${report.deleted.length}`,
     `archived ${report.archived.files} files (${gib(report.archived.bytes)})`,
     `worktrees removed ${report.worktreesRemoved.length}`,
+    `test databases dropped ${report.testDatabasesDropped.length}`,
   ];
   if (report.skipped.length > 0) parts.push(`skipped: ${report.skipped.join("; ")}`);
   if (report.errors.length > 0) parts.push(`errors: ${report.errors.length}`);
@@ -182,6 +222,80 @@ function archiveMounted(home: string): boolean {
 }
 
 // =============================================================================
+// Test databases
+// =============================================================================
+
+type MysqlQuery = (sql: string) => Promise<string[][] | undefined>;
+
+/** Runs SQL against the local server and returns its rows, or undefined when the client is missing or the query fails. */
+function mysqlClient(home: string): MysqlQuery | undefined {
+  const herd = join(home, "Library/Application Support/Herd/bin/mysql");
+  const binary = Bun.which("mysql") ?? (existsSync(herd) ? herd : undefined);
+  if (!binary) return undefined;
+
+  return async (sql) => {
+    const result = await run(binary, [...MAC_WATCHER.storage.testDatabases.mysqlArgs, "-N", "-B", "-e", sql]);
+    if (result.exitCode !== 0) return undefined;
+    return result.stdout
+      .split("\n")
+      .filter((line) => line.length > 0)
+      .map((line) => line.split("\t"));
+  };
+}
+
+/** The newest change to any file of a database, from its folder in the server's data directory. */
+async function newestChangeMs(dir: string): Promise<number> {
+  try {
+    const names = await readdir(dir);
+    const times = await Promise.all(names.map(async (name) => (await lstat(join(dir, name))).mtimeMs));
+    return Math.max(statSync(dir).mtimeMs, ...times);
+  } catch {
+    // Unknown age counts as fresh, so the age rule never drops it.
+    return Date.now();
+  }
+}
+
+async function testDatabaseFacts(mysql: MysqlQuery): Promise<TestDatabaseFacts[] | undefined> {
+  const rules = MAC_WATCHER.storage.testDatabases;
+  const schemas = await mysql("select schema_name from information_schema.schemata");
+  if (!schemas) return undefined;
+
+  // Only plain names, since they are interpolated into the queries below.
+  const names = schemas.map(([name]) => name ?? "").filter((name) => /^\w+$/.test(name) && rules.match.test(name));
+  if (names.length === 0) return [];
+
+  const dataDir = (await mysql("select @@datadir"))?.[0]?.[0] ?? "";
+  const sizes = new Map(
+    ((await mysql("select table_schema, sum(data_length + index_length) from information_schema.tables group by table_schema")) ?? []).map(
+      ([schema, bytes]) => [schema ?? "", Number(bytes ?? 0)],
+    ),
+  );
+  const marked = (
+    (await mysql(`select table_schema from information_schema.tables where table_name = '${rules.markerTable}'`)) ?? []
+  )
+    .map(([schema]) => schema ?? "")
+    .filter((schema) => names.includes(schema));
+  const checkouts = new Map<string, string[]>();
+  if (marked.length > 0) {
+    const rows = await mysql(
+      marked.map((schema) => `(select '${schema}', path from \`${schema}\`.${rules.markerTable})`).join(" union all "),
+    );
+    for (const [schema, path] of rows ?? []) {
+      if (schema && path) checkouts.set(schema, [...(checkouts.get(schema) ?? []), path]);
+    }
+  }
+
+  return Promise.all(
+    names.map(async (name) => ({
+      name,
+      checkouts: checkouts.get(name) ?? [],
+      touchedMs: dataDir ? await newestChangeMs(join(dataDir, name)) : Date.now(),
+      bytes: sizes.get(name) ?? 0,
+    })),
+  );
+}
+
+// =============================================================================
 // Worktrees
 // =============================================================================
 
@@ -262,6 +376,7 @@ export async function pruneStorage(options: { home: string; now: Date; dryRun: b
     archived: { files: 0, bytes: 0 },
     worktreesRemoved: [],
     worktreesKept: [],
+    testDatabasesDropped: [],
     skipped: [],
     errors: [],
   };
@@ -348,6 +463,30 @@ export async function pruneStorage(options: { home: string; now: Date; dryRun: b
       }
     });
   }
+
+  await attempt("test databases", async () => {
+    const mysql = mysqlClient(home);
+    const databases = mysql && (await testDatabaseFacts(mysql));
+    if (!mysql || !databases) {
+      report.skipped.push("MySQL is not reachable, so no test database was checked");
+      return;
+    }
+    const doomed = testDatabasesToDrop(databases, {
+      now,
+      unmarkedDays: rules.testDatabases.unmarkedDays,
+      prefixes: ACTIVE_PROJECTS.map((project) => `${project.name.toLowerCase()}_`),
+      checkoutExists: existsSync,
+    });
+    if (doomed.length === 0) return;
+    if (!dryRun) {
+      const dropped = await mysql(doomed.map((database) => `drop database if exists \`${database.name}\`;`).join(" "));
+      if (!dropped) throw new Error("dropping test databases failed");
+    }
+    for (const database of doomed) {
+      report.testDatabasesDropped.push({ name: database.name, bytes: database.bytes });
+      report.freedBytes += database.bytes;
+    }
+  });
 
   return report;
 }

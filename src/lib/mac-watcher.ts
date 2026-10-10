@@ -151,6 +151,73 @@ export interface AlertInput {
   sustainedCpu: ProcessSummary[];
   guardStops: string[];
   memcapHealthy: boolean;
+  sharedPorts: SharedPort[];
+}
+
+export interface Listener {
+  port: number;
+  pid: number;
+  command: string;
+}
+
+export interface SharedPort {
+  port: number;
+  processes: string[];
+}
+
+/** Parses `lsof -nP -iTCP -sTCP:LISTEN -Fpcn` output into one entry per listening socket. */
+export function parseListeners(output: string): Listener[] {
+  const listeners: Listener[] = [];
+  let pid = 0;
+  let command = "";
+  for (const line of output.split("\n")) {
+    const value = line.slice(1);
+    if (line.startsWith("p")) pid = Number(value);
+    else if (line.startsWith("c")) command = value;
+    else if (line.startsWith("n")) {
+      const port = Number(value.slice(value.lastIndexOf(":") + 1));
+      if (pid > 0 && Number.isInteger(port) && port > 0) listeners.push({ port, pid, command });
+    }
+  }
+  return listeners;
+}
+
+/**
+ * Ports that two unrelated processes listen on, such as a server left over from an app's previous run beside the one it
+ * started since. Clients that connected first stay on the leftover, so an app and its workers can end up on different
+ * servers. Server workers listen through a socket inherited from their parent, so a process whose ancestor listens too
+ * doesn't count, and workers of one parent count once even when the parent isn't visible, as with a root nginx master.
+ */
+export function sharedPorts(listeners: Listener[], parentOf: Map<number, number>): SharedPort[] {
+  const byPort = new Map<number, Map<number, string>>();
+  for (const listener of listeners) {
+    const pids = byPort.get(listener.port) ?? new Map<number, string>();
+    pids.set(listener.pid, listener.command);
+    byPort.set(listener.port, pids);
+  }
+
+  const inherits = (pid: number, others: Map<number, string>) => {
+    for (let parent = parentOf.get(pid); parent !== undefined && parent > 1; parent = parentOf.get(parent)) {
+      if (others.has(parent)) return true;
+    }
+    return false;
+  };
+  // A process started by launchd owns its socket; any other shares it with its siblings.
+  const owner = (pid: number) => {
+    const parent = parentOf.get(pid);
+    return parent === undefined || parent <= 1 ? pid : parent;
+  };
+
+  return [...byPort.entries()]
+    .map(([port, pids]) => {
+      const owners = new Map<number, string>();
+      for (const [pid, command] of pids) {
+        if (!inherits(pid, pids) && !owners.has(owner(pid))) owners.set(owner(pid), `${command} (${pid})`);
+      }
+      return { port, processes: [...owners.values()] };
+    })
+    .filter((entry) => entry.processes.length > 1)
+    .sort((a, b) => a.port - b.port);
 }
 
 function topCommands(rows: ProcessSummary[]): string {
@@ -227,6 +294,18 @@ export function thresholdAlerts(input: AlertInput): ObservedAlert[] {
       title: `CPU guard stopped ${input.guardStops.length} leftover processes`,
       evidence: input.guardStops.at(-1) ?? "",
       fix: "If the same tool keeps appearing, fix it so it exits with its parent.",
+    });
+  }
+  if (input.sharedPorts.length > 0) {
+    alerts.push({
+      key: "shared-ports",
+      severity: "warning",
+      title: `${input.sharedPorts.length} ports served by two processes`,
+      evidence: input.sharedPorts
+        .slice(0, 3)
+        .map((entry) => `${entry.port}: ${entry.processes.join(" + ")}`)
+        .join("; "),
+      fix: "Stop the leftover copy, usually the older one whose parent exited, then restart whatever connected to it.",
     });
   }
   if (!input.memcapHealthy) {

@@ -3,7 +3,6 @@
  */
 
 export const CODEX_CONFIG = {
-  model_verbosity: "low",
   agents: {
     max_threads: 15,
   },
@@ -11,3 +10,8 @@ export const CODEX_CONFIG = {
     default_mode_request_user_input: true,
   },
 } as const;
+
+/**
+ * Top-level keys my-setup used to manage; install deletes them from existing Codex configs.
+ */
+export const CODEX_RETIRED_TOP_LEVEL_KEYS = ["model_verbosity"] as const;

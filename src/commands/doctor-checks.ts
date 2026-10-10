@@ -321,16 +321,16 @@ if (freeGib < MIN_FREE_GIB) {
   });
 }
 
-const avdHome = join(HOME, ".android/avd");
-if (
-  existsSync(join(HOME, ".android")) &&
-  lstatSync(avdHome, { throwIfNoEntry: false })?.isSymbolicLink()
-) {
-  if (!existsSync(avdHome)) {
+const ssdLinks = [
+  { path: join(HOME, ".android/avd"), label: "Android emulators offline" },
+  { path: join(HOME, ".gradle"), label: "Gradle cache offline" },
+];
+for (const { path, label } of ssdLinks) {
+  if (lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink() && !existsSync(path)) {
     findings.push({
       level: "optional",
-      label: "Android emulators offline",
-      detail: `${avdHome} points to ${readlinkSync(avdHome)}, which is not mounted; connect the SSD`,
+      label,
+      detail: `${path} points to ${readlinkSync(path)}, which is not mounted; connect the SSD`,
     });
   }
 }

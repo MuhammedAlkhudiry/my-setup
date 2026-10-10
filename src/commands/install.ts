@@ -30,16 +30,13 @@ import {
 import { ACTIVE_PROJECTS, type ActiveProject } from "../../config/active-projects";
 import type { DeviceProfile } from "../../config/devices";
 import { createClaudeManagedSettings } from "../../config/claude";
+import { CODEX_RETIRED_TOP_LEVEL_KEYS } from "../../config/codex";
 import { CREDENTIALS_HOME_ENV, CREDENTIALS_ROOT } from "../../config/credentials";
 import { MCP_SERVERS } from "../../config/mcp";
 import { createOpencodeConfig } from "../../config/opencode";
 import { mergeRtkHooks } from "../../config/rtk";
 import { renderCodexRules } from "../../config/permissions";
-import {
-  codexManagedSectionValues,
-  codexManagedTopLevelValues,
-  renderCodexMcpServersToml,
-} from "../lib/codex-config";
+import { codexManagedSectionValues, renderCodexMcpServersToml } from "../lib/codex-config";
 import { replaceDirectory, ensureParentDir } from "../lib/fs";
 import { claudePoolPaths, installClaudePool, retireLegacyClaudeFiles } from "../lib/claude-pool";
 import { secureManagedCredentials } from "../lib/credentials";
@@ -49,6 +46,7 @@ import { colors, compactOutput, print, printBox, printSeparator } from "../lib/p
 import { renderProfileBlocks } from "../lib/profile-blocks";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
 import { discoverLocalSkills, findUnknownSkillReferences } from "../lib/skills";
+import { installT3Settings, t3StateDir } from "../lib/t3-settings";
 import { validateRemoteSkillSources } from "../lib/validation";
 import { installVscodeKeymap, vscodeKeybindingsPath } from "../lib/vscode";
 
@@ -112,10 +110,20 @@ const REMOTE_SKILLS_STATE_PATH = join(STATE_HOME, "my-setup/remote-skills.json")
 const USER_ZSHRC_HEADER = "# Managed shell config lives in my-setup.";
 const USER_ZSHRC_IMPORT =
   '[ -f "$HOME/.config/zsh-sync/custom.zsh" ] && source "$HOME/.config/zsh-sync/custom.zsh"';
+const HERD_PHP_EXPORT = /^export HERD_PHP_\d+_INI_SCAN_DIR=/;
 const ACTIVE_PROJECTS_PLACEHOLDER = "{{ACTIVE_PROJECTS}}";
 const SETUP_ROOT_PLACEHOLDER = "{{SETUP_ROOT}}";
 
-const SHARED_BIN_COMMANDS = ["my-setup", "system-tools", "hugeicons", "doctor", "pk", "share-html", "html-artifact"];
+const SHARED_BIN_COMMANDS = [
+  "my-setup",
+  "system-tools",
+  "hugeicons",
+  "doctor",
+  "pk",
+  "share-html",
+  "html-artifact",
+  "store-build",
+];
 
 // =============================================================================
 // Individual Operations
@@ -215,6 +223,16 @@ function removeManagedMcpServers(configToml: string, managedServerNames: Set<str
   return cleanedLines.join("\n").trimEnd();
 }
 
+/** Herd writes a PHP configuration export into .zshrc whenever it updates; the managed shell config covers them. */
+export function onlyHerdAdditions(codeLines: string[]): boolean {
+  const extras = codeLines.filter((line) => line !== USER_ZSHRC_IMPORT);
+  return (
+    codeLines.includes(USER_ZSHRC_IMPORT) &&
+    extras.length > 0 &&
+    extras.every((line) => HERD_PHP_EXPORT.test(line))
+  );
+}
+
 async function assertThinUserZshrc(): Promise<void> {
   print.info(`Checking ${SHARED_PATHS.zshrc} stays thin...`);
 
@@ -232,6 +250,14 @@ async function assertThinUserZshrc(): Promise<void> {
 
   if (codeLines.length === 1 && codeLines[0] === USER_ZSHRC_IMPORT) {
     print.success("User .zshrc is thin");
+    return;
+  }
+
+  if (onlyHerdAdditions(codeLines)) {
+    await writeFile(SHARED_PATHS.zshrc, `${USER_ZSHRC_HEADER}\n${USER_ZSHRC_IMPORT}\n`);
+    print.success(
+      "Removed the PHP exports Herd added to .zshrc; shell/zsh-custom.zsh sets them for every version",
+    );
     return;
   }
 
@@ -405,22 +431,19 @@ async function installClaudeMcpServers(configDir: string): Promise<void> {
   print.success(`Claude Code MCP servers installed (${Object.keys(MCP_SERVERS).length})`);
 }
 
-function upsertTomlTopLevelKey(configToml: string, key: string, value: string): string {
-  const trimmed = configToml.trimEnd();
-  const lines = trimmed ? trimmed.split(/\r?\n/) : [];
-  const nextLine = `${key} = ${value}`;
+function removeTomlTopLevelKey(configToml: string, key: string): string {
+  const lines = configToml.split(/\r?\n/);
   const firstSectionIndex = lines.findIndex((line) => /^\s*\[/.test(line));
   const topLevelEnd = firstSectionIndex === -1 ? lines.length : firstSectionIndex;
+  const keyPattern = new RegExp(`^\\s*${key}\\s*=`);
+  const keyIndex = lines.slice(0, topLevelEnd).findIndex((line) => keyPattern.test(line));
 
-  for (let i = 0; i < topLevelEnd; i++) {
-    if (new RegExp(`^\\s*${key}\\s*=`).test(lines[i])) {
-      lines[i] = nextLine;
-      return `${lines.join("\n")}\n`;
-    }
+  if (keyIndex === -1) {
+    return configToml;
   }
 
-  lines.splice(topLevelEnd, 0, nextLine);
-  return `${lines.join("\n")}\n`;
+  lines.splice(keyIndex, 1);
+  return lines.join("\n");
 }
 
 function upsertTomlSectionKey(
@@ -465,8 +488,8 @@ async function mergeCodexConfigAsync(): Promise<void> {
     ? await readFile(CODEX_PATHS.config, "utf-8")
     : "";
   let merged = existing;
-  for (const [key, value] of Object.entries(codexManagedTopLevelValues())) {
-    merged = upsertTomlTopLevelKey(merged, key, value);
+  for (const key of CODEX_RETIRED_TOP_LEVEL_KEYS) {
+    merged = removeTomlTopLevelKey(merged, key);
   }
   for (const [section, key, value] of codexManagedSectionValues()) {
     merged = upsertTomlSectionKey(merged, section, key, value);
@@ -949,6 +972,7 @@ export async function install(): Promise<DeviceProfile> {
         `    VS Code:  ${vscodeKeybindingsPath(HOME)} (replace) + IntelliJ keymap extension`,
       );
     }
+    console.log(`    T3 Code:  ${t3StateDir(HOME)} (managed merge + theme, when installed)`);
     printSeparator();
     console.log();
   }
@@ -1005,6 +1029,15 @@ export async function install(): Promise<DeviceProfile> {
           }
         },
       ),
+    installT3Settings({ home: HOME }).then((result) => {
+      if (!result.installed) {
+        print.info("T3 Code is not installed; skipped its settings");
+      } else if (result.clientSettingsChanged) {
+        print.warning("T3 Code app settings updated; restart T3 Code to load them");
+      } else {
+        print.success(`T3 Code settings installed to ${result.stateDir}`);
+      }
+    }),
   ]);
 
   if (!compactOutput) {

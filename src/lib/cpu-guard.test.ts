@@ -56,6 +56,9 @@ test("ps output keeps the multi-word start time and the full command", () => {
 test("only this user's leftover agent tooling is a guard target", () => {
   expect(isOrphanedAgentTooling(row({}), UID)).toBe(true);
   expect(isOrphanedAgentTooling(row({ command: "node ./node_modules/.bin/vite" }), UID)).toBe(true);
+  expect(isOrphanedAgentTooling(row({ command: "bash /Users/x/Herd/bin/herd php artisan horizon" }), UID)).toBe(true);
+  expect(isOrphanedAgentTooling(row({ command: "php artisan queue:work redis" }), UID)).toBe(true);
+  expect(isOrphanedAgentTooling(row({ command: "php artisan migrate" }), UID)).toBe(false);
   expect(isOrphanedAgentTooling(row({ ppid: 4242 }), UID)).toBe(false);
   expect(isOrphanedAgentTooling(row({ uid: 0 }), UID)).toBe(false);
   expect(isOrphanedAgentTooling(row({ command: "/path/emulator/qemu-system-aarch64 -avd vite" }), UID)).toBe(false);

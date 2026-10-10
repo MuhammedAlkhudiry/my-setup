@@ -9,6 +9,7 @@
 - `config/skills.ts` — Remote skill declarations fetched and installed by this repo.
 - `config/codex.ts`, `config/opencode.ts`, `config/claude.ts`, and `config/mcp.ts` — Source of truth for the managed Codex, OpenCode, Claude Code, and
   MCP configuration keys.
+- `config/t3.ts` and `config/t3-theme.json` — T3 Code settings and theme that install applies on every device; providers stay per device.
 - `config/devices.ts` — Device profiles (`personal`, `work`): which agents, skills, features, secrets, and permission allowlists each machine gets.
   Each machine picks its profile in the untracked `~/.config/my-setup/device.json`.
 - `config/permissions.ts` — Renders a profile's command and path allowlist into OpenCode, Claude Code, and Codex permission surfaces.

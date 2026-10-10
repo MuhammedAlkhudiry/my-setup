@@ -11,7 +11,8 @@
  *                    `data-title`), restores them on load, and writes the summary itself. Radio buttons form one group
  *                    per item, even when items reuse a name such as `choice`; to make several items share one group,
  *                    give their radios the same `form="ID"` attribute and put that empty `<form id="ID" hidden>` before
- *                    them, because the browser groups radios as it parses the page.
+ *                    them, because the browser groups radios as it parses the page. Clicking the picked radio again
+ *                    clears it.
  *
  *   const saved = await Feedback.init()       For custom pages: returns the last saved state, or null.
  *   Feedback.save(state, markdown)            Call after every change with the full state and the summary to send.
@@ -119,6 +120,25 @@
     });
   }
 
+  // A browser radio cannot be cleared once picked, so clicking the picked radio again, or pressing Space on it, clears it.
+  function allowUnpick() {
+    let picked = new Set();
+    const remember = () => (picked = new Set(document.querySelectorAll('input[type="radio"]:checked')));
+
+    document.addEventListener('click', (event) => {
+      if (picked.has(event.target)) {
+        event.target.checked = false;
+        event.target.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      remember();
+    });
+    // Browsers send no click when Space lands on a radio that is already picked.
+    document.addEventListener('keyup', (event) => {
+      if (event.key === ' ' && picked.has(event.target)) event.target.click();
+    });
+    remember();
+  }
+
   async function auto() {
     const items = [...document.querySelectorAll('[data-item]')];
     scopeRadios(items);
@@ -161,6 +181,7 @@
 
     const saved = await init();
     if (saved) restore(saved);
+    allowUnpick();
 
     const onChange = () => {
       const state = read();

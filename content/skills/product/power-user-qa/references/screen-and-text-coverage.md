@@ -1,18 +1,16 @@
 # Screen and Text Coverage
 
 For each platform in scope, start with four size/text combinations: typical/default, compact/default, compact/enlarged, and larger/default. Choose
-supported devices or viewports, including short screens. Expand the matrix for breakpoints, orientations, intermediate text sizes, or combinations
-only when the scope or a failure warrants it.
+supported devices or viewports, including short screens. Expand the matrix for breakpoints, orientations, other common text sizes, or
+combinations only when the scope or a failure warrants it.
 
-Record original device/simulator, viewport, orientation, locale, and font/display settings before changing them. On native apps, enlarge text through
-the largest OS accessibility text setting:
-[iOS Dynamic Type, including accessibility sizes](https://developer.apple.com/design/human-interface-guidelines/typography), or
-[Android font scaling](https://developer.android.com/about/versions/14/features#non-linear-font-scaling). Confirm the setting took effect in the app;
-investigate unchanged text. On web, check [200% text enlargement](https://www.w3.org/WAI/WCAG21/Understanding/resize-text) and
-[reflow](https://www.w3.org/WAI/WCAG21/Understanding/reflow) using browser text resizing/zoom.
+Record original device/simulator, viewport, orientation, locale, and font/display settings before changing them. Enlarge text to a common setting,
+never the largest: on iOS, [Dynamic Type](https://developer.apple.com/design/human-interface-guidelines/typography) xxLarge, two steps above
+default and below the accessibility sizes; on Android, [font scale](https://developer.android.com/about/versions/14/features#non-linear-font-scaling)
+1.3×; on web, 150% browser zoom. Confirm the setting took effect in the app; investigate unchanged text.
 
-Keep an app's font preference separate from OS accessibility sizing. If present, check its default and largest setting on the compact size with OS
-text at default, then combine the largest app and OS settings when they can coexist. Record display scaling and browser zoom separately.
+Keep an app's font preference separate from OS text size. If present, check its default and one common larger step on the compact size with OS text
+at default. Record display scaling and browser zoom separately.
 
 ## Usability checks
 

@@ -31,9 +31,9 @@ Disposable but designed: one `index.html` plus assets beside it, no build step.
 - Save screenshots as WebP or JPEG at display width.
 - Add a viewport meta tag and a fluid layout so it reads on a phone. Use `dir="rtl"` for Arabic content.
 - When the user will respond, give items stable IDs, add [assets/feedback.js](assets/feedback.js) and follow its header. Put each choice
-  control in the header of the item it chooses, as a radio button or pill, so the user picks while looking at the item. Never gather the
-  choices into a separate form at the top or bottom of the page, and never use dropdowns. Only items that are alternatives to one another, such
-  as options of which the user picks one, share a radio group.
+  control in the item's header, as a checkbox or pill, so the user picks while looking at the item. Never gather choices into a separate
+  form or use dropdowns. Let the user pick several alternatives; use a radio group only for answers within one item that exclude each
+  other, such as approve or reject. A second click clears any pick; `feedback.js` does this for radios.
 
 ## Design
 
@@ -49,7 +49,7 @@ Pick one mode:
 
 - **Feature proposal** when the page proposes a feature, explains a product idea, or asks for a product decision. Follow
   [references/feature-proposal.md](references/feature-proposal.md); the minimal-page rules below do not apply.
-- **Options** when the user picks between alternatives: write only the template's JSON and one `options/<id>.html` per option; on
+- **Options** when the user picks one or more alternatives: write only the template's JSON and one `options/<id>.html` per option; on
   revision, rewrite only changed fragments.
 - **Plan review** for a plan to approve: [references/plan-review.md](references/plan-review.md).
 - **Visual prototype** when the user asks to visualize something or asks for a prototype or mockup:

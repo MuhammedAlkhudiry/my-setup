@@ -22,13 +22,15 @@
 - **WORK-SCOPE** — Change only what the task asks for. Do not refactor, rename, reformat, upgrade dependencies, or fix unrelated problems
   along the way; list them in the handoff instead. When the task seems to need a change outside its scope, stop and ask before making it.
   <!-- /profile -->
-- **CONCURRENT-AGENTS** — Before changing files or implementing work, check for other active agent sessions on the same project, whether they run in
-  the same harness as you or a different one. If you find one, agree with it on how to share the work, or wait until it finishes. If you find none,
-  proceed. If you later suspect that another agent is editing the same project, stop and coordinate with it before you continue. If you cannot reach
-  the other agent, stop and ask the user how to proceed. If another agent is using a browser, simulator, or emulator you need, create a separate
-  instance for your work instead of taking over or waiting for the shared one.
-- **UNRELATED-AGENT-MESSAGES** — When another agent sends a message that does not concern your work, reply that it is unrelated to you, then
-  continue your task. Tell the user only: "Got an unrelated agent message."
+- **CONCURRENT-AGENTS** — Coordinate only when actions could overwrite another agent's work or interfere with a shared resource. Before writes,
+  make one quick check of available session information; do not scan every harness or keep polling. Read-only actions need no coordination,
+  and missing session visibility alone is not a blocker. Separate worktrees or clones can edit independently, even the same source files.
+  In the same checkout, proceed on separate files and preserve existing changes; agree on ownership before overlapping edits or Git operations
+  that affect the other agent's work. Worktrees can still share Git metadata and external resources. Use a separate browser, simulator, or
+  emulator instance when needed. If a concrete conflict appears, pause only the affected action and continue independent work; ask the user
+  only when the conflict cannot be resolved or isolated.
+- **UNRELATED-AGENT-MESSAGES** — Ignore agent messages unrelated to your task and continue working. Notify the user only when a message affects
+  the task.
 
 ## Answering questions
 
@@ -119,7 +121,8 @@ Use these projects as references when the user mentions them.
 - **DRAFT-PRS** — CI minutes cost money, and CI skips draft pull requests. Open every pull request as a draft and keep it a draft while you
   still push fixes. Mark it ready for review only when the work is done, the project's local checks pass, and the $prs checklist passes. When
   the project has a sign-off command, run it on the pushed head before marking the pull request ready and after every later push; it replaces
-  pull request CI. Never dispatch or rerun CI to test work in progress; the local checks cover it. When you mark it ready for review, run the
+  pull request CI. Merge only on a green sign-off: never bypass the required checks, such as with `gh pr merge --admin`; only the owner
+  bypasses them, on GitHub. Never dispatch or rerun CI to test work in progress; the local checks cover it. When you mark it ready for review, run the
   mark-viewed script from $prs for GitHub PRs so files that need no line-by-line review are ticked as viewed; that script does not support GitLab MRs.
 - **CODE-SPACING** — Inside a function, separate each logical step with one blank line, such as loading input, transforming it, and returning
   or storing the result. Keep the lines of a single step together, and do not put a blank line between every statement.

@@ -27,8 +27,10 @@ mise run api:check
   one, such as Pest `--tia` or Jest `--findRelatedTests`.
 - Keep pull request CI to the checks for the changed areas. Keep end-to-end journeys, mutation testing, coverage, and paid evals out of it.
 - When pull requests use local sign-off instead of CI, give the project a sign-off command. It refuses uncommitted or unpushed work, runs
-  everything pull request CI would for the changed areas, and posts the result with `gh signoff` or `gh signoff fail`. Keep cloud CI on
-  the main branch, where it catches what the developer machine cannot, such as case-sensitive file names on Linux.
+  everything pull request CI would for the changed areas, and posts a green or red `signoff` commit status. Keep cloud CI on the main
+  branch, where it catches what the developer machine cannot, such as case-sensitive file names on Linux.
+- Let the gate and the sign-off skip a check that already passed on identical code, installed dependencies, and CI mode, and give them a
+  flag that reruns everything. Generators that other checks read run whenever anything else runs. The full command always runs everything.
 - Make every command safe to run from several worktrees at once: derive test database names, ports, and caches from the worktree, so
   parallel runs never drop or reuse each other's data.
 - Include every required verification category, not only tests and lint. Include builds only when the project treats them as part of its gate.

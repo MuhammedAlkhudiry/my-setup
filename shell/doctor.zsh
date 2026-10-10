@@ -293,6 +293,7 @@ main() {
   check_tool avdslim required "Install from the kdbhalala/avdslim Homebrew tap to slim Android emulators."
   check_tool memcap required "Install with brew install alextitov19/memcap/memcap; mise run install manages its config and service."
   check_tool asc required "Install with brew install asc for App Store Connect releases and status."
+  check_tool eas required "Install with bun add -g eas-cli for local store builds, EAS Submit, and updates."
   check_tool gpc required "Install with brew install yasserstudio/tap/gpc for Google Play releases and status."
   check_tool fzf optional "Used by the zsh fzf plugin and the project picker."
   check_tool sg optional "Install ast-grep for AST-shaped code search."
@@ -314,7 +315,7 @@ main() {
 
   print_header "Git workflow helpers"
   check_tool gh optional "Used to open GitHub pull requests from the command line."
-  check_gh_extension signoff optional "Install with gh extension install basecamp/gh-signoff; posts the local sign-off status that replaces pull request CI."
+  check_gh_extension signoff optional "Install with gh extension install basecamp/gh-signoff; sets up the branch rule that requires the local sign-off status."
   check_tool glab optional "Used to open GitLab merge requests from the command line."
 
   print_header "My Setup links"
@@ -325,6 +326,7 @@ main() {
   check_link doctor "$HOME/bin/doctor" "$MY_SETUP_ROOT/shell/doctor.zsh"
   check_link pk "$HOME/bin/pk" "$MY_SETUP_ROOT/shell/pk.zsh"
   check_link share-html "$HOME/bin/share-html" "$MY_SETUP_ROOT/shell/share-html.zsh"
+  check_link store-build "$HOME/bin/store-build" "$MY_SETUP_ROOT/shell/store-build.zsh"
   check_link claude-skills "$HOME/.claude_cliproxy/skills" "$HOME/.agents/skills"
 
   print_header "Managed skills"

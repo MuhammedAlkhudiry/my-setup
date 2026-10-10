@@ -32,6 +32,6 @@ export const ACTIVE_PROJECTS: ActiveProject[] = [
  * carry the same description. `doctor` reports any drift. Only each project's areas and checks differ.
  */
 export const SHARED_VERIFICATION = {
-  files: ["scripts/check.ts", ".github/scripts/changed-files.sh", ".github/scripts/test-mysql.sh"],
+  files: ["scripts/check.ts", "scripts/check.test.ts", ".github/scripts/changed-files.sh", ".github/scripts/test-mysql.sh"],
   tasks: ["check", "signoff", "premerge", "hooks:install"],
 };

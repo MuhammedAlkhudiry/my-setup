@@ -34,10 +34,12 @@ import {
   isMemcapActionLine,
   macWatcherPaths,
   mergeAlerts,
+  parseListeners,
   pruneAlerts,
   readAlerts,
   readState,
   reviewSchema,
+  sharedPorts,
   thresholdAlerts,
   writeJson,
 } from "../lib/mac-watcher";
@@ -107,7 +109,8 @@ async function largestTempEntries(): Promise<Array<{ path: string; gib: number }
 }
 
 async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) {
-  const [pressureText, pressureLevelText, swapText, processes, simsJson, adbText, memcapStatus] = await Promise.all([
+  const [pressureText, pressureLevelText, swapText, processes, simsJson, adbText, memcapStatus, listenersText] =
+    await Promise.all([
     run("memory_pressure", []),
     run("sysctl", ["-n", "kern.memorystatus_vm_pressure_level"]),
     run("sysctl", ["-n", "vm.swapusage"]),
@@ -115,6 +118,7 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
     run("xcrun", ["simctl", "list", "devices", "booted", "-j"]),
     Bun.which("adb") ? run("adb", ["devices"]) : Promise.resolve(""),
     Bun.which("memcap") ? run("memcap", ["status"], 30_000) : Promise.resolve(""),
+    run("lsof", ["-nP", "-iTCP", "-sTCP:LISTEN", "-Fpcn"]),
   ]);
 
   const freePercent = Number(pressureText.match(/free percentage: (\d+)%/)?.[1]);
@@ -147,6 +151,9 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
       ageMinutes: Math.round(row.ageSeconds / 60),
       command: shortCommand(row.command),
     }));
+
+  const parentOf = new Map(processes.map((row) => [row.pid, row.ppid]));
+  const ports = sharedPorts(parseListeners(listenersText), parentOf);
 
   const [load1, load5, load15] = loadavg();
   const cpuSummary = (row: (typeof processes)[number]) => ({
@@ -218,6 +225,7 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
         })),
       orphans: orphans.slice(0, 30),
       orphanCount: orphans.length,
+      sharedPorts: ports,
       bootedSimulators,
       emulators,
       memcap,
@@ -334,6 +342,7 @@ async function runOnce(): Promise<void> {
       sustainedCpu: snapshot.cpu.sustained,
       guardStops: snapshot.cpu.guardStops,
       memcapHealthy: memcapHealthy(snapshot),
+      sharedPorts: snapshot.sharedPorts,
     });
     const merged = mergeAlerts(readAlerts(paths), observed, at);
     await writeJson(paths.alerts, pruneAlerts(merged.alerts, now));
@@ -379,6 +388,9 @@ async function prune(dryRun: boolean, now = new Date()): Promise<void> {
   if (!dryRun) return;
   for (const entry of [...report.deleted, ...report.worktreesRemoved]) {
     console.log(`  remove ${(entry.bytes / 1024 ** 3).toFixed(2)}G ${shortCommand(entry.path)}`);
+  }
+  for (const database of report.testDatabasesDropped) {
+    console.log(`  drop test database ${database.name} (${(database.bytes / 1024 ** 2).toFixed(0)}M)`);
   }
   for (const kept of report.worktreesKept) {
     console.log(`  keep worktree ${shortCommand(kept.path)} (${kept.reason}, idle ${kept.idleDays}d)`);

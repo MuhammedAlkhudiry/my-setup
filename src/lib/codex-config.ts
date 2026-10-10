@@ -23,10 +23,6 @@ export function renderCodexMcpServersToml(servers = MCP_SERVERS): string {
   return lines.join("\n");
 }
 
-export function codexManagedTopLevelValues(): Record<string, string> {
-  return { model_verbosity: JSON.stringify(CODEX_CONFIG.model_verbosity) };
-}
-
 export function codexManagedSectionValues(): Array<[section: string, key: string, value: string]> {
   return [
     ["agents", "max_threads", String(CODEX_CONFIG.agents.max_threads)],

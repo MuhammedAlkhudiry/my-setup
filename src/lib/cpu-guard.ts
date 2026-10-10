@@ -58,9 +58,12 @@ export async function listProcesses(): Promise<ProcessRow[]> {
   return parsePsOutput(result.stdout);
 }
 
-/** Agent tooling that commonly outlives its session: browsers for automation, MCP servers, and dev servers. */
+/**
+ * Agent tooling that commonly outlives its session: browsers for automation, MCP servers, dev servers, and Laravel's
+ * long-running workers and servers.
+ */
 export const AGENT_TOOLING_PATTERN =
-  /Chrome for Testing|ms-playwright|chrome-headless-shell|chrome-devtools-mcp|playwright|\bmcp\b|-mcp|vite|next dev|webpack|esbuild|nodemon|\btsx\b|expo start|metro/i;
+  /Chrome for Testing|ms-playwright|chrome-headless-shell|chrome-devtools-mcp|playwright|\bmcp\b|-mcp|vite|next dev|webpack|esbuild|nodemon|\btsx\b|expo start|metro|artisan (horizon|queue:(work|listen)|serve|reverb:start|octane:start|schedule:work)/i;
 
 /** Main app executables, system binaries, agent CLIs, and devices are never guard targets. */
 const PROTECTED_COMMAND =

@@ -23,6 +23,19 @@ other supported release operations. Never automate App Store Connect or Google P
 cannot edit, such as Play's App content, when the owner asks for that change. Treat other API-unsupported account, policy, legal, payment, and
 review tasks as explicit manual blockers requiring fresh user intent.
 
+## Local Builds
+
+Build store artifacts on the Mac and upload them with EAS Submit; paid EAS cloud builds are the exception. From the app folder, run
+`store-build <ios|android> <submit-profile>`, usually through the project's own script; `store-build --help` lists the options.
+
+- The submit profile is always explicit, because a profile can release straight to production. Prove a new build path with a profile that
+  targets TestFlight or an internal track.
+- EAS keeps secret variables from local builds, so `store-build` stops until each is set locally; a file secret takes an absolute path, and
+  `--allow-missing` skips a secret the platform does not use.
+- A local build uses the Mac's Xcode, JDK, and Android SDK, not the `eas.json` image. `store-build` refuses local iOS while a project pins an
+  older Xcode major, and `--cloud` builds that platform on EAS.
+- A failed upload keeps the archive and prints the retry command; never rebuild only to resubmit.
+
 Ship every change in a store build. Publish an over-the-air update only when the owner asks for one, and keep the update tooling working so
 it is ready when they do.
 

@@ -65,6 +65,17 @@ export const MAC_WATCHER = {
      */
     worktreeIdleDays: 7,
     agentWorktreeDirs: ["/.claude/worktrees/", "/.codex/worktrees/", "/.t3/worktrees/"],
+    /**
+     * Local MySQL test databases go once the checkout that built them is gone. Each active project's suite records its
+     * checkout's path in a `testing_checkout` table. An active project's database without one goes once untouched this
+     * long, because the suite rebuilds a missing database. Parallel workers' copies (`<name>_test_<n>`) follow theirs.
+     */
+    testDatabases: {
+      match: /(^|_)testing(_|$)/,
+      markerTable: "testing_checkout",
+      unmarkedDays: 14,
+      mysqlArgs: ["-h", "127.0.0.1", "-u", "root"],
+    },
   },
   /** Consecutive runs without seeing an alert before it closes on its own. */
   autoResolveAfterClearRuns: 2,

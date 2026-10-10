@@ -7,9 +7,11 @@ import {
   isMemcapActionLine,
   macWatcherPaths,
   mergeAlerts,
+  parseListeners,
   pruneAlerts,
   renderMemcapConfig,
   renderWatcherLaunchAgent,
+  sharedPorts,
   thresholdAlerts,
 } from "./mac-watcher";
 
@@ -24,6 +26,7 @@ const quiet: AlertInput = {
   sustainedCpu: [],
   guardStops: [],
   memcapHealthy: true,
+  sharedPorts: [],
 };
 
 const keys = (input: Partial<AlertInput>) => thresholdAlerts({ ...quiet, ...input }).map((alert) => alert.key);
@@ -186,4 +189,33 @@ test("the guard launch agent runs every minute and at load", () => {
   if (process.platform === "darwin") {
     expect(Bun.spawnSync(["plutil", "-lint", "-"], { stdin: Buffer.from(plist) }).exitCode).toBe(0);
   }
+});
+
+test("a port two unrelated processes listen on is reported, but a parent's inherited socket is not", () => {
+  const listeners = parseListeners(
+    [
+      "p9756", "credis-server", "f6", "n*:6379", "f7", "n[::1]:6379",
+      "p61280", "credis-server", "f6", "n127.0.0.1:6379",
+      "p65051", "cnginx", "f6", "n127.0.0.1:80",
+      "p65055", "cnginx", "f6", "n127.0.0.1:80",
+      "p94307", "cnginx-arm64", "f6", "n127.0.0.1:443",
+      "p94308", "cnginx-arm64", "f6", "n127.0.0.1:443",
+    ].join("\n"),
+  );
+  const parentOf = new Map([
+    [9756, 1],
+    [61280, 724],
+    [724, 1],
+    [65051, 724],
+    [65055, 65051],
+    // Workers of a root nginx master, which a non-root lsof doesn't list.
+    [94307, 94306],
+    [94308, 94306],
+    [94306, 1],
+  ]);
+
+  expect(sharedPorts(listeners, parentOf)).toEqual([
+    { port: 6379, processes: ["redis-server (9756)", "redis-server (61280)"] },
+  ]);
+  expect(keys({ sharedPorts: sharedPorts(listeners, parentOf) })).toContain("shared-ports");
 });

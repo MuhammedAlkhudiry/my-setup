@@ -321,6 +321,21 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
+        name: "eas",
+        level: "required",
+        why: "Expo CLI for local store builds (eas build --local), EAS Submit, and over-the-air updates in mobile-app-infra.",
+        versionArgs: ["--version"],
+        latest: {
+          type: "command",
+          command: "npm",
+          args: ["view", "eas-cli", "version"],
+        },
+        update: {
+          commands: ["bun add -g eas-cli@latest"],
+          note: "Install with bun add -g eas-cli. Projects pin a minimum version in eas.json cli.version.",
+        },
+      },
+      {
         name: "gpc",
         level: "required",
         why: "Google Play Developer API CLI for releases, rollouts, listings, screenshots, and store status in mobile-app-infra.",
@@ -511,7 +526,7 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "gh",
         level: "optional",
-        why: "Used to open GitHub pull requests from the command line, and through the basecamp/gh-signoff extension to post the local sign-off status that replaces pull request CI.",
+        why: "Used to open GitHub pull requests from the command line, and through the basecamp/gh-signoff extension to make branch rules require the local sign-off status that replaces pull request CI.",
         versionArgs: ["--version"],
         latest: {
           type: "homebrew",

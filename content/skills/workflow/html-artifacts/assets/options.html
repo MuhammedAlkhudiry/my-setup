@@ -43,7 +43,6 @@
 }
 </script>
 
-<form id="pick" hidden></form>
 <div class="shell">
   <nav class="switcher" aria-label="Options">
     <div class="switcher-head">
@@ -84,7 +83,7 @@
           <span class="view-note">${esc(option.note)}</span>
           <span class="ms-auto flex items-center gap-2">
             <input class="notes" name="notes" placeholder="Notes">
-            <label class="pick"><input type="radio" name="pick" form="pick" value="${esc(option.id)}">Pick</label>
+            <label class="pick"><input type="checkbox" name="pick">Pick</label>
           </span>
         </header>
         <div class="stage" data-stage></div>
@@ -118,10 +117,10 @@
   }
 
   function markPicked() {
-    const picked = document.querySelector('input[name="pick"]:checked')?.value;
+    const picked = new Set([...views.querySelectorAll('input[name="pick"]:checked')].map((input) => input.closest('[data-item]').dataset.item));
     for (const tab of nav.querySelectorAll('[data-tab]')) {
       const option = data.options.find((item) => item.id === tab.dataset.tab);
-      tab.querySelector('[data-mark]').textContent = tab.dataset.tab === picked ? '✓' : option.rec ? '★' : '';
+      tab.querySelector('[data-mark]').textContent = picked.has(tab.dataset.tab) ? '✓' : option.rec ? '★' : '';
     }
   }
 
