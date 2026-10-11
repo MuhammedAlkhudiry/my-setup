@@ -20,7 +20,7 @@ Rules:
 - Alert when `cpu.guardStops` shows the same tool being stopped again and again; the fix belongs in that tool.
 - Keep memory under control: alert on a large process memcap does not manage, such as a browser, IDE, or app, that stays
   near the top of `topProcesses` with low free memory.
-- Always raise an alert when `diskFreeGib` is below 20; name the biggest entries from `largestTemp` or known caches.
+- Always raise an alert when `diskFreeGib` is below 20; name the biggest entries from `largestDiskUsers` or known caches.
 - Ignore memcap's "MEASUREMENT IS FAULTY" or mixed-measurement notes; they come from processes starting during its
   sample and are not actionable.
 - Do not alert on memcap declining or holding cleanup while mobile tooling or a live agent session is active; that is

@@ -3,7 +3,8 @@
 Use the [store CLIs](store-clis.md) with read-only commands only; never use a preparation or submission action as a status check.
 
 - EAS: `eas build:list --json --non-interactive` proves build and upload progress. Store CLIs prove review, rollout, and availability.
-- App Store: `ASC_READ_ONLY=1 asc status --app <id>` shows builds, TestFlight, the App Store version, submission blockers, review, and phased release.
+- App Store: `ASC_READ_ONLY=1 asc status --app <id>` shows builds, TestFlight, the App Store version, submission blockers, and review. Its
+  `phasedRelease.configured` can read `true` for a version with none; check with `asc versions phased-release view --version-id <id>`.
   Use `ASC_READ_ONLY=1 asc review doctor --app <id>` to explain a blocked or rejected version.
 - Google Play: `gpc --ci releases status --app <package>` shows every track, its version codes, status, and release notes. Add `gpc status` for
   vitals and recent reviews.

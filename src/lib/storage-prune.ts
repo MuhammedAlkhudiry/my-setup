@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, rm, rmdir, unlink } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
 
@@ -48,22 +48,57 @@ export interface WorktreeFacts {
 export type WorktreeDecision = { remove: true } | { remove: false; reason: string };
 
 /**
- * A worktree goes only when removing it loses nothing: its commits are on the base branch or in a finished PR, it has no
- * uncommitted or untracked files, and nobody is using it. The branch itself is kept, so the commits stay reachable.
+ * A worktree goes only when removing it loses nothing: it has no uncommitted or untracked files, nobody is using it, and
+ * its commits stay reachable from the base branch, a finished PR, or its own branch, which is kept. A landed worktree goes
+ * soon after its work is done; one whose branch never landed waits longer in case its work resumes, and stays while its
+ * PR is open. Detached commits that never landed have no branch to keep them, so they always stay.
  */
-export function decideWorktree(facts: WorktreeFacts, now: number, idleDays: number): WorktreeDecision {
+export function decideWorktree(
+  facts: WorktreeFacts,
+  now: number,
+  idleDays: { landed: number; abandoned: number },
+): WorktreeDecision {
   if (facts.locked) return { remove: false, reason: "locked" };
   if (facts.inUse) return { remove: false, reason: "in use by a running process" };
   if (facts.dirty) return { remove: false, reason: "uncommitted changes" };
 
-  const idle = (now - facts.lastActivityMs) / DAY_MS;
-  if (idle < idleDays) return { remove: false, reason: `active ${Math.floor(idle)}d ago` };
+  // Git activity during the run itself can land after `now`.
+  const idle = Math.max(0, now - facts.lastActivityMs) / DAY_MS;
+  const active = `active ${Math.floor(idle)}d ago`;
+  const prFinished = facts.pr !== undefined && facts.pr.state !== "OPEN" && facts.pr.headRefOid === facts.head;
+  if (facts.mergedIntoBase || prFinished) {
+    return idle < idleDays.landed ? { remove: false, reason: `landed, ${active}` } : { remove: true };
+  }
 
-  if (facts.mergedIntoBase) return { remove: true };
-  if (!facts.pr) return { remove: false, reason: facts.branch ? "no PR" : "detached HEAD" };
-  if (facts.pr.state === "OPEN") return { remove: false, reason: "PR open" };
-  if (facts.pr.headRefOid !== facts.head) return { remove: false, reason: "local commits not in the PR" };
+  if (!facts.branch) return { remove: false, reason: "detached HEAD" };
+  if (facts.pr?.state === "OPEN") return { remove: false, reason: "PR open" };
+  if (idle < idleDays.abandoned) return { remove: false, reason: active };
   return { remove: true };
+}
+
+export interface TempEntry extends AgedEntry {
+  name: string;
+  kind: "file" | "directory" | "other";
+  ownedByUser: boolean;
+  /** A socket sits in the folder itself, so a live service may still listen there. */
+  holdsSocket: boolean;
+}
+
+/** Temp entries agent runs left behind: this user's plain files and folders that no live service may still need. */
+export function tempLeftovers(entries: TempEntry[], options: { days: number; skip: RegExp; now: number }): TempEntry[] {
+  return olderThan(entries, options.days, options.now).filter(
+    (entry) => entry.kind !== "other" && entry.ownedByUser && !entry.holdsSocket && !options.skip.test(entry.name),
+  );
+}
+
+/** Direct children of `dir` that a running process holds open or works in, found in one pass over the open paths. */
+export function childrenInUse(dir: string, openPaths: Set<string>): Set<string> {
+  const prefix = dir.endsWith(sep) ? dir : `${dir}${sep}`;
+  const children = new Set<string>();
+  for (const open of openPaths) {
+    if (open.startsWith(prefix)) children.add(join(dir, open.slice(prefix.length).split(sep)[0] ?? ""));
+  }
+  return children;
 }
 
 export interface TestDatabaseFacts {
@@ -114,6 +149,7 @@ const reportSchema = z.object({
   freedBytes: z.number(),
   deleted: z.array(z.object({ path: z.string(), bytes: z.number() })),
   archived: z.object({ files: z.number(), bytes: z.number() }),
+  temp: z.object({ entries: z.number(), bytes: z.number() }).default({ entries: 0, bytes: 0 }),
   worktreesRemoved: z.array(z.object({ path: z.string(), bytes: z.number() })),
   worktreesKept: z.array(z.object({ path: z.string(), reason: z.string(), idleDays: z.number() })),
   testDatabasesDropped: z.array(z.object({ name: z.string(), bytes: z.number() })).default([]),
@@ -132,6 +168,7 @@ export function summarizePrune(report: PruneReport): string {
     `${report.dryRun ? "would free" : "freed"} ${gib(report.freedBytes)}`,
     `deleted ${report.deleted.length}`,
     `archived ${report.archived.files} files (${gib(report.archived.bytes)})`,
+    `temp entries removed ${report.temp.entries} (${gib(report.temp.bytes)})`,
     `worktrees removed ${report.worktreesRemoved.length}`,
     `test databases dropped ${report.testDatabasesDropped.length}`,
   ];
@@ -180,6 +217,55 @@ async function childrenWithAge(dir: string): Promise<AgedEntry[]> {
       return { path, mtimeMs };
     }),
   );
+}
+
+/** Total size of many paths, measured in batches so thousands of small entries cost a few `du` runs. */
+async function totalSizeBytes(paths: string[]): Promise<number> {
+  let total = 0;
+  for (let start = 0; start < paths.length; start += 500) {
+    const result = await run("du", ["-sck", ...paths.slice(start, start + 500)], { timeout: 180_000 });
+    total += Number(result.stdout.trim().split("\n").at(-1)?.split("\t")[0] ?? 0) * 1024;
+  }
+  return total;
+}
+
+/** The per-user temp folder; launchd does not set TMPDIR for the watcher. */
+async function userTempDir(): Promise<string | undefined> {
+  const result = await run("getconf", ["DARWIN_USER_TEMP_DIR"]);
+  const dir = result.stdout.trim();
+  return result.exitCode === 0 && dir ? dir : undefined;
+}
+
+/** Children macOS protects from deletion, such as its services' sandbox folders in the per-user temp folder. */
+async function protectedChildren(dir: string): Promise<Set<string>> {
+  const flagged = ["(", "-flags", "+sunlnk", "-o", "-flags", "+restricted", ")"];
+  const result = await run("find", [dir, "-mindepth", "1", "-maxdepth", "1", ...flagged, "-print0"]);
+  if (result.exitCode !== 0) throw new Error(`cannot list protected entries in ${dir}`);
+  return new Set(result.stdout.split("\0").filter(Boolean));
+}
+
+/** Read one entry at a time, since the per-user temp folder can hold tens of thousands of them. */
+async function tempEntries(dir: string, uid: number): Promise<TempEntry[]> {
+  const entries: TempEntry[] = [];
+  for (const name of await readdir(dir)) {
+    const path = join(dir, name);
+    try {
+      const stat = await lstat(path);
+      let mtimeMs = stat.mtimeMs;
+      let holdsSocket = false;
+      if (stat.isDirectory() && stat.uid === uid) {
+        for (const child of await readdir(path, { withFileTypes: true })) {
+          holdsSocket ||= child.isSocket();
+          mtimeMs = Math.max(mtimeMs, (await lstat(join(path, child.name))).mtimeMs);
+        }
+      }
+      const kind = stat.isDirectory() ? "directory" : stat.isFile() ? "file" : "other";
+      entries.push({ path, name, kind, mtimeMs, ownedByUser: stat.uid === uid, holdsSocket });
+    } catch {
+      // An entry that vanished or cannot be read is left alone.
+    }
+  }
+  return entries;
 }
 
 async function filesWithAge(dir: string): Promise<Array<AgedEntry & { size: number }>> {
@@ -374,6 +460,7 @@ export async function pruneStorage(options: { home: string; now: Date; dryRun: b
     freedBytes: 0,
     deleted: [],
     archived: { files: 0, bytes: 0 },
+    temp: { entries: 0, bytes: 0 },
     worktreesRemoved: [],
     worktreesKept: [],
     testDatabasesDropped: [],
@@ -409,6 +496,24 @@ export async function pruneStorage(options: { home: string; now: Date; dryRun: b
       }
     });
   }
+
+  await attempt("temp", async () => {
+    const uid = process.getuid?.() ?? -1;
+    const dirs = ["/private/tmp", await userTempDir()].filter((dir): dir is string => Boolean(dir && existsSync(dir)));
+    for (const dir of dirs.map((dir) => realpathSync(dir))) {
+      const kept = new Set([...childrenInUse(dir, openPaths), ...(await protectedChildren(dir))]);
+      const leftovers = tempLeftovers(await tempEntries(dir, uid), { ...rules.temp, now }).filter(
+        (entry) => !kept.has(entry.path),
+      );
+      const bytes = await totalSizeBytes(leftovers.map((entry) => entry.path));
+      if (!dryRun) {
+        for (const entry of leftovers) await attempt(entry.path, () => rm(entry.path, { recursive: true, force: true }));
+      }
+      report.temp.entries += leftovers.length;
+      report.temp.bytes += bytes;
+      report.freedBytes += bytes;
+    }
+  });
 
   if (!archiveMounted(home)) {
     report.skipped.push(`${rules.archiveVolume} is not mounted, so nothing was archived`);
@@ -448,7 +553,7 @@ export async function pruneStorage(options: { home: string; now: Date; dryRun: b
           const facts = await worktreeFacts(project.canonicalRoot, project.baseBranch, worktree, openPaths);
           const decision = decideWorktree(facts, now, rules.worktreeIdleDays);
           if (!decision.remove) {
-            const idleDays = Math.floor((now - facts.lastActivityMs) / DAY_MS);
+            const idleDays = Math.max(0, Math.floor((now - facts.lastActivityMs) / DAY_MS));
             report.worktreesKept.push({ path: worktree.path, reason: decision.reason, idleDays });
             return;
           }

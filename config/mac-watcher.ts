@@ -56,16 +56,26 @@ export const MAC_WATCHER = {
       { path: ".maestro/tests", days: 3 },
       { path: "Library/Developer/Xcode/DerivedData", days: 14, match: /-[a-z]{28}$/ },
     ],
+    /**
+     * Leftovers that agent runs drop in `/private/tmp` and the per-user temp folder, such as demo renders, QA copies, and
+     * package-install scratch folders. A direct child this user owns goes once it and its direct entries are untouched for
+     * `days`. Live services keep sockets and locks there, so sockets, folders holding one, folders macOS protects, and `skip`
+     * names always stay.
+     */
+    temp: { days: 2, skip: /^(com\.apple\.|tmux-|boost_interprocess$|TemporaryItems$)|\.(sock|lock|pid)$/ },
     /** Files older than `days` move to the same relative path under `archiveRoot/to`. */
     archiveFiles: [
       { path: ".codex/sessions", days: 14, to: "codex/sessions" },
       { path: ".codex/generated_images", days: 14, to: "codex/generated_images" },
     ],
     /**
-     * Linked worktrees of active projects are removed once clean, unlocked, landed, and idle this long. Only worktrees
-     * under these agent-managed folders count; worktrees a person placed elsewhere are never touched.
+     * Linked worktrees of active projects are removed once clean, unlocked, unused, and idle; their branches stay, so no
+     * commit is lost. A landed worktree, whose commits are on the base branch or in a finished PR, goes after `landed`
+     * idle days. Any other branch without an open PR counts as abandoned after `abandoned` idle days. Agents open several
+     * worktrees a day, each holding gigabytes of dependencies and native builds, so a long wait fills the disk. Only
+     * worktrees under these agent-managed folders count; worktrees a person placed elsewhere are never touched.
      */
-    worktreeIdleDays: 7,
+    worktreeIdleDays: { landed: 1, abandoned: 7 },
     agentWorktreeDirs: ["/.claude/worktrees/", "/.codex/worktrees/", "/.t3/worktrees/"],
     /**
      * Local MySQL test databases go once the checkout that built them is gone. Each active project's suite records its

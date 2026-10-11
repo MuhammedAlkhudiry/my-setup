@@ -19,7 +19,7 @@ const quiet: AlertInput = {
   pressureLevel: "normal",
   swapUsedGib: 1,
   diskFreeGib: 200,
-  largestTemp: [],
+  largestDiskUsers: [],
   loadAverage15: 6,
   cores: 14,
   orphans: [],
@@ -56,11 +56,12 @@ test("each crossed threshold opens its own stable alert", () => {
   expect(keys({ memcapHealthy: false })).toEqual(["memcap-unhealthy"]);
 });
 
-test("disk alerts escalate when nearly full and name the largest temp entries", () => {
-  const [warning] = thresholdAlerts({ ...quiet, diskFreeGib: 15, largestTemp: [{ path: "~/tmp/qa", gib: 6 }] });
+test("disk alerts escalate when nearly full and name the largest disk users", () => {
+  const largestDiskUsers = [{ path: "~/.t3/worktrees/app", gib: 150 }];
+  const [warning] = thresholdAlerts({ ...quiet, diskFreeGib: 15, largestDiskUsers });
   const [critical] = thresholdAlerts({ ...quiet, diskFreeGib: 5 });
 
-  expect(warning).toMatchObject({ severity: "warning", evidence: "largest temp entries: ~/tmp/qa 6G" });
+  expect(warning).toMatchObject({ severity: "warning", evidence: "largest disk users: ~/.t3/worktrees/app 150G" });
   expect(critical?.severity).toBe("critical");
 });
 

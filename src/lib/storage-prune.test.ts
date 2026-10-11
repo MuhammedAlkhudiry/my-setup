@@ -1,18 +1,24 @@
 import { expect, test } from "bun:test";
 import { join } from "node:path";
 
+import { MAC_WATCHER } from "../../config/mac-watcher";
+
 import {
+  type TempEntry,
   type TestDatabaseFacts,
   type WorktreeFacts,
+  childrenInUse,
   decideWorktree,
   isInUse,
   olderThan,
   parseWorktreeList,
+  tempLeftovers,
   testDatabasesToDrop,
 } from "./storage-prune";
 
 const DAY = 24 * 60 * 60 * 1000;
 const now = Date.parse("2026-10-02T12:00:00Z");
+const idleDays = { landed: 1, abandoned: 7 };
 
 const landed: WorktreeFacts = {
   path: "/repo/.claude/worktrees/done",
@@ -43,33 +49,71 @@ test("a path counts as in use when anything inside it is open, but not a sibling
   expect(isInUse(join("/repo", "wt-other"), open)).toBe(true);
 });
 
-test("a clean, idle worktree whose PR merged at its current commit is removed", () => {
-  expect(decideWorktree(landed, now, 7)).toEqual({ remove: true });
-  expect(decideWorktree({ ...landed, pr: undefined, mergedIntoBase: true }, now, 7)).toEqual({
-    remove: true,
-  });
+test("a clean worktree goes a day after it landed, on the base branch or in a finished PR", () => {
+  const remove = (facts: Partial<WorktreeFacts>) => decideWorktree({ ...landed, ...facts }, now, idleDays);
+
+  expect(remove({ lastActivityMs: now - 2 * DAY })).toEqual({ remove: true });
+  expect(remove({ pr: undefined, mergedIntoBase: true, lastActivityMs: now - 2 * DAY })).toEqual({ remove: true });
+  expect(remove({ pr: { state: "CLOSED", headRefOid: "abc" } })).toEqual({ remove: true });
+  expect(remove({ lastActivityMs: now - DAY / 2 })).toEqual({ remove: false, reason: "landed, active 0d ago" });
+});
+
+test("a clean branch that never landed goes once abandoned, since the kept branch still holds its commits", () => {
+  const decide = (facts: Partial<WorktreeFacts>) => decideWorktree({ ...landed, ...facts }, now, idleDays);
+
+  expect(decide({ pr: undefined })).toEqual({ remove: true });
+  expect(decide({ head: "def" })).toEqual({ remove: true });
+  expect(decide({ pr: undefined, lastActivityMs: now - 3 * DAY })).toEqual({ remove: false, reason: "active 3d ago" });
 });
 
 test("worktrees that could still hold work are kept with a reason", () => {
-  const keep = (facts: Partial<WorktreeFacts>) => decideWorktree({ ...landed, ...facts }, now, 7);
+  const keep = (facts: Partial<WorktreeFacts>) => decideWorktree({ ...landed, ...facts }, now, idleDays);
 
   expect(keep({ locked: true })).toEqual({ remove: false, reason: "locked" });
   expect(keep({ inUse: true })).toEqual({ remove: false, reason: "in use by a running process" });
   expect(keep({ dirty: true })).toEqual({ remove: false, reason: "uncommitted changes" });
-  expect(keep({ lastActivityMs: now - 2 * DAY })).toEqual({
-    remove: false,
-    reason: "active 2d ago",
-  });
-  expect(keep({ pr: { state: "OPEN", headRefOid: "abc" } })).toEqual({
+  expect(keep({ pr: { state: "OPEN", headRefOid: "abc" }, lastActivityMs: now - 30 * DAY })).toEqual({
     remove: false,
     reason: "PR open",
   });
-  expect(keep({ head: "def" })).toEqual({ remove: false, reason: "local commits not in the PR" });
-  expect(keep({ pr: undefined })).toEqual({ remove: false, reason: "no PR" });
-  expect(keep({ pr: undefined, branch: undefined })).toEqual({
+  expect(keep({ pr: undefined, branch: undefined, lastActivityMs: now - 30 * DAY })).toEqual({
     remove: false,
     reason: "detached HEAD",
   });
+});
+
+test("temp leftovers are this user's stale files and folders, never sockets, folders holding one, or skipped names", () => {
+  const entry = (name: string, facts: Partial<TempEntry> = {}): TempEntry => ({
+    path: join("/tmp", name),
+    name,
+    kind: "directory",
+    mtimeMs: now - 3 * DAY,
+    ownedByUser: true,
+    holdsSocket: false,
+    ...facts,
+  });
+  const entries = [
+    entry("harium-film"),
+    entry(".1626a762-1AF.shell-quote"),
+    entry("notes.txt", { kind: "file" }),
+    entry("fresh", { mtimeMs: now - DAY }),
+    entry("powerlog", { ownedByUser: false }),
+    entry("mysqlx.sock", { kind: "other" }),
+    entry("mysqlx.sock.lock", { kind: "file" }),
+    entry("cc-socks", { holdsSocket: true }),
+    entry("com.apple.launchd.abc"),
+    entry("tmux-501"),
+  ];
+
+  const leftovers = tempLeftovers(entries, { days: 2, skip: MAC_WATCHER.storage.temp.skip, now });
+
+  expect(leftovers.map((leftover) => leftover.name)).toEqual(["harium-film", ".1626a762-1AF.shell-quote", "notes.txt"]);
+});
+
+test("the children in use are the direct children holding any open path", () => {
+  const open = new Set(["/tmp/run/out/video.mp4", "/tmp/run", "/tmp/other.log", "/tmpfile", "/var/x"]);
+
+  expect([...childrenInUse("/tmp", open)].sort()).toEqual(["/tmp/other.log", "/tmp/run"]);
 });
 
 test("git worktree porcelain output is parsed, including locked worktrees with a reason", () => {

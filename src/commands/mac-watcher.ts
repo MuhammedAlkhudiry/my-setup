@@ -15,6 +15,7 @@ import { join } from "node:path";
 
 import { execa } from "execa";
 
+import { ACTIVE_PROJECTS } from "../../config/active-projects";
 import { MAC_WATCHER, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
 import {
   type GuardState,
@@ -51,7 +52,6 @@ const paths = macWatcherPaths(HOME);
 const GIB = 1024 ** 3;
 const MEMCAP_STALE_SECONDS = 600;
 const MAX_LOG_LINES = 80;
-const TEMP_DIR = process.env.TMPDIR || "/tmp";
 
 // =============================================================================
 // Snapshot
@@ -98,9 +98,20 @@ async function readNewLines(path: string, offset: number): Promise<{ lines: stri
   }
 }
 
-/** Largest temp entries; agent clones and QA copies there filled the disk once. Measured only when disk is low. */
-async function largestTempEntries(): Promise<Array<{ path: string; gib: number }>> {
-  const output = await run("sh", ["-c", 'du -sk "$0"/* 2>/dev/null | sort -rn | head -8', TEMP_DIR], 180_000);
+/**
+ * The biggest entries in the places agents fill: temp folders and agent worktree folders, which once held most of the
+ * disk. Measured only when disk is low, because walking every worktree takes a while.
+ */
+async function measureLargestDiskUsers(): Promise<Array<{ path: string; gib: number }>> {
+  const roots = [
+    (await run("getconf", ["DARWIN_USER_TEMP_DIR"])).trim(),
+    "/private/tmp",
+    join(HOME, ".t3/worktrees"),
+    join(HOME, ".codex/worktrees"),
+    ...ACTIVE_PROJECTS.map((project) => join(project.canonicalRoot, ".claude/worktrees")),
+  ].filter((root) => root && existsSync(root));
+  const script = 'for root; do du -sk "$root"/* 2>/dev/null; done | sort -rn | head -8';
+  const output = await run("sh", ["-c", script, "sh", ...roots], 300_000);
   return output
     .split("\n")
     .map((line) => line.match(/^(\d+)\s+(.+)$/))
@@ -128,7 +139,7 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
   const swapUsedGib = Number(swapText.match(/used = ([\d.]+)M/)?.[1] ?? 0) / 1024;
   const disk = statfsSync(HOME);
   const diskFreeGib = (disk.bavail * disk.bsize) / GIB;
-  const largestTemp = diskFreeGib < MAC_WATCHER.thresholds.minDiskFreeGib ? await largestTempEntries() : [];
+  const largestDiskUsers = diskFreeGib < MAC_WATCHER.thresholds.minDiskFreeGib ? await measureLargestDiskUsers() : [];
 
   const families = new Map<string, { processes: number; rssMib: number }>();
   for (const row of processes) {
@@ -210,7 +221,7 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
       },
       cpu,
       diskFreeGib: Number(diskFreeGib.toFixed(1)),
-      largestTemp,
+      largestDiskUsers,
       families: [...families.entries()]
         .map(([name, value]) => ({ name, ...value }))
         .sort((a, b) => b.rssMib - a.rssMib),
@@ -335,7 +346,7 @@ async function runOnce(): Promise<void> {
       pressureLevel: snapshot.memory.pressureLevel,
       swapUsedGib: snapshot.memory.swapUsedGib,
       diskFreeGib: snapshot.diskFreeGib,
-      largestTemp: snapshot.largestTemp,
+      largestDiskUsers: snapshot.largestDiskUsers,
       loadAverage15: snapshot.cpu.loadAverage[2],
       cores: snapshot.cpu.cores,
       orphans: snapshot.orphans,

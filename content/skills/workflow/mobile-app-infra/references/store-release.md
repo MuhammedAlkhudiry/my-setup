@@ -15,8 +15,10 @@ and live account state as the release contract.
    intermediate status or ask for another confirmation.
 
 Keep `built`, `submitted`, `waiting for review`, `in review`, `rolling out`, and `live` distinct. Stop only for rebuild requirements, signing or
-provisioning failures, version conflicts, policy rejection, or unresolved product decisions about rollout, compliance, pricing, privacy, or
+provisioning failures, version conflicts, policy rejection, or unresolved product decisions about compliance, pricing, privacy, or
 availability. When an authorized API cannot perform a required action, hand off that exact manual step.
+
+Every store release goes to all users at once: no App Store phased release and no Google Play staged rollout.
 
 Routine store releases are API/CLI-only: use EAS for builds and submissions and the [store CLIs](store-clis.md) for status, rollout, listings, and
 other supported release operations. Never automate App Store Connect or Google Play Console through a browser, except a declaration form the API
@@ -60,11 +62,13 @@ Use `asc` through the [store CLIs](store-clis.md) and $asc-release-flow. Run eac
 3. Set the new release notes for each locale with `asc localizations update --version <version-id> --locale <locale> --whats-new <text>`.
 4. Run `asc review doctor --app <id>`. When App Review contact details are missing, copy them from the previous version with
    `asc review details-for-version` and `asc review details-create`.
-5. Submit with `asc review submit --app <id> --version <version> --build-id <build-id>`. When App Review rejected the version, attach the fixed build
+5. Confirm the version has no phased release: `asc versions phased-release view --version-id <version-id>` must return no record. Delete one
+   that exists with `asc versions phased-release delete --id <phased-release-id>`.
+6. Submit with `asc review submit --app <id> --version <version> --build-id <build-id>`. When App Review rejected the version, attach the fixed build
    and resubmit the existing unresolved submission with `asc review submissions-submit --id <submission-id>`; follow $asc-submission-health.
 
 ## Google Play Rollout
 
-EAS submits Android builds to the configured track. Use `gpc` for later promotion and rollout changes, such as
-`gpc releases promote --from <track> --to production --rollout <percent>` and `gpc releases rollout increase`. Rollout percentage is a product
-decision; do not choose it without the user's instruction or the project's release instructions.
+EAS submits Android builds to the configured track. Promote to production with `gpc releases promote --from <track> --to production
+--status completed`, so the release reaches every user; never pass a `--rollout` percentage. When a release is already `inProgress`, finish it
+with `gpc releases rollout complete`.

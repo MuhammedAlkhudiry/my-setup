@@ -428,7 +428,7 @@ try {
     }
     // Idle worktrees the rules cannot remove safely need a person to decide.
     for (const kept of prune.worktreesKept.filter(
-      (worktree) => worktree.idleDays >= MAC_WATCHER.storage.worktreeIdleDays,
+      (worktree) => worktree.idleDays >= MAC_WATCHER.storage.worktreeIdleDays.abandoned,
     )) {
       findings.push({
         level: "optional",

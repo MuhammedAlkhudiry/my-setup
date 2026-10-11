@@ -144,7 +144,7 @@ export interface AlertInput {
   pressureLevel: "normal" | "warning" | "critical" | "unknown";
   swapUsedGib: number;
   diskFreeGib: number;
-  largestTemp: Array<{ path: string; gib: number }>;
+  largestDiskUsers: Array<{ path: string; gib: number }>;
   loadAverage15: number;
   cores: number;
   orphans: ProcessSummary[];
@@ -233,13 +233,13 @@ export function thresholdAlerts(input: AlertInput): ObservedAlert[] {
   const alerts: ObservedAlert[] = [];
 
   if (input.diskFreeGib < thresholds.minDiskFreeGib) {
-    const temp = input.largestTemp.map((entry) => `${entry.path} ${entry.gib}G`).join(", ");
+    const largest = input.largestDiskUsers.map((entry) => `${entry.path} ${entry.gib}G`).join(", ");
     alerts.push({
       key: "low-disk",
       severity: input.diskFreeGib < thresholds.criticalDiskFreeGib ? "critical" : "warning",
       title: `Disk free ${input.diskFreeGib.toFixed(0)} GiB`,
-      evidence: temp ? `largest temp entries: ${temp}` : "below the free-space threshold",
-      fix: "Run mise run watcher -- prune --dry-run to see what the cleanup rules free, then remove large temp entries or archive to the SSD.",
+      evidence: largest ? `largest disk users: ${largest}` : "below the free-space threshold",
+      fix: "Run mise run watcher -- prune --dry-run to see what the cleanup rules free and why they keep the rest, then remove or archive what they keep.",
     });
   }
   if (input.pressureLevel === "warning" || input.pressureLevel === "critical") {
