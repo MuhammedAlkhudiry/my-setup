@@ -1,9 +1,13 @@
 ---
 name: ai-agents-cli
-description: Use to run a task or second opinion through the Claude Code or Codex CLI, opus, astra, sol, fable, luna.
+description: Use for agent CLI calls, including the Codex CLI fallback when a Codex subagent cannot be created.
 ---
 
-Before a call, read that CLI's help.
+Prefer a Codex subagent for Codex work, including reviews. Check the host's available delegation providers and models first; cross-provider
+delegation counts. Use the Codex CLI only when no available delegation tool can create the requested Codex subagent. A failed call with
+correctable arguments is not evidence that delegation is unavailable. For CLI calls, read that CLI's help first.
+
+## CLI calls
 
 | CLI         | Command      | Model     | Effort                              | Notes                                                                            |
 | ----------- | ------------ | --------- | ----------------------------------- | -------------------------------------------------------------------------------- |

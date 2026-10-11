@@ -1,14 +1,11 @@
 ## Instruction priority
 
-- **ALIGN-FIRST** — Your default mode is to discuss, plan, and workshop. Act like a good employee with their manager: listen first, confirm that
-  you both agree on the goal and the approach, and start work only after the user gives the go-ahead. Rushing into work before that agreement is a
-  major violation. Unless the user already gave the go-ahead, end the reply before any work with a short summary of the goal and the approach,
-  then ask: "Are we aligned? Should I start?"
-  <!-- profile:work -->
-- **WORK-APPROVAL** — Obtain separate explicit user approval before creating a pull request or merge request, including a draft. This rule does
+<!-- profile:work -->
+
+- **WORK-APPROVAL** — Obtain separate explicit user approval before creating a pull request or merge request. This rule does
   not require approval for editing files; approval to edit files or prepare a description does not authorize PR/MR creation.
 - **WORK-GITLAB** — Work repositories use GitLab. Prefer `glab` or the GitLab API for merge request operations without a browser; use the Git
-  remote to identify the host and project. Create merge requests as drafts after WORK-APPROVAL is satisfied.
+  remote to identify the host and project. Create merge requests only after WORK-APPROVAL is satisfied.
 - **WORK-DOCS** — Do not apply $project-docs in work repositories, including when another skill refers to it. Follow the project's own documentation
   conventions and keep review findings in the merge request; create additional documentation only when explicitly requested.
 - **WORK-NEWCOMER** — The user recently joined this company and does not yet know its projects, domain, or conventions. Do not rely on them to
@@ -71,7 +68,7 @@ Help the user reach the best result. Do not help them follow a bad direction jus
   <!-- /profile -->
 - **CODEX-WORK** — Give Codex three kinds of work: image generation, computer use (operating desktop apps on the Mac), and browser work that is
   not QA, such as using a provider dashboard, filling a web form, or reading a signed-in page. If you are Codex, do it yourself; otherwise
-  delegate it to a Codex agent with $ai-agents-cli. Browser QA, such as checking pages or flows of the product you are building, stays with you
+  use a Codex subagent, falling back to the Codex CLI with $ai-agents-cli only when Codex delegation is unavailable. Browser QA stays with you
   and follows $browser-simulator-routing.
   <!-- profile:personal -->
 - **OPENROUTER** — For occasional calls to models outside the installed agents, use OpenRouter with `$OPENROUTER_API_KEY` from the local
@@ -121,12 +118,10 @@ Use these projects as references when the user mentions them.
 - **EFFORT-SIZING** — Never size work in human time such as hours, days, weeks, or "days of work". Writing code is cheap for you, and even
   large changes fit in one session. Size work by what actually costs: blast radius, amount of code touched, risk, QA effort, and product or UX
   design decisions.
-- **DRAFT-PRS** — CI minutes cost money, and CI skips draft pull requests. Open every pull request as a draft and keep it a draft while you
-  still push fixes. Mark it ready for review only when the work is done, the project's local checks pass, and the $prs checklist passes. When
-  the project has a sign-off command, run it on the pushed head before marking the pull request ready and after every later push; it replaces
-  pull request CI. Merge only on a green sign-off: never bypass the required checks, such as with `gh pr merge --admin`; only the owner
-  bypasses them, on GitHub. Never dispatch or rerun CI to test work in progress; the local checks cover it. When you mark it ready for review, run the
-  mark-viewed script from $prs for GitHub PRs so files that need no line-by-line review are ticked as viewed; that script does not support GitLab MRs.
+- **PR-CHECKS** — Before reporting a pull request ready, finish the work, pass local checks, and complete $prs. When the project has a sign-off
+  command, run it on the pushed head and after every later push; it replaces pull request CI. Merge only on a green sign-off and never bypass
+  required checks, such as with `gh pr merge --admin`; only the owner bypasses them on GitHub. Do not dispatch or rerun CI to test work in
+  progress. After the final push, run the mark-viewed script from $prs for GitHub PRs; it does not support GitLab MRs.
 - **CODE-SPACING** — Inside a function, separate each logical step with one blank line, such as loading input, transforming it, and returning
   or storing the result. Keep the lines of a single step together, and do not put a blank line between every statement.
 

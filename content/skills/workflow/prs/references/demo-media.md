@@ -14,5 +14,18 @@ branch. Choose the editing tools yourself.
 
 Include media only when it shows something a reviewer needs, such as a UI change, a visual bug, or output that is hard to read as text. Put
 every media file on one demo page built with $html-artifacts: one labeled block per changed surface, such as web or mobile, light or dark, and
-RTL, with before and after side by side and each video or screenshot under its caption. Under 🎬 Demo, write a single link to the published URL
-that names what it covers. Never upload media to GitHub, and never deliver a local path, a placeholder, or a request for the user to upload.
+RTL, with before and after side by side and each video or screenshot under its caption. For chat review, follow the parent skill's inline
+preview preference. Never upload media to GitHub or ask the user to upload it.
+
+<!-- profile:personal -->
+
+A demo linked from a PR needs a shareable URL: publish it as a separate artifact through $html-artifacts. Under 🎬 Demo, link the URL with a
+label naming what it covers.
+
+<!-- /profile -->
+<!-- profile:work -->
+
+Keep demo artifacts local under $html-artifacts. Link the local file in the reply. In the MR, use an existing reviewer-accessible demo link
+when available; otherwise state that a shareable demo is unavailable.
+
+<!-- /profile -->

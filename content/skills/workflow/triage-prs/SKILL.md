@@ -29,10 +29,10 @@ Run when the user asks to babysit the PRs or keep them mergeable, after triage. 
    - **Behind its parent:** merge the parent branch in.
    - **Parent squash-merged:** rebase the child onto the default branch with `git rebase --onto` and push with `--force-with-lease`.
    - **Failing CI:** fix lint, type, and test failures caused by the default branch moving or by the merge itself.
-   - **Drafts:** fix conflicts only; CI skips drafts, and a draft stays a draft.
+   - **Drafts:** respect an existing draft's status; do not mark it ready unless the user requests it and the project's checks pass.
 2. Run the project's local checks before every push.
-3. Stop on a PR and report it when the fix needs a logic decision, changes behavior, or answers review feedback; hand it to $help-me-land-this-pr
-   if the user wants it landed. Skip any PR branch another agent session is working on, and report it.
+3. Stop on a PR and report it when the fix needs a logic decision, changes behavior, or answers review feedback. Use $code-review and $prs
+   for an authorized follow-up. Coordinate with another agent only for conflicting work in the same checkout or shared resources.
 4. Watch every open PR with the harness's pull request watcher, or rerun this section on a schedule where there is none. When a PR merges, CI
    fails, or a branch starts conflicting, repeat from step 1.
 5. Stop when every PR is mergeable, merged, closed, or waiting on the user, and report the table from triage with what changed.

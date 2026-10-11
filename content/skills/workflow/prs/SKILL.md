@@ -3,82 +3,59 @@ name: prs
 description: Use when preparing, describing, or marking a pull request ready for review.
 ---
 
-A pull request stays a draft until the [checklist](#checklist) passes. Deliver the title and description in the reply and save them to a temporary
-file; do not create the pull request or edit its description. Besides checklist fixes on the branch, the only action on the pull request itself
-is [marking files viewed](references/viewed-files.md) for GitHub PRs only.
-
 <!-- profile:work -->
 
-On the work laptop, follow WORK-GITLAB. WORK-APPROVAL requires user approval only to create a PR/MR, including drafts, not to edit files or fix
-checklist findings. Codex review approval does not authorize PR/MR creation.
+Follow WORK-GITLAB and WORK-APPROVAL. User approval is required to create a PR/MR, not to edit files or fix checklist findings. Codex review
+approval does not authorize PR/MR creation.
 
 <!-- /profile -->
 
 ## Checklist
 
-1. **Simplify:** run $simplify on the branch diff, then check the diff against each skill its files call for: $laravel for PHP, $react for React,
-   $test-writing for tests, $translation for user-facing text, and $ux-ui for UI changes.
-2. **Docs:** fix every doc the branch made wrong, and record its decisions and follow-ups, through $project-docs.
-3. **Codex approval:** only for a medium or large pull request ($triage-prs tiers: 300 or more app-code lines, a migration counting 300) or a
-   risky one: auth, payments, privacy, deleted data, or a decision under Needs you. Run GPT Sol via $ai-agents-cli in the background
-   during Docs: `codex exec -s read-only -m gpt-6.1-sol -c model_reasoning_effort=high -o <file> "<prompt>"`. The prompt names the base branch
-   and asks to mark each finding blocking (bug, security, data loss, flake, false green, broken contract) or follow-up, or `APPROVED`. Fix
-   blockers, rerun local checks, and get one medium-effort recheck. Fix small follow-ups on the branch; batch the rest into one later pull
-   request or $project-docs. Bring the user what still blocks.
+1. **Simplify:** run $simplify on the diff, then check applicable skills: $laravel for PHP, $react for React, $verification for tests,
+   $translation for user-facing text, and $ux-ui for UI changes.
+2. **Docs:** fix docs made wrong by the change and record its decisions and follow-ups through $project-docs.
+3. **Codex approval:** for medium or large PRs ($triage-prs tiers: 300 or more app-code lines, a migration counting 300) or risky changes
+   involving auth, payments, privacy, deleted data, or a decision under Needs you, get a {{models.codex.review.displayName}} (`{{models.codex.review.id}}`) review while doing Docs. Prefer a Codex
+   subagent; use the Codex CLI through $ai-agents-cli only when Codex delegation is unavailable. Request high reasoning effort for the
+   first review. Name the base branch and ask for blocking findings (bugs, security, data loss, flakes, false greens, broken contracts),
+   follow-ups, or `APPROVED`. Fix blockers, rerun local checks, and obtain one medium-effort recheck. Fix small follow-ups; batch the rest
+   into a later PR or $project-docs. Bring the user anything that still blocks.
+4. After the final push to an existing GitHub PR, run [marking files viewed](references/viewed-files.md).
 
-Report the results in one line: `✅ $simplify, $laravel, docs · Sol approved` or `· Sol skipped: small, low risk`.
+Report results in one line, such as `✅ Simplified, framework checks, docs · {{models.codex.review.shortName}} approved` or `· {{models.codex.review.shortName}} skipped: small, low risk`.
 
 ## Sections
 
-<!-- profile:work -->
+Start with **What changes for users**. Explain who notices, what changes before and after, and why it matters, using the product's glossary
+terms. Keep internal file, class, and function names out. Open with one concrete example a user would recognize.
 
-Include only these two sections, in this order:
-
-1. **What changes for users:** two to four sentences explaining what users experience before and after, and why it matters. Use the product's
-   words, without file, class, or function names.
-2. **Demo:** link an edited demo page showing the change; see [Demo media](references/demo-media.md). If a demo is unavailable, state that plainly.
-
-Report checklist results, review details, risks, and approval questions in the reply, outside the PR description.
-
-<!-- /profile -->
-
-<!-- profile:personal -->
-
-Write them in this order. Omit a section that has nothing to say.
-
-1. **Description:** two to four sentences on what the change does and why, from the product side: who notices, and what they can now do or no
-   longer hit. No file, class, or function names, and no terms that exist only in code, such as "credit", "receipt", or "outcome"; use the
-   product's glossary words. Open with one concrete before-and-after a user would recognize, such as "You finish a 30-minute session on 'Read
-   30 minutes'…".
-2. **Needs you / risks:** at most three one-line bullets, only for what the reviewer must act on or approve:
-   - A link to the change's file in `docs/release/` for steps a deploy does not perform, never a copy of them. When the branch does not record
-     a needed step there, record it with $project-docs first.
-   - Each decision costly to reverse once released, such as schema, API contracts, stored enum values, environment variables, or provider
-     choices, as a checkbox with the one fact needed to approve it.
-   - A real risk to watch after merge.
-3. **Demo:** required when the UI changes. Link an edited demo page, never a raw recording; see [Demo media](references/demo-media.md).
-4. **Review size:** a table of changed lines by kind (app code, tests, migrations, generated and lock files, docs, assets). Split app code into
-   backend, frontend, and mobile rows; in a monorepo, give each changed app or package its own row instead and name its layer. Then list the app
-   files in review order with their line counts, grouped the same way. Count with `git diff --numstat <base>...HEAD`.
-5. **Performance:** only when the pull request targets performance. Before and after numbers from the same method and data, and every trade-off,
-   such as memory, staleness, or complexity.
-6. **Checklist:** the [checklist](#checklist) results.
-
-<!-- /profile -->
-
-**Title:** the best-fit handoff result label, unbolded, then what the user notices: `[✨ FEAT] Rate finished sessions`.
-
-## Emojis
+Give each idea room: use short paragraphs separated by blank lines, or a short list when there are distinct changes. Do not compress several
+behaviors into one dense paragraph. Scale the detail to the change.
 
 <!-- profile:work -->
 
-Use `✨ What changes for users` and `🎬 Demo` as the section headings.
+Include only these two sections, in order:
+
+1. **What changes for users:** the behavior and value described above.
+2. **Demo:** link an edited demo showing the change; see [demo media](references/demo-media.md). State plainly when a demo is unavailable.
+
+Keep checklist results, review details, risks, and approval questions in the reply, outside the PR description.
 
 <!-- /profile -->
-
 <!-- profile:personal -->
 
-Start each section heading with an emoji, such as 📝 Description, 🙋 Needs you / risks, 🎬 Demo, 📏 Review size, ⚡ Performance, and ✅
-Checklist. Mark items too: 🚀 after-merge steps, 🔒 decisions hard to reverse, ⚠️ risks, and 🖥️ 🌐 📱 🧪 backend, frontend, mobile, and test rows.
+Write these sections in order; omit any with nothing to say:
+
+1. **What changes for users:** the behavior and value described above.
+2. **Needs you / risks:** at most three one-line bullets for reviewer action: link release steps recorded through $project-docs in
+   `docs/release/`; show costly-to-reverse decisions as checkboxes with the fact that makes reversal expensive; name real risks to watch.
+3. **Demo:** required for UI changes; link an edited demo, following [demo media](references/demo-media.md).
+4. **Performance:** only for performance work. Give before and after numbers from the same method and data, with trade-offs.
+5. **Checklist:** the results above.
 
 <!-- /profile -->
+
+**Title:** the best-fit handoff label, unbolded, then what the user notices: `[✨ FEAT] Rate finished sessions`.
+
+Use `✨ What changes for users` and `🎬 Demo` as headings. For other sections, use 🙋 Needs you / risks, ⚡ Performance, and ✅ Checklist.

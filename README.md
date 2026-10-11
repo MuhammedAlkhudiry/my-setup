@@ -25,6 +25,13 @@ drift.
 
 Make durable changes in the source directories, then use `mise run install` to render and sync the installed state.
 
+## Managed Models
+
+Edit [config/models.ts](config/models.ts) to change managed model IDs, display names, or Claude Pool aliases, then run `mise run install`.
+TypeScript imports `MODELS`; local skill and base-rule Markdown uses references such as `{{models.codex.review.id}}` or
+`{{models.codex.review.displayName}}`. Installation resolves these into plain text. Lint rejects scattered model literals and unknown references;
+historical test fixtures are exempt. T3's per-device model selections stay in T3.
+
 ## Device Profiles
 
 Each machine installs one profile from `config/devices.ts`, chosen in the untracked `~/.config/my-setup/device.json`. The installer stops if the file

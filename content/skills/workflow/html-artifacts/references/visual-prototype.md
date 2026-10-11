@@ -10,4 +10,4 @@
 - Mark what is new with one to three short callouts on the mockup. Put the item's title and one-line detail beside it.
 - Put each item in a `card` with ID, title, and chips in its header. Show before and after with `pair`; use `shot-empty` for a missing capture.
 - For more than a few items, give each subagent a range of items, one fragment file per item, then assemble one page.
-- Check the `html-artifact check` screenshots for clipping, overlap, and wrong text direction before handing the page over.
+- Check the host's inline preview, or the `html-artifact check` screenshots for a separate artifact, for clipping, overlap, and wrong text direction.

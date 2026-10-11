@@ -22,7 +22,7 @@ give it one home, and delete it when it stops being true.
 
 - Only `AGENTS.md`, `CLAUDE.md`, and READMEs stay at the repository root. `AGENTS.md` links each runbook with its trigger, such as "read
   before production access".
-- $verification owns `docs/runbooks/checklist.md`; $manage-ad-accounts owns `docs/ads.md`.
+- $verification owns `docs/runbooks/checklist.md`; $service-access owns `docs/ads.md`.
 - Formats: [decisions](references/decisions.md), [tech debt](references/tech-debt.md), [release](references/release.md),
   [product setup](references/product-setup.md), [plans](references/plans.md).
 

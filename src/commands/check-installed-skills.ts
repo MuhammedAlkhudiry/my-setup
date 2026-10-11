@@ -6,7 +6,7 @@ import { join, relative } from "node:path";
 
 import { OPTIONAL_EXTERNAL_SKILL_NAMES, REMOTE_SKILL_SOURCES } from "../../config/skills";
 import { readDeviceProfile, selectRemoteSkillSources } from "../lib/device";
-import { renderProfileBlocks } from "../lib/profile-blocks";
+import { renderManagedMarkdown } from "../lib/models";
 import { discoverLocalSkills } from "../lib/skills";
 
 const HOME = homedir();
@@ -77,9 +77,9 @@ function compareSkillDirs(sourceDir: string, installedDir: string): string[] {
       continue;
     }
 
-    // Markdown is installed with this profile's blocks rendered, so compare against that output.
+    // Compare against the same profile and model rendering used by installation.
     const expected = file.endsWith(".md")
-      ? Buffer.from(renderProfileBlocks(readFileSync(sourcePath, "utf-8"), PROFILE.name, file))
+      ? Buffer.from(renderManagedMarkdown(readFileSync(sourcePath, "utf-8"), PROFILE.name, file))
       : readFileSync(sourcePath);
 
     if (!expected.equals(readFileSync(installedPath))) {

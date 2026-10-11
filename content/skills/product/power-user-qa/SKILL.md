@@ -1,7 +1,9 @@
 ---
 name: power-user-qa
-description: Use to exercise a running product as a demanding real user and find bugs and UX issues; for design review use $ux-ui.
+description: Use only when the user asks for power-user QA or a thorough exercise of a running product to find bugs and UX issues.
 ---
+
+Do not invoke this skill for routine implementation checks or design review; use $verification or $ux-ui for those.
 
 ## Workflow
 
@@ -12,7 +14,7 @@ description: Use to exercise a running product as a demanding real user and find
 3. Use every feature in scope heavily through complete journeys, then try to break it as a real user could: repetition, interruption, abandoned flows,
    limits, bad input, account switching, poor network, locale, and accessibility. Test what a meaningful share of users actually do; never spend
    effort on rare setups, such as the largest text size or extreme combined settings. For a large scope, split areas across subagents that share no
-   devices or accounts. For UI journeys, include [screen and text coverage](references/screen-and-text-coverage.md).
+   devices or accounts. For UI journeys, use the screen and text coverage reference in $verification.
 4. After each meaningful action, check stored data, side effects, and logs against the intended result, even when the interface looks correct. Look
    for failed requests that the interface hides.
 5. Record UX issues and bugs: broken behavior, controls that do nothing, confusing copy, dead ends, missing feedback, missing expected features, and

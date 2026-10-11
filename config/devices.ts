@@ -74,8 +74,6 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
     excludedSkills: [
       "project-docs",
       "personal-knowledge",
-      "manage-ad-accounts",
-      "promo-video",
       "service-access",
       "cli-tools",
       "mobile-app-infra",

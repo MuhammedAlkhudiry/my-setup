@@ -42,7 +42,7 @@ a green verification emoji. Identify any checks that could not be completed.
 - Separate distinct areas with sections or containers where useful, without excessive nesting or visual boundaries.
 - Refine visual appeal with purposeful icons, restrained color, and subtle, smooth microanimations. Keep these touches proportionate.
 - Check every UI element against the design system and correct inconsistencies.
-- Use the screen and text coverage in $power-user-qa to check responsive layouts and accessibility text sizing.
+- Check layout and text sizing with $verification.
 - Check loading, error, and recovery states. Make progress clear and provide a useful retry or recovery action when a flow fails.
 - Keep button and label text readable; allow wrapping or layout changes at larger text sizes.
 

@@ -1,7 +1,4 @@
----
-name: test-writing
-description: Use before adding, editing, or deleting any test file, before fixing a bug, and when judging or pruning tests; to rate the whole setup use $verification-report.
----
+# Tests
 
 ## What earns a test
 
@@ -41,7 +38,7 @@ Do not write these, and remove them when found:
 - Keep the test diff in proportion to the fix. When added test lines exceed about one and a half times the changed production lines, trim them or
   state the reason in the pull request.
 - Use the regression test itself to show the fix: run it once without the fix to see it fail. Do not add tests only to demonstrate a change.
-- When delegating work that may add tests, tell the agent to load $test-writing first.
+- When delegating work that may add tests, tell the agent to load $verification first.
 
 ## Test speed
 

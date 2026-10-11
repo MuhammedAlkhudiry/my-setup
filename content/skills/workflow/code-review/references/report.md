@@ -5,8 +5,8 @@
 When there are findings, deliver a minimal page built with $html-artifacts; otherwise reply normally.
 
 Also save every review as Markdown in one place: `~/Documents/code-reviews/<project>/<YYYY-MM-DD>-<topic>.md`. Include the reviewed scope, the
-verification limits, each area's result, and every finding in the copied finding format below, plus its evidence. Give the user the file's path
-beside the page link.
+verification limits, each area's result, and every finding in the copied finding format below, plus its evidence. Link the file beside the
+inline preview or separate page link.
 
 - State the reviewed scope and verification limits. Group findings by review area, order them by severity, and mark areas with no findings `Clear`.
   Distinguish unreviewed or inapplicable areas from those checked and clear.

@@ -19,6 +19,7 @@ import { execaSync } from "execa";
 
 import { ACTIVE_PROJECTS, SHARED_VERIFICATION } from "../../config/active-projects";
 import { CLAUDE_POOL } from "../../config/claude-pool";
+import { MODELS } from "../../config/models";
 import { mergeRtkHooks } from "../../config/rtk";
 import { MAC_WATCHER, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
 import { claudePoolPaths, findLegacyClaudeFiles } from "../lib/claude-pool";
@@ -190,8 +191,11 @@ if (existsSync(pool.config)) {
     !config.includes("allow-remote: false") ||
     !config.includes("disable-control-panel: false") ||
     !config.includes("session-affinity-subagents: false") ||
-    !config.includes('alias: "claude-haiku-4-5"') ||
-    !config.includes('alias: "claude-opus-4-5"')
+    Object.values(MODELS.claudePool).some(
+      ({ id, alias }) =>
+        !config.includes(`name: ${JSON.stringify(id)}`) ||
+        !config.includes(`alias: ${JSON.stringify(alias)}`),
+    )
   ) {
     findings.push({
       level: "required",
@@ -416,10 +420,16 @@ try {
   if (existsSync(watcher.storagePrune)) {
     const prune = parsePruneReport(JSON.parse(readFileSync(watcher.storagePrune, "utf8")));
     for (const problem of [...prune.skipped, ...prune.errors]) {
-      findings.push({ level: "optional", label: "Storage prune", detail: `${problem} (run ${prune.at})` });
+      findings.push({
+        level: "optional",
+        label: "Storage prune",
+        detail: `${problem} (run ${prune.at})`,
+      });
     }
     // Idle worktrees the rules cannot remove safely need a person to decide.
-    for (const kept of prune.worktreesKept.filter((worktree) => worktree.idleDays >= MAC_WATCHER.storage.worktreeIdleDays)) {
+    for (const kept of prune.worktreesKept.filter(
+      (worktree) => worktree.idleDays >= MAC_WATCHER.storage.worktreeIdleDays,
+    )) {
       findings.push({
         level: "optional",
         label: "Stale worktree",
@@ -441,11 +451,15 @@ if (PROFILE.activeProjects) {
 
     return result.exitCode === 0 ? result.stdout : null;
   };
-  const projects = ACTIVE_PROJECTS.filter((project) => existsSync(join(project.canonicalRoot, ".git")));
+  const projects = ACTIVE_PROJECTS.filter((project) =>
+    existsSync(join(project.canonicalRoot, ".git")),
+  );
   const [reference, ...others] = projects;
 
   for (const project of reference ? others : []) {
-    const drift = SHARED_VERIFICATION.files.filter((path) => show(project, path) !== show(reference, path));
+    const drift = SHARED_VERIFICATION.files.filter(
+      (path) => show(project, path) !== show(reference, path),
+    );
     const descriptions = (target: typeof project) => {
       const manifest = Bun.TOML.parse(show(target, "mise.toml") ?? "") as {
         tasks?: Record<string, { description?: string }>;
@@ -456,7 +470,11 @@ if (PROFILE.activeProjects) {
     };
     const theirs = descriptions(project);
     const ours = descriptions(reference);
-    drift.push(...SHARED_VERIFICATION.tasks.filter((task, index) => theirs[index] !== ours[index]).map((task) => `mise task ${task}`));
+    drift.push(
+      ...SHARED_VERIFICATION.tasks
+        .filter((task, index) => theirs[index] !== ours[index])
+        .map((task) => `mise task ${task}`),
+    );
 
     if (drift.length > 0) {
       findings.push({

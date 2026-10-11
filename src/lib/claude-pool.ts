@@ -18,6 +18,7 @@ import { dirname, join } from "node:path";
 import { execa } from "execa";
 
 import { CLAUDE_POOL } from "../../config/claude-pool";
+import { MODELS } from "../../config/models";
 
 export function claudePoolPaths(home: string) {
   const proxyDir = join(home, ".cli-proxy-api");
@@ -160,12 +161,11 @@ export function renderClaudePoolConfig(
     "    usage-statistics-enabled: true",
     "oauth-model-alias:",
     "  claude:",
-    '    - name: "claude-haiku-4-5-20251001"',
-    '      alias: "claude-haiku-4-5"',
-    "      fork: true",
-    '    - name: "claude-opus-4-5-20251101"',
-    '      alias: "claude-opus-4-5"',
-    "      fork: true",
+    ...Object.values(MODELS.claudePool).flatMap(({ id, alias }) => [
+      `    - name: ${JSON.stringify(id)}`,
+      `      alias: ${JSON.stringify(alias)}`,
+      "      fork: true",
+    ]),
     "",
   ].join("\n");
 }
@@ -279,7 +279,9 @@ export async function ensureClaudePoolBinary(home: string): Promise<boolean> {
   const paths = claudePoolPaths(home);
   if (existsSync(paths.binary)) {
     const version = await execa(paths.binary, ["-h"], { reject: false });
-    if (`${version.stdout}\n${version.stderr}`.includes(`CLIProxyAPI Version: ${CLAUDE_POOL.version}`)) {
+    if (
+      `${version.stdout}\n${version.stderr}`.includes(`CLIProxyAPI Version: ${CLAUDE_POOL.version}`)
+    ) {
       return false;
     }
   }

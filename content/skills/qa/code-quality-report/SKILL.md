@@ -6,7 +6,7 @@ description: Use to rate the quality of an existing codebase — architecture, c
 ## Scope
 
 Assess the current state of the whole codebase, not a diff. Report only; do not edit code. Route fixes to $simplify or a normal task, dependency work
-to $dependency-upgrade, and lint, format, and test setup to $verification-report.
+to $dependency-upgrade, and lint, format, and test setup to $verification.
 
 ## Assessment and recommendations
 

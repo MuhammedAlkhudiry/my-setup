@@ -6,7 +6,7 @@ description: Use before any browser, simulator, or emulator automation to pick t
 ## Rules
 
 - If you are not Codex, use these browser tools for QA only, such as checking pages or flows of the product you are building. Delegate other
-  browser work, such as using a provider dashboard or filling a web form, to a Codex agent with $ai-agents-cli.
+  browser work to a Codex subagent; use the Codex CLI through $ai-agents-cli only when Codex delegation is unavailable.
 - Use the tool the user names. If it is unavailable, repair its setup when possible, then report the blocker. Do not substitute another tool.
 - Otherwise, use the first available tool in [Tools](#tools) that fits the task, and keep it unless the task changes.
 - Use a connector, API, or CLI instead when the task does not need the UI.
@@ -15,6 +15,8 @@ description: Use before any browser, simulator, or emulator automation to pick t
   data.
 - Run `playwright-cli` headless in a named session. Clean up after yourself: close every session you opened when the task is done.
 - Use the iOS simulator unless the work is Android-specific. Keep the device window visible; never run it headless.
+- Obtain explicit user approval before starting or using an Android emulator, including one already running. Android-specific work alone
+  does not authorize emulator use; an explicit request to use the emulator does. Approval remains valid for the authorized task.
 - Before signing in on a new simulator or emulator, set up local HTTPS trust with $mobile-app-infra.
 - Before starting long agent work on a simulator or emulator that is not slimmed, slim it with $mobile-app-infra.
 

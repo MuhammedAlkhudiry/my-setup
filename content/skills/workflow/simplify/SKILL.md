@@ -12,7 +12,7 @@ description: "Use to make completed work simpler: applies safe edits in scope an
    unless sharing or configuration is necessary.
 4. Recommend rather than apply changes that alter required behavior, expand scope, need a migration, introduce a meaningful trade-off, or cannot be
    verified. Consider both the implementation and the user experience.
-5. Use $laravel or $react for framework changes and $test-writing when changing tests. After approval, use $workshop for unresolved product decisions and $ux-ui for
+5. Use $laravel or $react for framework changes and $verification when changing tests. After approval, use $workshop for unresolved product decisions and $ux-ui for
    product or UX changes.
 
 ## Recommended, not applied

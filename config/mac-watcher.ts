@@ -1,3 +1,5 @@
+import { MODELS } from "./models";
+
 /**
  * Mac resource watcher managed by my-setup.
  *
@@ -20,7 +22,7 @@ export const MAC_WATCHER = {
   ],
   /** Used only by the manual `review` command. */
   codex: {
-    model: "gpt-6.1-sol",
+    model: MODELS.codex.review.id,
     reasoningEffort: "low",
     timeoutMs: 5 * 60 * 1000,
   },

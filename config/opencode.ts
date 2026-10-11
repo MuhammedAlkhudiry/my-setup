@@ -37,18 +37,18 @@ export function createOpencodeConfig(profile: DeviceProfile, homeDir: string): O
       model_cycle_favorite: "ctrl+a",
       model_cycle_favorite_reverse: "ctrl+shift+a",
     },
-    model: MODELS.smart,
-    small_model: MODELS.fast,
+    model: MODELS.opencode.smart,
+    small_model: MODELS.opencode.fast,
     permission: createOpencodePermission(profile, homeDir),
     agent: {
       plan: {
         disable: true,
       },
       explore: {
-        model: MODELS.fast,
+        model: MODELS.opencode.fast,
       },
       general: {
-        model: MODELS.smart,
+        model: MODELS.opencode.smart,
       },
     },
   };

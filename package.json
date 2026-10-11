@@ -10,7 +10,7 @@
     "watcher": "bun src/commands/mac-watcher.ts",
     "format": "bun node_modules/oxfmt/dist/cli.js src/cli.ts src/commands src/lib config '**/*.md' package.json tsconfig.json .oxfmtrc.json .oxlintrc.json",
     "format:check": "bun node_modules/oxfmt/dist/cli.js --check src/cli.ts src/commands src/lib config '**/*.md' package.json tsconfig.json .oxfmtrc.json .oxlintrc.json",
-    "lint": "bun node_modules/oxlint/dist/cli.js .",
+    "lint": "bun node_modules/oxlint/dist/cli.js . && bun src/commands/check-models.ts",
     "lint:fix": "bun node_modules/oxlint/dist/cli.js --fix .",
     "typecheck": "tsc --noEmit",
     "test": "bun test",

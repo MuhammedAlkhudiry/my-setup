@@ -6,9 +6,9 @@ carry comfortably, or when the user asks for it. Keep short plans in chat.
 
 ## Build
 
-1. Run `html-artifact new plan-review <topic>`; it builds `index.html` from [../assets/plan-review.html](../assets/plan-review.html).
-2. Replace only the JSON in `<script id="plan">`. The example in the template is the schema; keep every field name. Never edit the rest of the
-   template for one plan.
+1. For a separate artifact, run `html-artifact new plan-review <topic>` to build `index.html` from
+   [../assets/plan-review.html](../assets/plan-review.html). For an inline preview, adapt its layout into one self-contained page.
+2. The template's `<script id="plan">` example defines the schema; keep its field names. For a separate artifact, replace only that JSON.
 3. Give the plan an `id` that names it and its version, such as `plan-notif-prefs-v1`.
 
 ## Content
@@ -29,29 +29,17 @@ The page leads with what the owner must decide. Write for someone who will not r
 
 ## Hand over
 
-<!-- profile:personal -->
-
-Publish the folder with `share-html --writable`. Give the user the URL and tell them to say "see" when they are done.
-
-<!-- /profile -->
-<!-- profile:work -->
-
-Hand over the local file and tell the user to press Copy and paste the summary into chat when they are done.
-
-<!-- /profile -->
+Follow the parent skill's delivery choice: an inline preview for a small, self-contained plan when supported, otherwise a separate artifact.
+Use native feedback when available. For other previews or local files, tell the user to press Copy and paste the summary into chat.
 
 ## Apply feedback
 
-<!-- profile:personal -->
-
-When the user says "see", run `share-html feedback`, passing the URL or a name when several pages are open.
-
-<!-- /profile -->
+Read native feedback or the copied summary. For a published writable page, read "see" feedback as the parent skill describes.
 
 Act on the summary:
 
 - Apply each decision answer. Ask again in chat, briefly, for any decision marked NOT DECIDED.
 - Check each assumption marked wrong in the code, then fix every part of the plan that relied on it.
 - Apply every edit, removal, and addition; keep the IDs it names.
-- Publish the revised plan as a new page with the next version in its `id`. Keep existing IDs, give new items new IDs, mark every revised item with
+- Deliver the revised plan as a new version with the next version in its `id`. Keep existing IDs, give new items new IDs, mark every revised item with
   `"changed": true`, and say in chat what changed and why.

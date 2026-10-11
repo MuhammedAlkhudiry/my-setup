@@ -43,7 +43,7 @@ import { secureManagedCredentials } from "../lib/credentials";
 import { readDeviceProfile, selectRemoteSkillSources } from "../lib/device";
 import { installMacWatcher } from "../lib/mac-watcher";
 import { colors, compactOutput, print, printBox, printSeparator } from "../lib/print";
-import { renderProfileBlocks } from "../lib/profile-blocks";
+import { assertCentralizedModels, renderManagedMarkdown } from "../lib/models";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
 import { discoverLocalSkills, findUnknownSkillReferences } from "../lib/skills";
 import { installT3Settings, t3StateDir } from "../lib/t3-settings";
@@ -145,7 +145,7 @@ export function renderBaseRules(
     throw new Error(`Base rules are missing ${ACTIVE_PROJECTS_PLACEHOLDER}`);
   }
 
-  const rules = renderProfileBlocks(template, profile.name, "content/base-rules.md");
+  const rules = renderManagedMarkdown(template, profile.name, "content/base-rules.md");
   const activeProjects = (profile.activeProjects ? projects : [])
     .map(
       ({ name, remoteUrl, baseBranch, canonicalRoot }) =>
@@ -834,7 +834,7 @@ export async function syncManagedSkillsAsync(options: ManagedSkillSyncOptions): 
 
   for (const skill of skills) {
     await replaceDirectory(skill.dir, join(dest, skill.name), (content, sourcePath) =>
-      renderProfileBlocks(content, profile.name, relative(src, sourcePath)),
+      renderManagedMarkdown(content, profile.name, relative(src, sourcePath)),
     );
   }
 
@@ -927,6 +927,8 @@ async function installRemoteSkill(
 // =============================================================================
 
 export async function install(): Promise<DeviceProfile> {
+  assertCentralizedModels(ROOT_DIR);
+
   const profile = readDeviceProfile(HOME);
   const claude = claudePaths(profile);
   const rtk = await detectRtk(profile);

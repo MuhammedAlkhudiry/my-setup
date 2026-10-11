@@ -2,7 +2,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
 
 import { DEVICE_PROFILE_NAMES } from "../../config/devices";
-import { renderProfileBlocks } from "./profile-blocks";
+import { renderManagedMarkdown } from "./models";
 
 export interface LocalSkill {
   name: string;
@@ -295,7 +295,7 @@ function validateSkillSize(
 // Agents load one profile's rendering, so size a skill by its largest rendered variant.
 function largestProfileRendering(content: string, source: string): string {
   return DEVICE_PROFILE_NAMES.map((profile) =>
-    renderProfileBlocks(content, profile, source),
+    renderManagedMarkdown(content, profile, source),
   ).reduce((largest, rendered) => (rendered.length > largest.length ? rendered : largest));
 }
 

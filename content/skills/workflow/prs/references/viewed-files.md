@@ -8,5 +8,5 @@ files that need no line-by-line review, so the reviewer opens only what matters.
 - **Test files left for review:** deleted files, diffs that remove or change a test or assertion, and diffs that add a skip or focus marker. Only
   added or extended tests are ticked.
 
-The tick belongs to the account `gh` uses, and GitHub clears it when the file changes, so run the script again after every later push. In the 📏
-Review size table, add ✅ to each row the script ticked, and list the test files it left for review with its reason.
+The tick belongs to the account `gh` uses, and GitHub clears it when the file changes, so run the script again after every later push.
+Report the marked files and any test files left for review with their reasons in the task handoff.
