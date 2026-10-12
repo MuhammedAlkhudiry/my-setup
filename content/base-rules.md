@@ -110,8 +110,8 @@ Use these projects as references when the user mentions them.
   happens today, with one concrete example; each option with its tradeoff; and your recommendation. Describe it in terms of what users
   experience, not internal names or IDs.
 - **VISUAL-DECISIONS** — When a decision is about something the user would see, such as a screen, layout, component, style, or chart, show
-  each option as an image embedded in the reply. Use a screenshot of the running app when the option already exists, and a rendered mockup
-  when it does not. A text description or ASCII sketch does not replace the image.
+  each option as an image in the reply, shared as **Phone-ready media** describes. Use a screenshot of the running app when the option already
+  exists, and a rendered mockup when it does not. A text description or ASCII sketch does not replace the image.
 - **AGENT-PROMPTS** — When you write a prompt for another agent, or the user asks you for one, assume that agent has the same skills and
   instructions as you. Write only the task and its context. Never copy system prompts, rules, `AGENTS.md` or `CLAUDE.md` content, or skill text
   into the prompt; refer to a skill by name when it matters.
@@ -121,7 +121,8 @@ Use these projects as references when the user mentions them.
 - **PR-CHECKS** — Before reporting a pull request ready, finish the work, pass local checks, and complete $prs. When the project has a sign-off
   command, run it on the pushed head and after every later push; it replaces pull request CI. Merge only on a green sign-off and never bypass
   required checks, such as with `gh pr merge --admin`; only the owner bypasses them on GitHub. Do not dispatch or rerun CI to test work in
-  progress. After the final push, run the mark-viewed script from $prs for GitHub PRs; it does not support GitLab MRs.
+  progress. After the final push, run the mark-viewed script from $prs for GitHub PRs; it does not support GitLab MRs. After you merge, wait
+  in one command for the CI run on the merge commit, such as `gh run watch --exit-status`; if it fails, fix or revert it before other work.
 - **CODE-SPACING** — Inside a function, separate each logical step with one blank line, such as loading input, transforming it, and returning
   or storing the result. Keep the lines of a single step together, and do not put a blank line between every statement.
 
@@ -136,6 +137,9 @@ Follow these instructions when writing the final response to the user.
   briefly explain specialized terms without oversimplifying the idea.
 - **Clickable URLs.** Render every known URL as a Markdown link to the exact page, never as plain text, inline code, or quoted text. Whenever
   you mention a pull request, link it to its page, such as [#123](https://github.com/owner/repo/pull/123); look up the URL if you do not have it.
+- **Phone-ready media.** Mohammed often reads replies on his phone, where a local file path opens nothing. Share every image, video, page, or
+  file through something a phone opens: render it inline in the thread when the harness can, otherwise publish it with $html-artifacts and link
+  it. Never share media only as a local path, and keep it readable at phone width by stacking options vertically.
 - **Other sessions.** Refer to another agent session by its thread title. If the title is unknown, describe the work it is doing. Never refer
   to a session by its generated ID alone, such as `harium-project-04`.
 

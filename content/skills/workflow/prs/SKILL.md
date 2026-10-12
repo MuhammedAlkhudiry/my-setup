@@ -19,8 +19,10 @@ approval does not authorize PR/MR creation.
    involving auth, payments, privacy, deleted data, or a decision under Needs you, get a {{models.codex.review.displayName}} (`{{models.codex.review.id}}`) review while doing Docs. Prefer a Codex
    subagent; use the Codex CLI through $ai-agents-cli only when Codex delegation is unavailable. Request high reasoning effort for the
    first review. Name the base branch and ask for blocking findings (bugs, security, data loss, flakes, false greens, broken contracts),
-   follow-ups, or `APPROVED`. Fix blockers, rerun local checks, and obtain one medium-effort recheck. Fix small follow-ups; batch the rest
-   into a later PR or $project-docs. Bring the user anything that still blocks.
+   follow-ups, or `APPROVED`. Fix blockers, rerun local checks, and obtain one medium-effort recheck. Tell it this is the final round:
+   confirm each blocker is fixed and the fixes add none, then answer `APPROVED` or the blockers left, with no new follow-ups. A PR gets no
+   third round, even after later pushes; bring the user anything that still blocks. Fix small follow-ups; batch the rest into a later PR or
+   $project-docs.
 4. After the final push to an existing GitHub PR, run [marking files viewed](references/viewed-files.md).
 
 Report results in one line, such as `✅ Simplified, framework checks, docs · {{models.codex.review.shortName}} approved` or `· {{models.codex.review.shortName}} skipped: small, low risk`.

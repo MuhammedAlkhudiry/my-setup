@@ -400,8 +400,14 @@ async function prune(dryRun: boolean, now = new Date()): Promise<void> {
   for (const entry of [...report.deleted, ...report.worktreesRemoved]) {
     console.log(`  remove ${(entry.bytes / 1024 ** 3).toFixed(2)}G ${shortCommand(entry.path)}`);
   }
+  for (const entry of report.nativeBuildsCleared) {
+    console.log(`  clear native builds ${(entry.bytes / 1024 ** 3).toFixed(2)}G ${shortCommand(entry.path)}`);
+  }
   for (const database of report.testDatabasesDropped) {
     console.log(`  drop test database ${database.name} (${(database.bytes / 1024 ** 2).toFixed(0)}M)`);
+  }
+  for (const device of report.devicesDeleted) {
+    console.log(`  delete ${device.kind} ${device.name} (${(device.bytes / 1024 ** 3).toFixed(1)}G)`);
   }
   for (const kept of report.worktreesKept) {
     console.log(`  keep worktree ${shortCommand(kept.path)} (${kept.reason}, idle ${kept.idleDays}d)`);
@@ -422,13 +428,13 @@ async function startedAt(pid: number): Promise<string | undefined> {
   return result.exitCode === 0 ? result.stdout.trim().replace(/\s+/g, " ") : undefined;
 }
 
-/** Stops leftover agent tooling that stayed hot; rechecks identity before each signal so a reused pid is never hit. */
+/** Stops leftover agent tooling that stayed hot or idle; rechecks identity before each signal so a reused pid is never hit. */
 async function guardOnce(): Promise<void> {
   const uid = process.getuid?.() ?? 0;
   const now = Date.now();
   const { next, stop } = stepGuard(readGuardState(), await listProcesses(), uid, now);
 
-  for (const { row, percent, hotMinutes } of stop) {
+  for (const { row, reason, percent, minutes } of stop) {
     if ((await startedAt(row.pid)) !== row.started) continue;
     process.kill(row.pid, "SIGTERM");
     await Bun.sleep(5_000);
@@ -436,7 +442,7 @@ async function guardOnce(): Promise<void> {
     delete next.tracked[String(row.pid)];
     await appendFile(
       paths.guardLog,
-      `[${new Date(now).toISOString()}] stopped pid ${row.pid} -- leftover at ${percent}% CPU for ${hotMinutes} min, ${row.rssMib} MiB: ${shortCommand(row.command)}\n`,
+      `[${new Date(now).toISOString()}] stopped pid ${row.pid} -- leftover ${reason === "hot" ? `at ${percent}% CPU` : "idle"} for ${minutes} min, ${row.rssMib} MiB: ${shortCommand(row.command)}\n`,
     );
   }
 

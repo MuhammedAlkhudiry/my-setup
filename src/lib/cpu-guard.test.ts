@@ -28,7 +28,8 @@ function row(overrides: Partial<ProcessRow>): ProcessRow {
   };
 }
 
-const options = { hotPercent: 80, stopAfterMinutes: 10 };
+const options = { hotPercent: 80, stopAfterMinutes: 10, idlePercent: 1, stopIdleAfterHours: 24 };
+const HOUR = 3_600_000;
 const MINUTE = 60_000;
 
 test("ps times parse into seconds", () => {
@@ -59,6 +60,11 @@ test("only this user's leftover agent tooling is a guard target", () => {
   expect(isOrphanedAgentTooling(row({ command: "bash /Users/x/Herd/bin/herd php artisan horizon" }), UID)).toBe(true);
   expect(isOrphanedAgentTooling(row({ command: "php artisan queue:work redis" }), UID)).toBe(true);
   expect(isOrphanedAgentTooling(row({ command: "php artisan migrate" }), UID)).toBe(false);
+  expect(isOrphanedAgentTooling(row({ command: "tail -n0 -F /tmp/e2e/run.log" }), UID)).toBe(true);
+  expect(isOrphanedAgentTooling(row({ command: "/usr/bin/tail -fn100 app.log" }), UID)).toBe(true);
+  expect(isOrphanedAgentTooling(row({ command: "ugrep -G --ignore-files --hidden -I error" }), UID)).toBe(true);
+  expect(isOrphanedAgentTooling(row({ command: "/opt/homebrew/bin/idb_companion --udid C235 --only simulator" }), UID)).toBe(true);
+  expect(isOrphanedAgentTooling(row({ command: "tail -n 20 /tmp/e2e/run.log" }), UID)).toBe(false);
   expect(isOrphanedAgentTooling(row({ ppid: 4242 }), UID)).toBe(false);
   expect(isOrphanedAgentTooling(row({ uid: 0 }), UID)).toBe(false);
   expect(isOrphanedAgentTooling(row({ command: "/path/emulator/qemu-system-aarch64 -avd vite" }), UID)).toBe(false);
@@ -79,7 +85,23 @@ test("a leftover is stopped only after staying hot for the whole window", () => 
   cpuSeconds += 55;
   const step = stepGuard(state, [row({ cpuSeconds })], UID, 10 * MINUTE, options);
   expect(step.stop).toHaveLength(1);
-  expect(step.stop[0]).toMatchObject({ percent: 92, hotMinutes: 10 });
+  expect(step.stop[0]).toMatchObject({ reason: "hot", percent: 92, minutes: 10 });
+});
+
+test("a leftover is stopped once idle for the whole window, and any work restarts it", () => {
+  const idle = (cpuSeconds: number, sampledAt: number, idleSince?: number) => ({
+    tracked: { "100": { started: STARTED, cpuSeconds, sampledAt, idleSince } },
+  });
+
+  const almost = stepGuard(idle(5, 23 * HOUR, 0), [row({ cpuSeconds: 5 })], UID, 23 * HOUR + MINUTE, options);
+  expect(almost.stop).toEqual([]);
+
+  const day = stepGuard(idle(5, 24 * HOUR - MINUTE, 0), [row({ cpuSeconds: 5.1 })], UID, 24 * HOUR, options);
+  expect(day.stop[0]).toMatchObject({ reason: "idle", percent: 0, minutes: 24 * 60 });
+
+  const used = stepGuard(idle(5, 24 * HOUR - MINUTE, 0), [row({ cpuSeconds: 20 })], UID, 24 * HOUR, options);
+  expect(used.stop).toEqual([]);
+  expect(used.next.tracked["100"].idleSince).toBeUndefined();
 });
 
 test("a cool minute or a reused pid restarts the window", () => {

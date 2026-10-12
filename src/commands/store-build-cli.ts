@@ -11,10 +11,17 @@ import { cac } from "cac";
 
 import {
   ARCHIVE_EXTENSION,
+  EAS_IOS_PROFILES_QUERY,
+  type EasIosProfilesResponse,
+  type IntrospectedConfig,
   MIN_FREE_GB,
   type Platform,
+  appGroupGaps,
+  appGroupRepair,
+  easProfiles,
   missingSecrets,
   parseEasVariables,
+  signingTargets,
   storeBuildEnv,
   xcodePinBlocksLocal,
 } from "../lib/store-build";
@@ -24,12 +31,17 @@ const EXTERNAL_DISK = "/Volumes/DevSSD";
 interface BuildProfile {
   extends?: string;
   environment?: string;
-  ios?: { image?: string };
+  credentialsSource?: string;
+  ios?: { image?: string; credentialsSource?: string };
 }
 
 interface EasJson {
   build?: Record<string, BuildProfile>;
   submit?: Record<string, unknown>;
+}
+
+interface ExpoState {
+  auth?: { sessionSecret?: string };
 }
 
 interface Options {
@@ -52,8 +64,8 @@ function run(command: string[], env: NodeJS.ProcessEnv, dryRun = false): boolean
   return dryRun || spawnSync(command[0], command.slice(1), { env, stdio: "inherit" }).status === 0;
 }
 
-function capture(command: string[]): { ok: boolean; stdout: string; stderr: string } {
-  const result = spawnSync(command[0], command.slice(1), { encoding: "utf8" });
+function capture(command: string[], env = process.env): { ok: boolean; stdout: string; stderr: string } {
+  const result = spawnSync(command[0], command.slice(1), { encoding: "utf8", env });
 
   return { ok: result.status === 0, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
@@ -111,6 +123,78 @@ function checkSecrets(environment: string, allowMissing: string[]): void {
       `EAS keeps secret variables from local builds; set these first: ${missing.join(", ")}.\n` +
         "Pass --allow-missing <names> for a secret the build does not use.",
     );
+  }
+}
+
+// eas-cli signs in with EXPO_TOKEN, or else with the session `eas login` saves.
+function easAuthHeaders(): Record<string, string> {
+  if (process.env.EXPO_TOKEN) {
+    return { authorization: `Bearer ${process.env.EXPO_TOKEN}` };
+  }
+
+  const state = join(homedir(), ".expo", "state.json");
+  const session = existsSync(state) ? (JSON.parse(readFileSync(state, "utf8")) as ExpoState).auth?.sessionSecret : "";
+
+  if (!session) {
+    fail("Run eas login, or set EXPO_TOKEN, so store-build can read the EAS iOS credentials.");
+  }
+
+  return { "expo-session": session };
+}
+
+async function readEasProfiles(projectId: string): Promise<Map<string, string>> {
+  const headers = { "content-type": "application/json", ...easAuthHeaders() };
+  const body = JSON.stringify({ query: EAS_IOS_PROFILES_QUERY, variables: { projectId } });
+  let response: EasIosProfilesResponse;
+
+  try {
+    const request = await fetch("https://api.expo.dev/graphql", { method: "POST", headers, body });
+    response = (await request.json()) as EasIosProfilesResponse;
+  } catch (error) {
+    fail(`Could not read the EAS iOS credentials: ${(error as Error).message}`);
+  }
+
+  if (!response.data?.app?.byId) {
+    const reason = response.errors?.map((error) => error.message).join("; ") ?? "the response has no project";
+    fail(`Could not read the EAS iOS credentials of project ${projectId}: ${reason}`);
+  }
+
+  return easProfiles(response);
+}
+
+// Runs before a cloud build too, because EAS hands it the same stored profiles. A project that keeps its own profiles
+// in credentials.json signs with those, and EAS assigns none.
+async function checkAppGroups(eas: EasJson, buildProfile: string): Promise<void> {
+  const source = profileValue(eas, buildProfile, (profile) => profile.ios?.credentialsSource ?? profile.credentialsSource);
+
+  if (source === "local") {
+    return;
+  }
+
+  // The introspection eas-cli runs to read the entitlements it signs with.
+  const env = { ...storeBuildEnv(process.env), EXPO_NO_DOTENV: "1" };
+  const introspection = capture(["bunx", "expo", "config", "--json", "--type", "introspect"], env);
+
+  if (!introspection.ok) {
+    fail(`Could not read the app config with expo config:\n${introspection.stderr.trim()}`);
+  }
+
+  const config = JSON.parse(introspection.stdout) as IntrospectedConfig;
+  const targets = signingTargets(config).filter((target) => target.appGroups.length);
+  const projectId = config.extra?.eas?.projectId;
+
+  if (!targets.length) {
+    return;
+  }
+
+  if (!projectId) {
+    fail("The app config has no extra.eas.projectId, so store-build cannot find its EAS credentials.");
+  }
+
+  const gaps = appGroupGaps(targets, await readEasProfiles(projectId));
+
+  if (gaps.length) {
+    fail(appGroupRepair(gaps, buildProfile));
   }
 }
 
@@ -188,7 +272,7 @@ function buildLocally(appDir: string, platform: Platform, submitProfile: string,
   }
 }
 
-function storeBuild(platform: string, submitProfile: string, options: Options): void {
+async function storeBuild(platform: string, submitProfile: string, options: Options): Promise<void> {
   const appDir = process.cwd();
   const easPath = join(appDir, "eas.json");
 
@@ -211,6 +295,10 @@ function storeBuild(platform: string, submitProfile: string, options: Options): 
     fail(`eas.json has no build profile "${options.profile}".`);
   }
 
+  if (platform === "ios") {
+    await checkAppGroups(eas, options.profile);
+  }
+
   if (options.cloud) {
     buildInCloud(platform, submitProfile, options);
   } else {
@@ -229,9 +317,9 @@ cli
   .option("--cloud", "Build on EAS instead, and submit when the build finishes")
   .option("--allow-missing <names>", "Comma-separated secret EAS variables the build does not use")
   .option("--dry-run", "Run the checks and print the build and submit commands without running them")
-  .action((platform: string, submitProfile: string, options: Options) => {
+  .action(async (platform: string, submitProfile: string, options: Options) => {
     try {
-      storeBuild(platform, submitProfile, options);
+      await storeBuild(platform, submitProfile, options);
     } catch (error) {
       if (!(error instanceof Stop)) {
         throw error;

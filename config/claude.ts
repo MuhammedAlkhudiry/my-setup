@@ -9,10 +9,13 @@ import { createClaudePermissionAllowList } from "./permissions";
 export function createClaudeManagedSettings(profile: DeviceProfile): {
   permissions: { allow: string[] };
   crossSessionInbound: "accept";
+  cleanupPeriodDays: number;
 } {
   return {
     permissions: { allow: createClaudePermissionAllowList(profile) },
     // Deliver messages from my other sessions even when their permission modes differ.
     crossSessionInbound: "accept",
+    // Transcripts take about 0.6 GB a day; Claude deletes older ones at startup instead of after 30 days.
+    cleanupPeriodDays: 14,
   };
 }

@@ -1,6 +1,6 @@
-import { existsSync, realpathSync, statSync } from "node:fs";
+import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { copyFile, lstat, mkdir, readdir, rm, rmdir, unlink } from "node:fs/promises";
-import { dirname, join, relative, sep } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 
 import { execa } from "execa";
 import { z } from "zod";
@@ -8,7 +8,8 @@ import { z } from "zod";
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
 import { MAC_WATCHER } from "../../config/mac-watcher";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
 
 // =============================================================================
 // Rules
@@ -76,6 +77,38 @@ export function decideWorktree(
   return { remove: true };
 }
 
+/** The folders git lists as ignored that hold native build output, and the dependency folders to search for more. */
+export function nativeBuildCandidates(
+  ignoredPaths: string[],
+  rule: { ignored: RegExp; dependencies: { dir: RegExp } },
+): { outputs: string[]; dependencyDirs: string[] } {
+  return {
+    outputs: ignoredPaths.filter((path) => rule.ignored.test(path)),
+    dependencyDirs: ignoredPaths.filter((path) => rule.dependencies.dir.test(path)),
+  };
+}
+
+/** Installed Codex versions to delete: every one but the current version and the newest others up to `keep` in all. */
+export function codexReleasesToDelete<T extends AgedEntry>(releases: T[], current: string, keep: number): T[] {
+  const others = releases.filter((release) => basename(release.path) !== current);
+  return others.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(Math.max(0, keep - 1));
+}
+
+export interface CodexThreadFacts {
+  id: string;
+  updatedMs: number;
+  /** The thread's session file is still in Codex's folder, so the archive has not taken it yet. */
+  sessionFileExists: boolean;
+}
+
+/** Codex threads idle past `idleDays` whose session file is gone from Codex's folder, so deleting one never takes the file. */
+export function codexThreadsToDelete(
+  threads: CodexThreadFacts[],
+  options: { idleDays: number; now: number },
+): CodexThreadFacts[] {
+  return threads.filter((thread) => !thread.sessionFileExists && options.now - thread.updatedMs > options.idleDays * DAY_MS);
+}
+
 export interface TempEntry extends AgedEntry {
   name: string;
   kind: "file" | "directory" | "other";
@@ -99,6 +132,19 @@ export function childrenInUse(dir: string, openPaths: Set<string>): Set<string> 
     if (open.startsWith(prefix)) children.add(join(dir, open.slice(prefix.length).split(sep)[0] ?? ""));
   }
   return children;
+}
+
+export interface DeviceFacts extends AgedEntry {
+  kind: "simulator" | "emulator";
+  /** Simulator UDID or emulator AVD name. */
+  id: string;
+  name: string;
+  running: boolean;
+}
+
+/** Simulators and emulators nobody uses: not running, unused for `days`, and not a device to keep. */
+export function devicesToDelete(devices: DeviceFacts[], options: { days: number; keep: RegExp; now: number }): DeviceFacts[] {
+  return olderThan(devices, options.days, options.now).filter((device) => !device.running && !options.keep.test(device.name));
 }
 
 export interface TestDatabaseFacts {
@@ -152,7 +198,12 @@ const reportSchema = z.object({
   temp: z.object({ entries: z.number(), bytes: z.number() }).default({ entries: 0, bytes: 0 }),
   worktreesRemoved: z.array(z.object({ path: z.string(), bytes: z.number() })),
   worktreesKept: z.array(z.object({ path: z.string(), reason: z.string(), idleDays: z.number() })),
+  nativeBuildsCleared: z.array(z.object({ path: z.string(), bytes: z.number() })).default([]),
+  codexThreadsDeleted: z.object({ threads: z.number(), bytes: z.number() }).default({ threads: 0, bytes: 0 }),
   testDatabasesDropped: z.array(z.object({ name: z.string(), bytes: z.number() })).default([]),
+  devicesDeleted: z
+    .array(z.object({ kind: z.enum(["simulator", "emulator"]), name: z.string(), bytes: z.number() }))
+    .default([]),
   skipped: z.array(z.string()),
   errors: z.array(z.string()),
 });
@@ -170,7 +221,10 @@ export function summarizePrune(report: PruneReport): string {
     `archived ${report.archived.files} files (${gib(report.archived.bytes)})`,
     `temp entries removed ${report.temp.entries} (${gib(report.temp.bytes)})`,
     `worktrees removed ${report.worktreesRemoved.length}`,
+    `native builds cleared in ${report.nativeBuildsCleared.length} worktrees`,
+    `codex threads deleted ${report.codexThreadsDeleted.threads} (${gib(report.codexThreadsDeleted.bytes)})`,
     `test databases dropped ${report.testDatabasesDropped.length}`,
+    `devices deleted ${report.devicesDeleted.length}`,
   ];
   if (report.skipped.length > 0) parts.push(`skipped: ${report.skipped.join("; ")}`);
   if (report.errors.length > 0) parts.push(`errors: ${report.errors.length}`);
@@ -341,6 +395,107 @@ async function newestChangeMs(dir: string): Promise<number> {
   }
 }
 
+// =============================================================================
+// Simulators and emulators
+// =============================================================================
+
+const simulatorListSchema = z.object({
+  devices: z.record(z.string(), z.array(z.object({ udid: z.string(), name: z.string(), state: z.string(), dataPath: z.string() }))),
+});
+
+/** A simulator's last use is when it last changed state or wrote data. */
+async function simulatorFacts(): Promise<DeviceFacts[]> {
+  const result = await run("xcrun", ["simctl", "list", "devices", "-j"]);
+  if (result.exitCode !== 0) throw new Error(`simctl list failed: ${result.stderr.trim().slice(0, 200)}`);
+  const devices = Object.values(simulatorListSchema.parse(JSON.parse(result.stdout)).devices).flat();
+
+  return Promise.all(
+    devices.map(async (device) => {
+      const path = dirname(device.dataPath);
+      const times = await Promise.all(
+        [join(path, "device.plist"), device.dataPath].map(async (file) => (await lstat(file).catch(() => undefined))?.mtimeMs ?? Date.now()),
+      );
+      return { kind: "simulator", id: device.udid, name: device.name, running: device.state !== "Shutdown", path, mtimeMs: Math.max(...times) };
+    }),
+  );
+}
+
+/** An emulator's last use is its newest file; one whose folder is on an unmounted drive is skipped. */
+async function emulatorFacts(home: string): Promise<DeviceFacts[]> {
+  const avdRoot = join(home, ".android/avd");
+  if (!existsSync(avdRoot)) return [];
+  const commands = (await run("ps", ["-axo", "command="])).stdout;
+  const facts: DeviceFacts[] = [];
+  for (const file of (await readdir(avdRoot)).filter((name) => name.endsWith(".ini"))) {
+    const name = file.slice(0, -".ini".length);
+    const path = (await Bun.file(join(avdRoot, file)).text()).match(/^path=(.+)$/m)?.[1]?.trim();
+    if (!path || !existsSync(path)) continue;
+    // Lock files outlive a crashed emulator, so only a live process counts as running.
+    const running = new RegExp(`(-avd\\s+|@)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`, "m").test(commands);
+    facts.push({ kind: "emulator", id: name, name, running, path, mtimeMs: await newestChangeMs(path) });
+  }
+  return facts;
+}
+
+// =============================================================================
+// Codex
+// =============================================================================
+
+/** Pages returned to the disk per step, 100 MB at Codex's page size, so the write-ahead log never grows past one step. */
+const VACUUM_PAGES = 25_600;
+
+/** Codex's current file for a database, such as `state_5.sqlite`; Codex raises the number when it migrates one. */
+function codexDatabase(home: string, name: string): string | undefined {
+  const dir = join(home, ".codex");
+  if (!existsSync(dir)) return undefined;
+  const versions = readdirSync(dir)
+    .map((file) => Number(file.match(new RegExp(`^${name}_(\\d+)\\.sqlite$`))?.[1]))
+    .filter((version) => Number.isInteger(version));
+  return versions.length > 0 ? join(dir, `${name}_${Math.max(...versions)}.sqlite`) : undefined;
+}
+
+/** Runs SQL against a Codex database, waiting while Codex holds a lock, and returns its rows. */
+async function sqlite(database: string, sql: string): Promise<string[][]> {
+  const result = await run("sqlite3", ["-bail", "-cmd", ".timeout 10000", "-separator", "\t", database, sql], {
+    timeout: 300_000,
+  });
+  if (result.exitCode !== 0) throw new Error(`sqlite3 failed on ${basename(database)}: ${result.stderr.trim().slice(0, 200)}`);
+  return result.stdout
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => line.split("\t"));
+}
+
+async function codexThreadFacts(state: string): Promise<CodexThreadFacts[]> {
+  const rows = await sqlite(state, "select id, updated_at, rollout_path from threads");
+  return rows.map(([id = "", updatedAt, sessionFile = ""]) => ({
+    id,
+    updatedMs: Number(updatedAt) * 1000,
+    sessionFileExists: existsSync(sessionFile),
+  }));
+}
+
+/** The given Codex threads that still exist; an id that is unsafe to query counts as existing. */
+async function codexThreadsLeft(state: string, ids: string[]): Promise<string[]> {
+  const safe = ids.filter((id) => /^[\w-]+$/.test(id));
+  const rows = safe.length > 0 ? await sqlite(state, `select id from threads where id in ('${safe.join("', '")}')`) : [];
+  return [...rows.map(([id = ""]) => id), ...ids.filter((id) => !safe.includes(id))];
+}
+
+/** Returns the space deleted threads left inside Codex's history database to the disk; resolves to the bytes saved. */
+async function shrinkCodexHistory(history: string): Promise<number> {
+  const size = () =>
+    [history, `${history}-wal`].reduce((total, file) => total + (statSync(file, { throwIfNoEntry: false })?.size ?? 0), 0);
+  const before = size();
+
+  const [[free = "0"] = []] = await sqlite(history, "pragma freelist_count");
+  for (let left = Number(free); left > 0; left -= VACUUM_PAGES) {
+    await sqlite(history, `pragma incremental_vacuum(${VACUUM_PAGES}); pragma wal_checkpoint(truncate)`);
+  }
+
+  return Math.max(0, before - size());
+}
+
 async function testDatabaseFacts(mysql: MysqlQuery): Promise<TestDatabaseFacts[] | undefined> {
   const rules = MAC_WATCHER.storage.testDatabases;
   const schemas = await mysql("select schema_name from information_schema.schemata");
@@ -446,6 +601,31 @@ async function worktreeFacts(
   };
 }
 
+/** A worktree's native build output as absolute paths; empty while any of it changed within the idle window. */
+async function idleNativeBuilds(worktree: string): Promise<string[]> {
+  const rule = MAC_WATCHER.storage.nativeBuilds;
+  const listed = await run("git", ["-C", worktree, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"]);
+  if (listed.exitCode !== 0) throw new Error(`cannot list ignored files in ${worktree}`);
+  const { outputs, dependencyDirs } = nativeBuildCandidates(listed.stdout.split("\0").filter(Boolean), rule);
+
+  let dependencyBuilds: string[] = [];
+  if (dependencyDirs.length > 0) {
+    const builds = rule.dependencies.builds.flatMap((pattern, index) => [...(index > 0 ? ["-o"] : []), "-path", pattern]);
+    const dirs = dependencyDirs.map((dir) => join(worktree, dir));
+    const found = await run("find", [...dirs, "-type", "d", "(", ...builds, ")", "-prune", "-print0"], { timeout: 180_000 });
+    if (found.exitCode !== 0) throw new Error(`cannot search dependencies in ${worktree}`);
+    dependencyBuilds = found.stdout.split("\0").filter(Boolean);
+  }
+  const paths = [...outputs.map((path) => join(worktree, path).replace(/\/$/, "")), ...dependencyBuilds];
+  if (paths.length === 0) return [];
+
+  // One recent file means a build may still need the rest; find stops at the first.
+  const recent = await run("find", [...paths, "-mmin", `-${rule.idleHours * 60}`, "-print", "-quit"], { timeout: 180_000 });
+  if (recent.stdout.trim()) return [];
+  if (recent.exitCode !== 0) throw new Error(`cannot check native build ages in ${worktree}`);
+  return paths;
+}
+
 // =============================================================================
 // Run
 // =============================================================================
@@ -463,7 +643,10 @@ export async function pruneStorage(options: { home: string; now: Date; dryRun: b
     temp: { entries: 0, bytes: 0 },
     worktreesRemoved: [],
     worktreesKept: [],
+    nativeBuildsCleared: [],
+    codexThreadsDeleted: { threads: 0, bytes: 0 },
     testDatabasesDropped: [],
+    devicesDeleted: [],
     skipped: [],
     errors: [],
   };
@@ -535,8 +718,73 @@ export async function pruneStorage(options: { home: string; now: Date; dryRun: b
     }
   }
 
+  const codexState = codexDatabase(home, "state");
+  const codexHistory = codexDatabase(home, "thread_history");
+  if (codexState && codexHistory) {
+    await attempt("codex threads", async () => {
+      const idle = codexThreadsToDelete(await codexThreadFacts(codexState), { idleDays: rules.codex.threadIdleDays, now });
+      if (dryRun) {
+        report.codexThreadsDeleted.threads = idle.length;
+        return;
+      }
+
+      // One at a time, since parallel deletes fail on Codex's database locks. Deleting a thread also deletes its
+      // subagents' threads, so a later delete that fails because its thread is already gone still counts.
+      const failed: string[] = [];
+      for (const thread of idle) {
+        const deleted = await run("codex", ["delete", "--force", thread.id]);
+        if (deleted.exitCode !== 0) failed.push(thread.id);
+      }
+      const left = failed.length > 0 ? await codexThreadsLeft(codexState, failed) : [];
+      report.codexThreadsDeleted.threads += idle.length - left.length;
+      if (left.length > 0) throw new Error(`codex delete failed for ${left.length} threads, such as ${left[0]}`);
+    });
+
+    // Also returns space left by a run that stopped partway.
+    if (!dryRun) {
+      await attempt("codex history", async () => {
+        const bytes = await shrinkCodexHistory(codexHistory);
+        report.codexThreadsDeleted.bytes += bytes;
+        report.freedBytes += bytes;
+      });
+    }
+  }
+
+  await attempt("codex releases", async () => {
+    const standalone = join(home, ".codex/packages/standalone");
+    if (!existsSync(join(standalone, "current"))) return;
+    const current = basename(realpathSync(join(standalone, "current")));
+    const releases = codexReleasesToDelete(await childrenWithAge(join(standalone, "releases")), current, rules.codex.keepReleases);
+    for (const release of releases.filter((release) => !isInUse(release.path, openPaths))) {
+      const bytes = await sizeBytes(release.path);
+      if (!dryRun) await rm(release.path, { recursive: true, force: true });
+      report.deleted.push({ path: release.path, bytes });
+      report.freedBytes += bytes;
+    }
+  });
+
   await attempt("simulators", async () => {
     if (!dryRun && Bun.which("xcrun")) await run("xcrun", ["simctl", "delete", "unavailable"]);
+  });
+
+  await attempt("devices", async () => {
+    const devices = [...(Bun.which("xcrun") ? await simulatorFacts() : []), ...(await emulatorFacts(home))];
+    const unused = devicesToDelete(devices, { ...rules.devices, now }).filter((device) => !isInUse(device.path, openPaths));
+    for (const device of unused) {
+      await attempt(`${device.kind} ${device.name}`, async () => {
+        const bytes = await sizeBytes(device.path);
+        if (!dryRun && device.kind === "simulator") {
+          const deleted = await run("xcrun", ["simctl", "delete", device.id]);
+          if (deleted.exitCode !== 0) throw new Error(deleted.stderr.trim() || "simctl delete failed");
+        }
+        if (!dryRun && device.kind === "emulator") {
+          await rm(device.path, { recursive: true, force: true });
+          await rm(join(home, ".android/avd", `${device.id}.ini`), { force: true });
+        }
+        report.devicesDeleted.push({ kind: device.kind, name: device.name, bytes });
+        report.freedBytes += bytes;
+      });
+    }
   });
 
   for (const project of ACTIVE_PROJECTS) {
@@ -555,6 +803,14 @@ export async function pruneStorage(options: { home: string; now: Date; dryRun: b
           if (!decision.remove) {
             const idleDays = Math.max(0, Math.floor((now - facts.lastActivityMs) / DAY_MS));
             report.worktreesKept.push({ path: worktree.path, reason: decision.reason, idleDays });
+
+            if (facts.inUse || now - facts.lastActivityMs < rules.nativeBuilds.idleHours * HOUR_MS) return;
+            const builds = await idleNativeBuilds(worktree.path);
+            if (builds.length === 0) return;
+            const buildBytes = await totalSizeBytes(builds);
+            if (!dryRun) for (const path of builds) await rm(path, { recursive: true, force: true });
+            report.nativeBuildsCleared.push({ path: worktree.path, bytes: buildBytes });
+            report.freedBytes += buildBytes;
             return;
           }
           const bytes = await sizeBytes(worktree.path);
@@ -582,14 +838,13 @@ export async function pruneStorage(options: { home: string; now: Date; dryRun: b
       prefixes: ACTIVE_PROJECTS.map((project) => `${project.name.toLowerCase()}_`),
       checkoutExists: existsSync,
     });
-    if (doomed.length === 0) return;
-    if (!dryRun) {
-      const dropped = await mysql(doomed.map((database) => `drop database if exists \`${database.name}\`;`).join(" "));
-      if (!dropped) throw new Error("dropping test databases failed");
-    }
+    // One call per database, so a slow drop on a busy disk never times out the rest.
     for (const database of doomed) {
-      report.testDatabasesDropped.push({ name: database.name, bytes: database.bytes });
-      report.freedBytes += database.bytes;
+      await attempt(`test database ${database.name}`, async () => {
+        if (!dryRun && !(await mysql(`drop database if exists \`${database.name}\``))) throw new Error("drop failed");
+        report.testDatabasesDropped.push({ name: database.name, bytes: database.bytes });
+        report.freedBytes += database.bytes;
+      });
     }
   });
 

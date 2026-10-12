@@ -59,11 +59,12 @@ export async function listProcesses(): Promise<ProcessRow[]> {
 }
 
 /**
- * Agent tooling that commonly outlives its session: browsers for automation, MCP servers, dev servers, and Laravel's
- * long-running workers and servers.
+ * Agent tooling that commonly outlives its session: browsers for automation, MCP servers, dev servers, Laravel's
+ * long-running workers and servers, log followers (`tail -f` and the search it pipes into), which never exit on their
+ * own once the log stops changing, and idb's simulator companion, which idb starts detached and never stops.
  */
 export const AGENT_TOOLING_PATTERN =
-  /Chrome for Testing|ms-playwright|chrome-headless-shell|chrome-devtools-mcp|playwright|\bmcp\b|-mcp|vite|next dev|webpack|esbuild|nodemon|\btsx\b|expo start|metro|artisan (horizon|queue:(work|listen)|serve|reverb:start|octane:start|schedule:work)/i;
+  /Chrome for Testing|ms-playwright|chrome-headless-shell|chrome-devtools-mcp|playwright|\bmcp\b|-mcp|vite|next dev|webpack|esbuild|nodemon|\btsx\b|expo start|metro|idb_companion|artisan (horizon|queue:(work|listen)|serve|reverb:start|octane:start|schedule:work)|^(\S*\/)?tail\s(.*\s)?-[a-z0-9]*f|^(\S*\/)?(u?grep|rg)\s/i;
 
 /** Main app executables, system binaries, agent CLIs, and devices are never guard targets. */
 const PROTECTED_COMMAND =
@@ -104,6 +105,7 @@ const trackedSchema = z.object({
   cpuSeconds: z.number(),
   sampledAt: z.number(),
   hotSince: z.number().optional(),
+  idleSince: z.number().optional(),
 });
 
 export const guardStateSchema = z.object({
@@ -113,20 +115,26 @@ export type GuardState = z.infer<typeof guardStateSchema>;
 
 export interface GuardStep {
   next: GuardState;
-  /** Leftovers that stayed hot long enough to stop, with their average CPU since they turned hot. */
-  stop: Array<{ row: ProcessRow; percent: number; hotMinutes: number }>;
+  /** Leftovers that stayed hot or idle long enough to stop, with their CPU in the last sample and how long it lasted. */
+  stop: Array<{ row: ProcessRow; reason: "hot" | "idle"; percent: number; minutes: number }>;
 }
 
 /**
  * Compares this pass with the last one. A leftover is hot when it used at least `hotPercent` of a core between the two
- * samples; it is stopped once it has stayed hot for `stopAfterMinutes`. A cool sample or a reused pid resets it.
+ * samples, and idle when it used less than `idlePercent`. It is stopped once it has stayed hot for `stopAfterMinutes` or
+ * idle for `stopIdleAfterHours`. A sample of the other kind or a reused pid resets the window.
  */
 export function stepGuard(
   previous: GuardState,
   rows: ProcessRow[],
   uid: number,
   now: number,
-  options: { hotPercent: number; stopAfterMinutes: number } = MAC_WATCHER.cpu.guard,
+  options: {
+    hotPercent: number;
+    stopAfterMinutes: number;
+    idlePercent: number;
+    stopIdleAfterHours: number;
+  } = MAC_WATCHER.cpu.guard,
 ): GuardStep {
   const next: GuardState = { tracked: {} };
   const stop: GuardStep["stop"] = [];
@@ -137,11 +145,22 @@ export function stepGuard(
     const wallSeconds = same ? (now - before.sampledAt) / 1000 : 0;
     const percent = wallSeconds > 0 ? ((row.cpuSeconds - before!.cpuSeconds) / wallSeconds) * 100 : 0;
     const hot = wallSeconds > 0 && percent >= options.hotPercent;
+    const idle = wallSeconds > 0 && percent < options.idlePercent;
     const hotSince = hot ? (before?.hotSince ?? before!.sampledAt) : undefined;
+    const idleSince = idle ? (before?.idleSince ?? before!.sampledAt) : undefined;
 
-    next.tracked[String(row.pid)] = { started: row.started, cpuSeconds: row.cpuSeconds, sampledAt: now, hotSince };
+    next.tracked[String(row.pid)] = {
+      started: row.started,
+      cpuSeconds: row.cpuSeconds,
+      sampledAt: now,
+      hotSince,
+      idleSince,
+    };
+    const since = (start: number) => Math.round((now - start) / 60_000);
     if (hotSince !== undefined && now - hotSince >= options.stopAfterMinutes * 60_000) {
-      stop.push({ row, percent: Math.round(percent), hotMinutes: Math.round((now - hotSince) / 60_000) });
+      stop.push({ row, reason: "hot", percent: Math.round(percent), minutes: since(hotSince) });
+    } else if (idleSince !== undefined && now - idleSince >= options.stopIdleAfterHours * 3_600_000) {
+      stop.push({ row, reason: "idle", percent: Math.round(percent), minutes: since(idleSince) });
     }
   }
   return { next, stop };

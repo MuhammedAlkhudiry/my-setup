@@ -4,7 +4,7 @@ import { MODELS } from "./models";
  * Mac resource watcher managed by my-setup.
  *
  * memcap does the minute-by-minute memory cleanup with fixed rules, and the CPU guard does the same for leftover agent
- * tooling that burns CPU. The watcher runs on a schedule with fixed rules and no AI: it prunes disk, takes a snapshot, and
+ * tooling that burns CPU or sits idle for a day. The watcher runs on a schedule with fixed rules and no AI: it prunes disk, takes a snapshot, and
  * raises threshold alerts that `doctor` shows until the numbers recover. `mac-watcher review` asks Codex to diagnose the
  * current snapshot on demand; it never kills processes or changes stored state.
  */
@@ -36,8 +36,11 @@ export const MAC_WATCHER = {
     orphanMinAgeMinutes: 60,
   },
   cpu: {
-    /** Leftover agent tooling (parent exited) is stopped after staying at this CPU for this long. Nothing else is. */
-    guard: { intervalSeconds: 60, hotPercent: 80, stopAfterMinutes: 10 },
+    /**
+     * Leftover agent tooling (parent exited) is stopped after staying at `hotPercent` CPU for `stopAfterMinutes`, or
+     * below `idlePercent` for `stopIdleAfterHours`, since nothing uses a leftover that idle. Nothing else is stopped.
+     */
+    guard: { intervalSeconds: 60, hotPercent: 80, stopAfterMinutes: 10, idlePercent: 1, stopIdleAfterHours: 24 },
     /** Any process averaging this CPU over its life for this long is reported to the watcher, never stopped. */
     sustainedPercent: 80,
     sustainedMinMinutes: 30,
@@ -63,20 +66,48 @@ export const MAC_WATCHER = {
      * names always stay.
      */
     temp: { days: 2, skip: /^(com\.apple\.|tmux-|boost_interprocess$|TemporaryItems$)|\.(sock|lock|pid)$/ },
+    /**
+     * iOS simulators and Android emulators. Agents create one for most device tasks, and each keeps its installed apps and
+     * data, 1 to 4 GB. One that is not running and was unused for `days` is deleted; agents create a fresh one when they
+     * need it. Names matching `keep`, such as each project's main device, always stay.
+     */
+    devices: { days: 1, keep: /(^|[\s_-])main$/i },
     /** Files older than `days` move to the same relative path under `archiveRoot/to`. */
     archiveFiles: [
       { path: ".codex/sessions", days: 14, to: "codex/sessions" },
       { path: ".codex/generated_images", days: 14, to: "codex/generated_images" },
     ],
     /**
+     * Codex keeps a second copy of every thread, screenshots included, in a history database that never shrinks. A
+     * thread idle for `threadIdleDays` whose session file the archive already took is deleted through Codex, which
+     * removes its rows, and the freed space is then returned. Codex installs each update next to the old versions, about
+     * 300 MB each; all but the current one and the newest `keepReleases - 1` others go unless a running process uses one.
+     */
+    codex: { threadIdleDays: 14, keepReleases: 2 },
+    /**
      * Linked worktrees of active projects are removed once clean, unlocked, unused, and idle; their branches stay, so no
      * commit is lost. A landed worktree, whose commits are on the base branch or in a finished PR, goes after `landed`
-     * idle days. Any other branch without an open PR counts as abandoned after `abandoned` idle days. Agents open several
+     * idle days, so 0 removes it at the next run; T3 recreates a thread's checkout from its branch if the thread resumes.
+     * Any other branch without an open PR counts as abandoned after `abandoned` idle days. Agents open several
      * worktrees a day, each holding gigabytes of dependencies and native builds, so a long wait fills the disk. Only
      * worktrees under these agent-managed folders count; worktrees a person placed elsewhere are never touched.
      */
-    worktreeIdleDays: { landed: 1, abandoned: 7 },
+    worktreeIdleDays: { landed: 0, abandoned: 7 },
     agentWorktreeDirs: ["/.claude/worktrees/", "/.codex/worktrees/", "/.t3/worktrees/"],
+    /**
+     * Native build output in agent worktrees that stay, such as for an open PR or uncommitted work: 2 to 12 GB each,
+     * written fresh per worktree because the builds record the worktree's own path. It goes once nothing runs in the
+     * worktree, git saw no activity there, and no file in the output changed for `idleHours`; the next device build
+     * regenerates it. Only folders git ignores count, so no source file is touched. `ignored` matches what git lists,
+     * relative to the worktree: generated native projects, such as Expo's `ios/` and `android/`, and native build
+     * folders. Git lists an ignored dependency folder as a whole, so each one matching `dependencies.dir` is searched for
+     * native modules' build folders matching `dependencies.builds`.
+     */
+    nativeBuilds: {
+      idleHours: 6,
+      ignored: /(^|\/)(android|ios)\/$|\/(android|ios)\/(build|\.cxx|\.gradle|Pods)\/$/,
+      dependencies: { dir: /(^|\/)node_modules\/$/, builds: ["*/android/build", "*/android/.cxx"] },
+    },
     /**
      * Local MySQL test databases go once the checkout that built them is gone. Each active project's suite records its
      * checkout's path in a `testing_checkout` table. An active project's database without one goes once untouched this

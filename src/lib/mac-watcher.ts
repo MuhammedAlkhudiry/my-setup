@@ -275,7 +275,7 @@ export function thresholdAlerts(input: AlertInput): ObservedAlert[] {
       severity: "warning",
       title: `${input.orphans.length} orphaned agent processes`,
       evidence: topCommands(input.orphans),
-      fix: "Make the tool that launched them stop its children on exit; memcap reaps them meanwhile.",
+      fix: "Make the tool that launched them stop its children on exit; the CPU guard stops them once idle for a day.",
     });
   }
   if (input.sustainedCpu.length > 0) {

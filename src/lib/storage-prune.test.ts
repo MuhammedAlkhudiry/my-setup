@@ -4,12 +4,18 @@ import { join } from "node:path";
 import { MAC_WATCHER } from "../../config/mac-watcher";
 
 import {
+  type CodexThreadFacts,
+  type DeviceFacts,
   type TempEntry,
   type TestDatabaseFacts,
   type WorktreeFacts,
   childrenInUse,
+  codexReleasesToDelete,
+  codexThreadsToDelete,
   decideWorktree,
+  devicesToDelete,
   isInUse,
+  nativeBuildCandidates,
   olderThan,
   parseWorktreeList,
   tempLeftovers,
@@ -108,6 +114,78 @@ test("temp leftovers are this user's stale files and folders, never sockets, fol
   const leftovers = tempLeftovers(entries, { days: 2, skip: MAC_WATCHER.storage.temp.skip, now });
 
   expect(leftovers.map((leftover) => leftover.name)).toEqual(["harium-film", ".1626a762-1AF.shell-quote", "notes.txt"]);
+});
+
+test("simulators and emulators go once stopped and unused for a day, except the devices to keep", () => {
+  const device = (name: string, facts: Partial<DeviceFacts> = {}): DeviceFacts => ({
+    kind: "simulator",
+    id: name,
+    name,
+    running: false,
+    path: join("/devices", name),
+    mtimeMs: now - 2 * DAY,
+    ...facts,
+  });
+  const devices = [
+    device("Harium Voice Try"),
+    device("Harium_E2E", { kind: "emulator" }),
+    device("Harium Path", { running: true }),
+    device("Harium Feed Labels", { mtimeMs: now - DAY / 2 }),
+    device("Awraq Main"),
+    device("Harium_Main", { kind: "emulator" }),
+  ];
+
+  const deleted = devicesToDelete(devices, { ...MAC_WATCHER.storage.devices, now });
+
+  expect(deleted.map((entry) => entry.name)).toEqual(["Harium Voice Try", "Harium_E2E"]);
+});
+
+test("native build output is the generated native projects and build folders git ignores, never other output", () => {
+  const ignored = [
+    "harium-app/.expo/",
+    "harium-app/android/",
+    "harium-app/ios/",
+    "harium-app/modules/focus-activity/android/build/",
+    "harium-app/modules/widgets/ios/Pods/",
+    "harium-app/node_modules/",
+    "harium/public/build/",
+    "harium/vendor/",
+    "android-notes.md",
+    "node_modules/",
+  ];
+
+  const { outputs, dependencyDirs } = nativeBuildCandidates(ignored, MAC_WATCHER.storage.nativeBuilds);
+
+  expect(outputs).toEqual([
+    "harium-app/android/",
+    "harium-app/ios/",
+    "harium-app/modules/focus-activity/android/build/",
+    "harium-app/modules/widgets/ios/Pods/",
+  ]);
+  expect(dependencyDirs).toEqual(["harium-app/node_modules/", "node_modules/"]);
+});
+
+test("old Codex versions go, except the current one and the newest other", () => {
+  const release = (name: string, ageDays: number) => ({ path: join("/releases", name), mtimeMs: now - ageDays * DAY });
+  const releases = [release("0.159.0", 9), release("0.162.1", 2), release("0.160.1", 4), release("0.156.0", 20)];
+
+  const deleted = codexReleasesToDelete(releases, "0.162.1", 2);
+
+  expect(deleted.map((entry) => entry.path)).toEqual([join("/releases", "0.159.0"), join("/releases", "0.156.0")]);
+  expect(codexReleasesToDelete(releases, "0.159.0", 1)).toHaveLength(3);
+});
+
+test("idle Codex threads go only once the archive took their session file", () => {
+  const thread = (id: string, idleDays: number, sessionFileExists = false): CodexThreadFacts => ({
+    id,
+    updatedMs: now - idleDays * DAY,
+    sessionFileExists,
+  });
+  const threads = [thread("archived", 15), thread("not archived yet", 30, true), thread("recent", 3), thread("unknown", Number.NaN)];
+
+  const deleted = codexThreadsToDelete(threads, { idleDays: 14, now });
+
+  expect(deleted.map((entry) => entry.id)).toEqual(["archived"]);
 });
 
 test("the children in use are the direct children holding any open path", () => {
