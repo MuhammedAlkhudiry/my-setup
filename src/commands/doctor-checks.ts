@@ -14,13 +14,11 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { isDeepStrictEqual } from "node:util";
 import { execaSync } from "execa";
 
 import { ACTIVE_PROJECTS, SHARED_VERIFICATION } from "../../config/active-projects";
 import { CLAUDE_POOL } from "../../config/claude-pool";
 import { MODELS } from "../../config/models";
-import { mergeRtkHooks } from "../../config/rtk";
 import { MAC_WATCHER, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
 import { claudePoolPaths, findLegacyClaudeFiles } from "../lib/claude-pool";
 import {
@@ -106,27 +104,6 @@ if (staleRules.length > 0) {
   });
 }
 
-for (const [agent, path] of [
-  ["claude", claudePaths(PROFILE).settings],
-  ["codex", join(HOME, ".codex/hooks.json")],
-] as const) {
-  try {
-    const config = JSON.parse(readFileSync(path, "utf-8"));
-    if (
-      config.disableAllHooks === true ||
-      !isDeepStrictEqual(config.hooks, mergeRtkHooks(config.hooks, agent))
-    ) {
-      throw new Error("missing, disabled, duplicated, or stale hook");
-    }
-  } catch {
-    findings.push({
-      level: "required",
-      label: `RTK ${agent} hook`,
-      detail: `${path} needs an enabled RTK hook; run mise run install -- --compact`,
-    });
-  }
-}
-
 const rtkPlugin = join(HOME, ".config/opencode/plugins/rtk.ts");
 if (
   !existsSync(rtkPlugin) ||
@@ -136,17 +113,6 @@ if (
     level: "required",
     label: "RTK OpenCode plugin",
     detail: `${rtkPlugin} is missing or invalid; run mise run install -- --compact`,
-  });
-}
-
-if (
-  Bun.which("rtk") &&
-  execaSync("rtk", ["hook", "codex", "--help"], { reject: false }).exitCode !== 0
-) {
-  findings.push({
-    level: "required",
-    label: "RTK version",
-    detail: "native Codex hooks require RTK 0.50.0 or newer; run brew upgrade rtk",
   });
 }
 

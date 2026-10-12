@@ -6,6 +6,7 @@ import { execa } from "execa";
 import { z } from "zod";
 
 import { MAC_WATCHER, MEMCAP_CONFIG, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
+import { STUCK_RUN_NOTE } from "./cpu-guard";
 
 export function macWatcherPaths(home: string) {
   const stateDir = join(home, ".local/state/mac-watcher");
@@ -20,6 +21,8 @@ export function macWatcherPaths(home: string) {
     guardState: join(stateDir, "guard.json"),
     guardLog: join(stateDir, "guard.log"),
     storagePrune: join(stateDir, "storage-prune.json"),
+    /** The step the current run is on, so the guard can name it if the run gets stuck. */
+    runStep: join(stateDir, "run-step.json"),
     launchAgent: join(home, "Library/LaunchAgents", `${MAC_WATCHER.label}.plist`),
     guardLaunchAgent: join(home, "Library/LaunchAgents", `${MAC_WATCHER.guardLabel}.plist`),
     log: join(home, "Library/Logs/mac-watcher.log"),
@@ -287,12 +290,23 @@ export function thresholdAlerts(input: AlertInput): ObservedAlert[] {
       fix: "Stop the device or tool if it is not doing work you need.",
     });
   }
-  if (input.guardStops.length > 0) {
+  const stuckRuns = input.guardStops.filter((line) => line.includes(STUCK_RUN_NOTE));
+  const leftoverStops = input.guardStops.filter((line) => !line.includes(STUCK_RUN_NOTE));
+  if (stuckRuns.length > 0) {
+    alerts.push({
+      key: "watcher-run-stuck",
+      severity: "warning",
+      title: "A watcher run got stuck and was stopped",
+      evidence: stuckRuns.at(-1) ?? "",
+      fix: "Find why the named step hangs; while a run is stuck, no scheduled cleanup runs.",
+    });
+  }
+  if (leftoverStops.length > 0) {
     alerts.push({
       key: "cpu-guard-stops",
       severity: "info",
-      title: `CPU guard stopped ${input.guardStops.length} leftover processes`,
-      evidence: input.guardStops.at(-1) ?? "",
+      title: `CPU guard stopped ${leftoverStops.length} leftover processes`,
+      evidence: leftoverStops.at(-1) ?? "",
       fix: "If the same tool keeps appearing, fix it so it exits with its parent.",
     });
   }

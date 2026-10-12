@@ -103,12 +103,12 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "rtk",
         level: "required",
-        why: "Compresses agent shell output; native Codex hooks require RTK 0.50.0 or newer.",
+        why: "Compresses OpenCode shell output through the RTK OpenCode plugin.",
         versionArgs: ["--version"],
         latest: { type: "homebrew", formula: "rtk" },
         update: {
           commands: ["brew upgrade rtk", "mise run install -- --compact"],
-          note: "Run the sync in ~/PhpstormProjects/my-setup to refresh the bundled OpenCode plugin. Restart agents; review new Codex hooks in /hooks.",
+          note: "Run the sync in ~/PhpstormProjects/my-setup to refresh the bundled OpenCode plugin, then restart OpenCode.",
         },
       },
       {
@@ -248,20 +248,6 @@ export const SYSTEM_TOOL_GROUPS = [
         },
         update: {
           commands: ["npm install -g agent-device"],
-        },
-      },
-      {
-        name: "maestro",
-        level: "required",
-        why: "Mobile E2E test execution and persistent agent control through the bundled MCP server.",
-        versionArgs: ["--version"],
-        latest: {
-          type: "homebrew",
-          formula: "mobile-dev-inc/tap/maestro",
-        },
-        update: {
-          commands: ["brew upgrade mobile-dev-inc/tap/maestro"],
-          note: "Install with brew install mobile-dev-inc/tap/maestro. Maestro requires Java 17 or newer.",
         },
       },
       {

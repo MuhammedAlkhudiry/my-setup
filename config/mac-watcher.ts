@@ -20,6 +20,11 @@ export const MAC_WATCHER = {
     { hour: 18, minute: 7 },
     { hour: 21, minute: 7 },
   ],
+  /**
+   * launchd skips a scheduled run while the last one is still going, so one stuck run cancels every cleanup after it.
+   * The guard stops a run still going after this long and raises an alert naming the step it was stuck in.
+   */
+  runTimeoutMinutes: 60,
   /** Used only by the manual `review` command. */
   codex: {
     model: MODELS.codex.review.id,
@@ -40,7 +45,13 @@ export const MAC_WATCHER = {
      * Leftover agent tooling (parent exited) is stopped after staying at `hotPercent` CPU for `stopAfterMinutes`, or
      * below `idlePercent` for `stopIdleAfterHours`, since nothing uses a leftover that idle. Nothing else is stopped.
      */
-    guard: { intervalSeconds: 60, hotPercent: 80, stopAfterMinutes: 10, idlePercent: 1, stopIdleAfterHours: 24 },
+    guard: {
+      intervalSeconds: 60,
+      hotPercent: 80,
+      stopAfterMinutes: 10,
+      idlePercent: 1,
+      stopIdleAfterHours: 24,
+    },
     /** Any process averaging this CPU over its life for this long is reported to the watcher, never stopped. */
     sustainedPercent: 80,
     sustainedMinMinutes: 30,
@@ -56,7 +67,6 @@ export const MAC_WATCHER = {
     archiveRoot: "/Volumes/DevSSD/archive",
     /** Each direct child older than `days` is deleted; `match` limits which children count. */
     deleteChildren: [
-      { path: ".maestro/tests", days: 3 },
       { path: "Library/Developer/Xcode/DerivedData", days: 14, match: /-[a-z]{28}$/ },
     ],
     /**
@@ -65,7 +75,10 @@ export const MAC_WATCHER = {
      * `days`. Live services keep sockets and locks there, so sockets, folders holding one, folders macOS protects, and `skip`
      * names always stay.
      */
-    temp: { days: 2, skip: /^(com\.apple\.|tmux-|boost_interprocess$|TemporaryItems$)|\.(sock|lock|pid)$/ },
+    temp: {
+      days: 2,
+      skip: /^(com\.apple\.|tmux-|boost_interprocess$|TemporaryItems$)|\.(sock|lock|pid)$/,
+    },
     /**
      * iOS simulators and Android emulators. Agents create one for most device tasks, and each keeps its installed apps and
      * data, 1 to 4 GB. One that is not running and was unused for `days` is deleted; agents create a fresh one when they

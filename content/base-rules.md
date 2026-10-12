@@ -59,6 +59,7 @@ Help the user reach the best result. Do not help them follow a bad direction jus
   <!-- profile:personal -->
 - **SELF-SERVE-TOOLS** — You have access to browsers, iOS simulators, Android emulators, App Store Connect, and Google Play Console. Operate them
   yourself, or through Codex as CODEX-WORK says, to inspect, verify, and complete work. If task depend on browser never ask user to do it.
+  Lease a simulator or emulator before booting or building onto it, as $browser-simulator-routing says.
   <!-- /profile -->
   <!-- profile:work -->
 - **SELF-SERVE-TOOLS** — You have access to browsers. Operate them yourself, or through Codex as CODEX-WORK says, to inspect, verify, and
@@ -115,6 +116,9 @@ Use these projects as references when the user mentions them.
 - **AGENT-PROMPTS** — When you write a prompt for another agent, or the user asks you for one, assume that agent has the same skills and
   instructions as you. Write only the task and its context. Never copy system prompts, rules, `AGENTS.md` or `CLAUDE.md` content, or skill text
   into the prompt; refer to a skill by name when it matters.
+- **AGENT-MODES** — Start every subagent, delegated task, or launched thread in your own runtime mode, never in one that asks the user to
+  approve commands, such as `approval-required`, because nobody watches that thread and the work stalls. Put limits such as read-only in the
+  task prompt instead.
 - **EFFORT-SIZING** — Never size work in human time such as hours, days, weeks, or "days of work". Writing code is cheap for you, and even
   large changes fit in one session. Size work by what actually costs: blast radius, amount of code touched, risk, QA effort, and product or UX
   design decisions.

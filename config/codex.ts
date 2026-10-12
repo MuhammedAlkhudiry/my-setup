@@ -8,6 +8,8 @@ export const CODEX_CONFIG = {
   },
   features: {
     default_mode_request_user_input: true,
+    // Agents run no hooks, so Codex never runs one or asks to trust one, including hooks a repo ships.
+    hooks: false,
   },
 } as const;
 

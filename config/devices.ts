@@ -19,7 +19,7 @@ export interface DeviceProfile {
   mcpServers: boolean;
   // PhpStorm shortcuts in VS Code: the IntelliJ keymap extension plus `config/vscode.ts` (Windows keys).
   vscodeKeymap: boolean;
-  // RTK hooks are installed whenever RTK is present; `required` fails the install without it.
+  // The RTK OpenCode plugin is installed whenever OpenCode is enabled and RTK is present; `required` fails the install without RTK.
   rtk: "required" | "optional";
   requiredSecrets: readonly string[];
   // Local and remote skill names that this device never installs.

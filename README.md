@@ -76,7 +76,7 @@ mise run install
 ```
 
 Then sign in to Claude Code (`claude`) and Codex (`codex`) with the work accounts. Claude Code on Windows runs its shell commands through Git Bash from
-Git for Windows. RTK is optional on this profile; the installer skips its hooks when RTK is missing.
+Git for Windows.
 
 ## Claude Pool on a New Mac
 

@@ -26,10 +26,8 @@ export function renderCodexMcpServersToml(servers = MCP_SERVERS): string {
 export function codexManagedSectionValues(): Array<[section: string, key: string, value: string]> {
   return [
     ["agents", "max_threads", String(CODEX_CONFIG.agents.max_threads)],
-    [
-      "features",
-      "default_mode_request_user_input",
-      String(CODEX_CONFIG.features.default_mode_request_user_input),
-    ],
+    ...Object.entries(CODEX_CONFIG.features).map(
+      ([key, value]): [string, string, string] => ["features", key, String(value)],
+    ),
   ];
 }

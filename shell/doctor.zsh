@@ -276,7 +276,7 @@ main() {
   check_tool zsh required "Needed by all installed shared shell commands."
 
   print_header "Shell and helper integrations"
-  check_tool rtk required "Agent shell output compression; install with brew install rtk (0.50.0+)."
+  check_tool rtk required "OpenCode shell output compression; install with brew install rtk."
   check_tool phpstorm optional "Used by the synced zsh config as the editor command."
   check_tool herd optional "Used by Laravel aliases in the synced zsh config."
   check_tool forge optional "Manages Laravel Forge servers and sites through the cli-tools skill."
@@ -288,7 +288,6 @@ main() {
   check_tool tailscale optional "Install the standalone app from tailscale.com so the phone and other Macs reach T3 Code."
   check_tool playwright-cli required "Fallback headless browser automation CLI."
   check_tool agent-device required "Default AI-agent mobile and device automation CLI."
-  check_tool maestro required "Mobile E2E testing and bundled MCP server for agents."
   check_tool simslim required "Install with brew install mobai-app/tap/simslim to slim iOS simulators."
   check_tool avdslim required "Install from the kdbhalala/avdslim Homebrew tap to slim Android emulators."
   check_tool memcap required "Install with brew install alextitov19/memcap/memcap; mise run install manages its config and service."
@@ -327,6 +326,7 @@ main() {
   check_link pk "$HOME/bin/pk" "$MY_SETUP_ROOT/shell/pk.zsh"
   check_link share-html "$HOME/bin/share-html" "$MY_SETUP_ROOT/shell/share-html.zsh"
   check_link store-build "$HOME/bin/store-build" "$MY_SETUP_ROOT/shell/store-build.zsh"
+  check_link device-queue "$HOME/bin/device-queue" "$MY_SETUP_ROOT/shell/device-queue.zsh"
   check_link claude-skills "$HOME/.claude_cliproxy/skills" "$HOME/.agents/skills"
 
   print_header "Managed skills"

@@ -7,6 +7,7 @@ import {
   parseEtime,
   parsePsOutput,
   stepGuard,
+  stuckWatcherRuns,
   sustainedCpuProcesses,
 } from "./cpu-guard";
 
@@ -136,4 +137,14 @@ test("busy devices are reported as sustained CPU users, never as guard targets",
   const young = row({ pid: 3, cpuSeconds: 600, ageSeconds: 600 });
   expect(sustainedCpuProcesses([idle, young, emulator], 80, 30).map((entry) => entry.pid)).toEqual([17466]);
   expect(stepGuard({ tracked: {} }, [emulator], UID, 0, options).next.tracked).toEqual({});
+});
+
+test("only this user's scheduled watcher runs past the time limit count as stuck", () => {
+  const watcher = "/Users/test/.bun/bin/bun /Users/test/my-setup/src/commands/mac-watcher.ts";
+  const stuck = row({ pid: 10, ppid: 1, command: `${watcher} run`, ageSeconds: 61 * 60 });
+  const recent = row({ pid: 11, command: `${watcher} run`, ageSeconds: 30 * 60 });
+  const manual = row({ pid: 12, command: `${watcher} prune --dry-run`, ageSeconds: 90 * 60 });
+  const otherUser = row({ pid: 13, uid: 0, command: `${watcher} run`, ageSeconds: 90 * 60 });
+
+  expect(stuckWatcherRuns([stuck, recent, manual, otherUser], UID, 60).map((entry) => entry.pid)).toEqual([10]);
 });

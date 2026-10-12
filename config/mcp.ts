@@ -11,21 +11,13 @@ interface McpServer {
   toolTimeoutSec: number;
 }
 
-export const MCP_SERVERS: Record<string, McpServer> = {
-  maestro: {
-    type: "local",
-    command: ["maestro", "mcp"],
-    enabledTools: [
-      "list_devices",
-      "inspect_screen",
-      "run",
-      "take_screenshot",
-      "open_maestro_viewer",
-    ],
-    startupTimeoutSec: 10,
-    toolTimeoutSec: 180,
-  },
-};
+export const MCP_SERVERS: Record<string, McpServer> = {};
+
+/**
+ * Servers install removes from Claude Code, which keeps a server until it is removed by name. Codex and OpenCode drop them
+ * on their own, because install rewrites their whole managed MCP section. Maestro's server started one JVM per session.
+ */
+export const RETIRED_MCP_SERVERS = ["maestro"];
 
 export function createOpencodeMcpConfig(): Record<
   string,
@@ -47,30 +39,4 @@ export function createOpencodeMcpConfig(): Record<
       },
     ]),
   );
-}
-
-export function createOpencodeMcpToolConfig(): Record<string, boolean> {
-  const tools: Record<string, boolean> = {};
-
-  for (const [serverName, server] of Object.entries(MCP_SERVERS)) {
-    const enabledTools = new Set(server.enabledTools);
-    for (const toolName of [
-      "list_devices",
-      "take_screenshot",
-      "run",
-      "inspect_screen",
-      "cheat_sheet",
-      "open_maestro_viewer",
-      "list_cloud_devices",
-      "run_on_cloud",
-      "get_cloud_run_status",
-      "describe_cloud_run",
-    ]) {
-      if (!enabledTools.has(toolName)) {
-        tools[`${serverName}_${toolName}`] = false;
-      }
-    }
-  }
-
-  return tools;
 }

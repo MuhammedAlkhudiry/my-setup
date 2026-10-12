@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 
 import { MAC_WATCHER, MEMCAP_CONFIG } from "../../config/mac-watcher";
+import { STUCK_RUN_NOTE } from "./cpu-guard";
 import {
   type Alert,
   type AlertInput,
@@ -54,6 +55,16 @@ test("each crossed threshold opens its own stable alert", () => {
   expect(keys({ sustainedCpu: [busy] })).toEqual(["sustained-cpu"]);
   expect(keys({ guardStops: ["stopped pid 1"] })).toEqual(["cpu-guard-stops"]);
   expect(keys({ memcapHealthy: false })).toEqual(["memcap-unhealthy"]);
+});
+
+test("a stopped watcher run raises its own warning apart from stopped leftovers", () => {
+  const stuck = `stopped pid 2 -- ${STUCK_RUN_NOTE} for 61 min, in step ".codex/sessions" since 2026-10-11T18:08:00.000Z`;
+  const alerts = thresholdAlerts({ ...quiet, guardStops: ["stopped pid 1 -- leftover idle", stuck] });
+
+  expect(alerts.map((alert) => [alert.key, alert.severity, alert.evidence])).toEqual([
+    ["watcher-run-stuck", "warning", stuck],
+    ["cpu-guard-stops", "info", "stopped pid 1 -- leftover idle"],
+  ]);
 });
 
 test("disk alerts escalate when nearly full and name the largest disk users", () => {

@@ -15,10 +15,25 @@ description: Use before any browser, simulator, or emulator automation to pick t
   data.
 - Run `playwright-cli` headless in a named session. Clean up after yourself: close every session you opened when the task is done.
 - Use the iOS simulator unless the work is Android-specific. Keep the device window visible; never run it headless.
+- Lease a simulator or emulator before booting, building onto, or driving it, as [Device queue](#device-queue) says.
+- Create a new iOS simulator on the newest installed iOS version. When the project pins its iOS builds to an older Xcode major, such as in an
+  EAS build image, use the newest installed iOS of that major instead, because the app may not launch on newer iOS until the pin is removed.
 - Obtain explicit user approval before starting or using an Android emulator, including one already running. Android-specific work alone
   does not authorize emulator use; an explicit request to use the emulator does. Approval remains valid for the authorized task.
 - Before signing in on a new simulator or emulator, set up local HTTPS trust with $mobile-app-infra.
 - Before starting long agent work on a simulator or emulator that is not slimmed, slim it with $mobile-app-infra.
+
+## Device queue
+
+```sh
+device-queue acquire <udid-or-avd-name> --owner "<thread title>"
+```
+
+- When every slot is taken, `acquire` waits its turn; run it in the background and keep working. Exit code 75 means still queued; run it
+  again within two minutes to keep your place.
+- Reuse your leased device instead of creating another.
+- Run `acquire` again before each round of device work; it renews your lease at once. After 15 minutes without renewal or a running
+  build aimed at the device, a waiting agent can take it. Run `device-queue release <id>` when device work ends; it shuts the device down.
 
 ## Tools
 
@@ -30,6 +45,5 @@ Rows are in order of preference within each area.
 | Browser | $chrome:control-chrome               | The runtime provides it.                                                                 |
 | Browser | Claude Code Chrome (`--chrome`)      | A Claude Code session needs the user's signed-in Chrome state.                           |
 | Browser | `playwright-cli`                     | No other browser tool fits.                                                              |
-| Device  | Maestro MCP                          | The task runs, changes, or creates a Maestro flow stored in the project.                 |
 | Device  | T3 Code device panel (`device_open`) | The host provides it. Drive the opened device with the $agent-device command it returns. |
 | Device  | $agent-device                        | Any other device work.                                                                   |

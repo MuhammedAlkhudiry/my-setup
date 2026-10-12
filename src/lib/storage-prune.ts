@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { copyFile, lstat, mkdir, readdir, rm, rmdir, unlink } from "node:fs/promises";
+import { lstat, mkdir, readdir, rm, rmdir, unlink } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
 
 import { execa } from "execa";
@@ -10,6 +10,8 @@ import { MAC_WATCHER } from "../../config/mac-watcher";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
+const ARCHIVE_COPY_TIMEOUT_MS = 5 * 60 * 1000;
+const SLOW_STEP_SECONDS = 60;
 
 // =============================================================================
 // Rules
@@ -204,6 +206,8 @@ const reportSchema = z.object({
   devicesDeleted: z
     .array(z.object({ kind: z.enum(["simulator", "emulator"]), name: z.string(), bytes: z.number() }))
     .default([]),
+  /** Steps that took at least a minute, so a run that ran long shows where its time went. */
+  slowSteps: z.array(z.object({ step: z.string(), seconds: z.number() })).default([]),
   skipped: z.array(z.string()),
   errors: z.array(z.string()),
 });
@@ -227,6 +231,9 @@ export function summarizePrune(report: PruneReport): string {
     `devices deleted ${report.devicesDeleted.length}`,
   ];
   if (report.skipped.length > 0) parts.push(`skipped: ${report.skipped.join("; ")}`);
+  if (report.slowSteps.length > 0) {
+    parts.push(`slow steps: ${report.slowSteps.map((slow) => `${slow.step} ${Math.round(slow.seconds / 60)} min`).join("; ")}`);
+  }
   if (report.errors.length > 0) parts.push(`errors: ${report.errors.length}`);
   return parts.join(", ");
 }
@@ -335,10 +342,17 @@ async function filesWithAge(dir: string): Promise<Array<AgedEntry & { size: numb
   );
 }
 
-/** Moves across volumes by copying first, so an interrupted move never loses the only copy. */
+/**
+ * Moves across volumes by copying first, so an interrupted move never loses the only copy. The copy runs as `cp` with a
+ * time limit, because a copy to a stalled external disk can wait for hours and an in-process copy cannot be stopped.
+ */
 async function moveFile(source: string, target: string): Promise<void> {
   await mkdir(dirname(target), { recursive: true });
-  await copyFile(source, target);
+  const copied = await run("cp", ["-p", source, target], { timeout: ARCHIVE_COPY_TIMEOUT_MS });
+  if (copied.exitCode !== 0) {
+    await rm(target, { force: true });
+    throw new Error(`cannot copy ${source}${copied.timedOut ? " within the time limit" : `: ${copied.stderr.trim()}`}`);
+  }
   if ((await lstat(target)).size !== (await lstat(source)).size) {
     throw new Error(`copy size mismatch for ${source}`);
   }
@@ -630,8 +644,14 @@ async function idleNativeBuilds(worktree: string): Promise<string[]> {
 // Run
 // =============================================================================
 
-export async function pruneStorage(options: { home: string; now: Date; dryRun: boolean }): Promise<PruneReport> {
-  const { home, dryRun } = options;
+/** `onStep` hears each step as it starts, so whoever stops a stuck run can name the step it was stuck in. */
+export async function pruneStorage(options: {
+  home: string;
+  now: Date;
+  dryRun: boolean;
+  onStep?: (step: string) => void;
+}): Promise<PruneReport> {
+  const { home, dryRun, onStep } = options;
   const now = options.now.getTime();
   const rules = MAC_WATCHER.storage;
   const report: PruneReport = {
@@ -647,17 +667,24 @@ export async function pruneStorage(options: { home: string; now: Date; dryRun: b
     codexThreadsDeleted: { threads: 0, bytes: 0 },
     testDatabasesDropped: [],
     devicesDeleted: [],
+    slowSteps: [],
     skipped: [],
     errors: [],
   };
   const attempt = async (label: string, step: () => Promise<void>) => {
+    onStep?.(label);
+    const started = Date.now();
     try {
       await step();
     } catch (error) {
       report.errors.push(`${label}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300));
     }
+
+    const seconds = Math.round((Date.now() - started) / 1000);
+    if (seconds >= SLOW_STEP_SECONDS) report.slowSteps.push({ step: label, seconds });
   };
 
+  onStep?.("open files");
   const openPaths = await listOpenPaths();
   if (!openPaths) {
     report.skipped.push("lsof failed, so nothing was touched");

@@ -32,9 +32,9 @@ import type { DeviceProfile } from "../../config/devices";
 import { createClaudeManagedSettings } from "../../config/claude";
 import { CODEX_RETIRED_TOP_LEVEL_KEYS } from "../../config/codex";
 import { CREDENTIALS_HOME_ENV, CREDENTIALS_ROOT } from "../../config/credentials";
-import { MCP_SERVERS } from "../../config/mcp";
+import { MCP_SERVERS, RETIRED_MCP_SERVERS } from "../../config/mcp";
 import { createOpencodeConfig } from "../../config/opencode";
-import { mergeRtkHooks } from "../../config/rtk";
+import { removeRetiredHooks } from "../../config/hooks";
 import { renderCodexRules } from "../../config/permissions";
 import { codexManagedSectionValues, renderCodexMcpServersToml } from "../lib/codex-config";
 import { replaceDirectory, ensureParentDir } from "../lib/fs";
@@ -123,6 +123,7 @@ const SHARED_BIN_COMMANDS = [
   "share-html",
   "html-artifact",
   "store-build",
+  "device-queue",
 ];
 
 // =============================================================================
@@ -340,21 +341,27 @@ async function mergeOpencodeConfigAsync(profile: DeviceProfile): Promise<void> {
   print.success("OpenCode config merged");
 }
 
-async function installCodex(profile: DeviceProfile, rtk: boolean): Promise<void> {
+async function installCodex(profile: DeviceProfile): Promise<void> {
   copyRules(CODEX_PATHS.rules, "Codex", profile);
   await mergeCodexConfigAsync();
   await mergeCodexMcpConfigAsync(profile);
   await writeCodexRules(profile);
-  if (!rtk) return;
+  await removeCodexHooks();
+}
 
-  const existing = existsSync(CODEX_PATHS.hooks)
-    ? JSON.parse(await readFile(CODEX_PATHS.hooks, "utf-8"))
-    : {};
-  await writeFile(
-    CODEX_PATHS.hooks,
-    JSON.stringify({ ...existing, hooks: mergeRtkHooks(existing.hooks, "codex") }, null, 2) + "\n",
-  );
-  print.success("RTK Codex hook installed; new hooks require review in /hooks");
+// Codex runs no hooks (see config/codex.ts); delete the file once only retired my-setup hooks were in it.
+async function removeCodexHooks(): Promise<void> {
+  if (!existsSync(CODEX_PATHS.hooks)) return;
+
+  const { hooks, ...rest } = JSON.parse(await readFile(CODEX_PATHS.hooks, "utf-8"));
+  const kept = removeRetiredHooks(hooks);
+
+  if (Object.keys(kept).length === 0 && Object.keys(rest).length === 0) {
+    await rm(CODEX_PATHS.hooks);
+    print.success("Removed Codex hooks");
+  } else {
+    await writeFile(CODEX_PATHS.hooks, JSON.stringify({ ...rest, hooks: kept }, null, 2) + "\n");
+  }
 }
 
 async function writeCodexRules(profile: DeviceProfile): Promise<void> {
@@ -364,7 +371,7 @@ async function writeCodexRules(profile: DeviceProfile): Promise<void> {
   print.success("Codex execution rules written");
 }
 
-async function installClaude(profile: DeviceProfile, rtk: boolean): Promise<void> {
+async function installClaude(profile: DeviceProfile): Promise<void> {
   const paths = claudePaths(profile);
 
   // The pool retires the default ~/.claude files; with direct sign-in they are the install target.
@@ -376,15 +383,11 @@ async function installClaude(profile: DeviceProfile, rtk: boolean): Promise<void
 
   copyRules(paths.rules, "Claude Code", profile);
   await installManagedSymlink(SHARED_PATHS.skills, paths.skills, "Claude Code skills");
-  await mergeClaudeSettingsAsync(profile, paths.settings, rtk);
+  await mergeClaudeSettingsAsync(profile, paths.settings);
   if (profile.mcpServers) await installClaudeMcpServers(paths.configDir);
 }
 
-async function mergeClaudeSettingsAsync(
-  profile: DeviceProfile,
-  settingsPath: string,
-  rtk: boolean,
-): Promise<void> {
+async function mergeClaudeSettingsAsync(profile: DeviceProfile, settingsPath: string): Promise<void> {
   print.info(`Merging Claude Code settings into ${settingsPath}...`);
   await ensureParentDir(settingsPath);
   let existing: Record<string, unknown> = {};
@@ -399,7 +402,7 @@ async function mergeClaudeSettingsAsync(
   const merged = {
     ...existing,
     ...managedKeys,
-    hooks: rtk ? mergeRtkHooks(existing.hooks, "claude") : existing.hooks,
+    hooks: removeRetiredHooks(existing.hooks),
     permissions: {
       ...(existing.permissions as Record<string, unknown> | undefined),
       allow: permissions.allow,
@@ -414,14 +417,14 @@ async function installClaudeMcpServers(configDir: string): Promise<void> {
     print.warning("claude CLI not found; skipped Claude Code MCP servers");
     return;
   }
+  const env = { CLAUDE_CONFIG_DIR: configDir };
+  const remove = (name: string) =>
+    execa("claude", ["mcp", "remove", "-s", "user", name], { env, reject: false, stdio: "pipe" });
+
+  for (const name of RETIRED_MCP_SERVERS) await remove(name);
   for (const [name, server] of Object.entries(MCP_SERVERS)) {
     const [command, ...args] = server.command;
-    const env = { CLAUDE_CONFIG_DIR: configDir };
-    await execa("claude", ["mcp", "remove", "-s", "user", name], {
-      env,
-      reject: false,
-      stdio: "pipe",
-    });
+    await remove(name);
     await execa(
       "claude",
       ["mcp", "add-json", "-s", "user", name, JSON.stringify({ type: "stdio", command, args })],
@@ -931,7 +934,7 @@ export async function install(): Promise<DeviceProfile> {
 
   const profile = readDeviceProfile(HOME);
   const claude = claudePaths(profile);
-  const rtk = await detectRtk(profile);
+  const rtk = profile.opencode && (await detectRtk(profile));
 
   if (!compactOutput) {
     console.log();
@@ -989,7 +992,7 @@ export async function install(): Promise<DeviceProfile> {
   await Promise.all([
     installSharedSkills(profile),
     profile.opencode && installOpencode(profile, rtk),
-    installCodex(profile, rtk),
+    installCodex(profile),
     profile.shell && installShared(profile),
     profile.claude === "pool"
       ? // The pool creates the private config dir and its proxy settings before installClaude merges into them.
@@ -1003,8 +1006,8 @@ export async function install(): Promise<DeviceProfile> {
               print.success("Local Claude Pool proxy installed");
             }
           })
-          .then(() => installClaude(profile, rtk))
-      : installClaude(profile, rtk),
+          .then(() => installClaude(profile))
+      : installClaude(profile),
     profile.macWatcher &&
       installMacWatcher({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }).then(
         ({ memcapInstalled }) => {
@@ -1051,28 +1054,13 @@ export async function install(): Promise<DeviceProfile> {
   return profile;
 }
 
-// Returns whether RTK hooks can be installed; a profile that requires RTK fails without a hook-capable RTK.
+// Returns whether the RTK OpenCode plugin can be installed; a profile that requires RTK fails without it.
 async function detectRtk(profile: DeviceProfile): Promise<boolean> {
-  if (!Bun.which("rtk")) {
-    if (profile.rtk === "required") {
-      throw new Error("RTK is required. Run brew install rtk, then rerun mise run install.");
-    }
-    print.warning("RTK not found; skipped RTK hooks");
-    return false;
-  }
-
-  // Native Codex hooks require RTK 0.50.0 or newer.
-  const hookSupport = await execa("rtk", ["hook", "codex", "--help"], {
-    stdio: "pipe",
-    reject: false,
-  });
-  if (hookSupport.exitCode === 0) return true;
+  if (Bun.which("rtk")) return true;
   if (profile.rtk === "required") {
-    throw new Error(
-      "RTK needs native Codex hook support. Run brew upgrade rtk, then rerun mise run install.",
-    );
+    throw new Error("RTK is required. Run brew install rtk, then rerun mise run install.");
   }
-  print.warning("RTK lacks native Codex hook support; skipped RTK hooks");
+  print.warning("RTK not found; skipped the RTK OpenCode plugin");
   return false;
 }
 

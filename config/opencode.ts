@@ -1,6 +1,6 @@
 import type { DeviceProfile } from "./devices";
 import { MODELS } from "./models";
-import { createOpencodeMcpConfig, createOpencodeMcpToolConfig } from "./mcp";
+import { createOpencodeMcpConfig } from "./mcp";
 import { createOpencodePermission } from "./permissions";
 
 export interface OpencodeConfig {
@@ -32,7 +32,7 @@ export function createOpencodeConfig(profile: DeviceProfile, homeDir: string): O
     instructions: [],
     plugin: [],
     mcp: createOpencodeMcpConfig(),
-    tools: createOpencodeMcpToolConfig(),
+    tools: {},
     keybinds: {
       model_cycle_favorite: "ctrl+a",
       model_cycle_favorite_reverse: "ctrl+shift+a",

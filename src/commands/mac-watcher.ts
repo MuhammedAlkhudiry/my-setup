@@ -8,22 +8,26 @@
  * `review` asks Codex for a read-only diagnosis of a fresh snapshot and stores nothing.
  */
 
-import { existsSync, readFileSync, statfsSync } from "node:fs";
-import { appendFile, open } from "node:fs/promises";
+import { existsSync, readFileSync, statfsSync, writeFileSync } from "node:fs";
+import { appendFile, open, rm } from "node:fs/promises";
 import { cpus, loadavg } from "node:os";
 import { join } from "node:path";
 
 import { execa } from "execa";
+import { z } from "zod";
 
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
 import { MAC_WATCHER, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
 import {
   type GuardState,
+  type ProcessRow,
+  STUCK_RUN_NOTE,
   guardStateSchema,
   isOrphanedAgentTooling,
   lifetimeCpuPercent,
   listProcesses,
   stepGuard,
+  stuckWatcherRuns,
   sustainedCpuProcesses,
 } from "../lib/cpu-guard";
 import {
@@ -68,7 +72,6 @@ const FAMILIES: Array<[name: string, pattern: RegExp]> = [
   ["iOS Simulator", /CoreSimulator|launchd_sim|Simulator\.app/],
   ["Android emulator", /qemu-system|emulator64|\/emulator\/emulator/],
   ["Xcode", /Xcode\.app/],
-  ["Maestro", /maestro/i],
   ["Codex", /codex/i],
   ["Claude Code", /claude/i],
   ["T3 Code", /T3 Code/],
@@ -334,8 +337,9 @@ async function runOnce(): Promise<void> {
 
   try {
     // A failed cleanup must not cost the alerts, which still report low disk.
-    await prune(false, now).catch((error) => console.error(`[${at}] storage prune failed: ${String(error)}`));
+    await prune(false, now, markStep).catch((error) => console.error(`[${at}] storage prune failed: ${String(error)}`));
 
+    markStep("snapshot");
     const { snapshot, memcapLogOffset, guardLogOffset } = await collectSnapshot(
       state.memcapLogOffset,
       state.guardLogOffset,
@@ -375,6 +379,27 @@ async function runOnce(): Promise<void> {
     process.exitCode = 1;
   } finally {
     await writeJson(paths.state, state);
+    await rm(paths.runStep, { force: true });
+  }
+}
+
+const runStepSchema = z.object({ pid: z.number(), step: z.string(), since: z.string() });
+
+/** Records the step this run is on, for the guard to name if it stops the run. A failed note never stops the run. */
+function markStep(step: string): void {
+  try {
+    writeFileSync(paths.runStep, JSON.stringify({ pid: process.pid, step, since: new Date().toISOString() }));
+  } catch {
+    // The note only explains a stuck run; the cleanup matters more.
+  }
+}
+
+function readRunStep(pid: number): z.infer<typeof runStepSchema> | undefined {
+  try {
+    const note = runStepSchema.parse(JSON.parse(readFileSync(paths.runStep, "utf8")));
+    return note.pid === pid ? note : undefined;
+  } catch {
+    return undefined;
   }
 }
 
@@ -391,8 +416,8 @@ async function review(): Promise<void> {
   }
 }
 
-async function prune(dryRun: boolean, now = new Date()): Promise<void> {
-  const report = await pruneStorage({ home: HOME, now, dryRun });
+async function prune(dryRun: boolean, now = new Date(), onStep?: (step: string) => void): Promise<void> {
+  const report = await pruneStorage({ home: HOME, now, dryRun, onStep });
   if (!dryRun) await writeJson(paths.storagePrune, report);
 
   console.log(`[${report.at}] storage: ${summarizePrune(report)}`);
@@ -428,21 +453,37 @@ async function startedAt(pid: number): Promise<string | undefined> {
   return result.exitCode === 0 ? result.stdout.trim().replace(/\s+/g, " ") : undefined;
 }
 
-/** Stops leftover agent tooling that stayed hot or idle; rechecks identity before each signal so a reused pid is never hit. */
+/** Stops a process, rechecking its identity before each signal so a reused pid is never hit; false when it was gone. */
+async function stopProcess(row: ProcessRow): Promise<boolean> {
+  if ((await startedAt(row.pid)) !== row.started) return false;
+  process.kill(row.pid, "SIGTERM");
+  await Bun.sleep(5_000);
+  if ((await startedAt(row.pid)) === row.started) process.kill(row.pid, "SIGKILL");
+  return true;
+}
+
+/** Stops leftover agent tooling that stayed hot or idle, and watcher runs stuck past their time limit. */
 async function guardOnce(): Promise<void> {
   const uid = process.getuid?.() ?? 0;
   const now = Date.now();
-  const { next, stop } = stepGuard(readGuardState(), await listProcesses(), uid, now);
+  const rows = await listProcesses();
+  const { next, stop } = stepGuard(readGuardState(), rows, uid, now);
 
   for (const { row, reason, percent, minutes } of stop) {
-    if ((await startedAt(row.pid)) !== row.started) continue;
-    process.kill(row.pid, "SIGTERM");
-    await Bun.sleep(5_000);
-    if ((await startedAt(row.pid)) === row.started) process.kill(row.pid, "SIGKILL");
+    if (!(await stopProcess(row))) continue;
     delete next.tracked[String(row.pid)];
     await appendFile(
       paths.guardLog,
       `[${new Date(now).toISOString()}] stopped pid ${row.pid} -- leftover ${reason === "hot" ? `at ${percent}% CPU` : "idle"} for ${minutes} min, ${row.rssMib} MiB: ${shortCommand(row.command)}\n`,
+    );
+  }
+
+  for (const row of stuckWatcherRuns(rows, uid)) {
+    const note = readRunStep(row.pid);
+    if (!(await stopProcess(row))) continue;
+    await appendFile(
+      paths.guardLog,
+      `[${new Date(now).toISOString()}] stopped pid ${row.pid} -- ${STUCK_RUN_NOTE} for ${Math.round(row.ageSeconds / 60)} min${note ? `, in step "${note.step}" since ${note.since}` : ""}\n`,
     );
   }
 

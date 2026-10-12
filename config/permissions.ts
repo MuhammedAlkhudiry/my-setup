@@ -37,7 +37,10 @@ export function createOpencodePermission(
 
 export function createClaudePermissionAllowList(profile: Allowlist): string[] {
   return [
-    ...profile.allowedDirectories.flatMap((directory) => [`Edit(${directory})`, `Read(${directory})`]),
+    ...profile.allowedDirectories.flatMap((directory) => [
+      `Edit(${directory})`,
+      `Read(${directory})`,
+    ]),
     ...ALLOWED_READ_PATTERNS.map((pattern) => `Read(${pattern})`),
     ...profile.allowedCommands.map((command) => `Bash(${command} *)`),
   ];

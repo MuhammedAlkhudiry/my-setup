@@ -80,6 +80,23 @@ export function isOrphanedAgentTooling(row: ProcessRow, uid: number): boolean {
   );
 }
 
+/** Marks the guard log lines about a stopped watcher run, which raise their own alert. */
+export const STUCK_RUN_NOTE = "watcher run stuck";
+
+/** This user's scheduled watcher runs still going after `timeoutMinutes`. */
+export function stuckWatcherRuns(
+  rows: ProcessRow[],
+  uid: number,
+  timeoutMinutes: number = MAC_WATCHER.runTimeoutMinutes,
+): ProcessRow[] {
+  return rows.filter(
+    (row) =>
+      row.uid === uid &&
+      row.command.endsWith("mac-watcher.ts run") &&
+      row.ageSeconds >= timeoutMinutes * 60,
+  );
+}
+
 /** Average CPU over a process's whole life, in percent of one core. */
 export function lifetimeCpuPercent(row: ProcessRow): number {
   return row.ageSeconds > 0 ? (row.cpuSeconds / row.ageSeconds) * 100 : 0;
@@ -143,7 +160,8 @@ export function stepGuard(
     const before = previous.tracked[String(row.pid)];
     const same = before && before.started === row.started;
     const wallSeconds = same ? (now - before.sampledAt) / 1000 : 0;
-    const percent = wallSeconds > 0 ? ((row.cpuSeconds - before!.cpuSeconds) / wallSeconds) * 100 : 0;
+    const percent =
+      wallSeconds > 0 ? ((row.cpuSeconds - before!.cpuSeconds) / wallSeconds) * 100 : 0;
     const hot = wallSeconds > 0 && percent >= options.hotPercent;
     const idle = wallSeconds > 0 && percent < options.idlePercent;
     const hotSince = hot ? (before?.hotSince ?? before!.sampledAt) : undefined;
@@ -159,7 +177,10 @@ export function stepGuard(
     const since = (start: number) => Math.round((now - start) / 60_000);
     if (hotSince !== undefined && now - hotSince >= options.stopAfterMinutes * 60_000) {
       stop.push({ row, reason: "hot", percent: Math.round(percent), minutes: since(hotSince) });
-    } else if (idleSince !== undefined && now - idleSince >= options.stopIdleAfterHours * 3_600_000) {
+    } else if (
+      idleSince !== undefined &&
+      now - idleSince >= options.stopIdleAfterHours * 3_600_000
+    ) {
       stop.push({ row, reason: "idle", percent: Math.round(percent), minutes: since(idleSince) });
     }
   }
