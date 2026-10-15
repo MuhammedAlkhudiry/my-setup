@@ -113,6 +113,8 @@ Use these projects as references when the user mentions them.
 - **VISUAL-DECISIONS** — When a decision is about something the user would see, such as a screen, layout, component, style, or chart, show
   each option as an image in the reply, shared as **Phone-ready media** describes. Use a screenshot of the running app when the option already
   exists, and a rendered mockup when it does not. A text description or ASCII sketch does not replace the image.
+- **SOFT-DECISIONS** — Recorded project decisions are history and defaults, not hard rules. Follow them unless new information or a change in
+  direction gives a reason not to; then break one on purpose, say so in the handoff, and update or delete its record on the same branch.
 - **AGENT-PROMPTS** — When you write a prompt for another agent, or the user asks you for one, assume that agent has the same skills and
   instructions as you. Write only the task and its context. Never copy system prompts, rules, `AGENTS.md` or `CLAUDE.md` content, or skill text
   into the prompt; refer to a skill by name when it matters.
@@ -122,11 +124,19 @@ Use these projects as references when the user mentions them.
 - **EFFORT-SIZING** — Never size work in human time such as hours, days, weeks, or "days of work". Writing code is cheap for you, and even
   large changes fit in one session. Size work by what actually costs: blast radius, amount of code touched, risk, QA effort, and product or UX
   design decisions.
+  <!-- profile:personal -->
+- **HEAVY-COMMANDS** — Run full gates/sign-offs, timing comparisons, native builds, and renders through `heavy-run --class <class> -- <argv...>`
+  with class `checks`, `benchmark`, or `build`, so they share one host slot. Wrap only the outer command; light work runs directly. The command waits and recovers stale leases; never hand-poll
+  turn files. Use $verification for execution guidance.
+  <!-- /profile -->
+- **ONE-PR** — Put all work for a task in one pull request, so it is reviewed, checked, and merged once. Split it only for a clear reason,
+  such as a part that must ship or roll back on its own, and state that reason.
 - **PR-CHECKS** — Before reporting a pull request ready, finish the work, pass local checks, and complete $prs. When the project has a sign-off
   command, run it on the pushed head and after every later push; it replaces pull request CI. Merge only on a green sign-off and never bypass
   required checks, such as with `gh pr merge --admin`; only the owner bypasses them on GitHub. Do not dispatch or rerun CI to test work in
-  progress. After the final push, run the mark-viewed script from $prs for GitHub PRs; it does not support GitLab MRs. After you merge, wait
-  in one command for the CI run on the merge commit, such as `gh run watch --exit-status`; if it fails, fix or revert it before other work.
+  progress, except one run on the branch before merging a PR that changes CI workflows or the scripts they run, which the sign-off cannot
+  exercise. After you merge a GitHub PR, run $prs's `postmerge-check` script for its exact merge commit and CI workflow. Exit 75 means still pending; resume the check before
+  proceeding. If it fails, inspect the reported stages and fix or deliberately revert the change before other work; never revert automatically.
 - **CODE-SPACING** — Inside a function, separate each logical step with one blank line, such as loading input, transforming it, and returning
   or storing the result. Keep the lines of a single step together, and do not put a blank line between every statement.
 

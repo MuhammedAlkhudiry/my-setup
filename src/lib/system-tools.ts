@@ -51,7 +51,7 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "git",
         level: "required",
-        why: "Needed for remote skill checkout, hooks, and shared git helpers.",
+        why: "Needed for remote skill checkout, hooks, and shared Git helpers including worktree-cleanup.",
         versionArgs: ["--version"],
         update: {
           note: "This machine uses Apple Git; update it through macOS/Xcode Command Line Tools, or intentionally switch to Homebrew Git.",
@@ -95,6 +95,28 @@ export const SYSTEM_TOOL_GROUPS = [
           note: "Usually updated by macOS or the package manager that owns the shell.",
         },
       },
+      {
+        name: "lsof",
+        level: "required",
+        why: "Checks open files and working directories before worktree-cleanup removes finished work.",
+        update: {
+          note: "Provided by macOS; update through macOS/Xcode Command Line Tools.",
+        },
+      },
+      {
+        name: "du",
+        level: "required",
+        why: "Measures worktree storage during worktree-cleanup; doctor reads the cached summary.",
+        update: {
+          note: "Provided by macOS; update through macOS.",
+        },
+      },
+      {
+        name: "find",
+        level: "required",
+        why: "Checks file-change grace periods before worktree cleanup or scheduled storage pruning.",
+        update: { note: "Provided by macOS; update through macOS." },
+      },
     ],
   },
   {
@@ -107,7 +129,7 @@ export const SYSTEM_TOOL_GROUPS = [
         versionArgs: ["--version"],
         latest: { type: "homebrew", formula: "rtk" },
         update: {
-          commands: ["brew upgrade rtk", "mise run install -- --compact"],
+          commands: ["brew upgrade rtk", "mise run install"],
           note: "Run the sync in ~/PhpstormProjects/my-setup to refresh the bundled OpenCode plugin, then restart OpenCode.",
         },
       },
@@ -205,7 +227,7 @@ export const SYSTEM_TOOL_GROUPS = [
           args: ["api", "repos/router-for-me/CLIProxyAPI/releases/latest", "--jq", ".tag_name"],
         },
         update: {
-          note: "Update the pinned version and macOS checksums in config/claude-pool.ts, then run mise run install -- --compact. Restart the launch agent after active Claude Pool agents finish.",
+          note: "Update the pinned version and macOS checksums in config/claude-pool.ts, then run mise run install. Restart the launch agent after active Claude Pool agents finish.",
         },
       },
       {
@@ -512,7 +534,7 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "gh",
         level: "optional",
-        why: "Used to open GitHub pull requests from the command line, and through the basecamp/gh-signoff extension to make branch rules require the local sign-off status that replaces pull request CI.",
+        why: "Used for GitHub pull requests, CI runner switching, fresh PR evidence in worktree-cleanup, and local sign-off through basecamp/gh-signoff.",
         versionArgs: ["--version"],
         latest: {
           type: "homebrew",

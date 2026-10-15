@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { lstat, mkdir, readdir, rm, rmdir, unlink } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rm, rmdir, unlink } from "node:fs/promises";
 import { basename, dirname, join, relative, sep } from "node:path";
 
 import { execa } from "execa";
@@ -7,6 +7,16 @@ import { z } from "zod";
 
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
 import { MAC_WATCHER } from "../../config/mac-watcher";
+import {
+  cleanupBoundThreads,
+  cleanupProjectThreadTitles,
+  cleanupWorktreeAllowed,
+  finishedCleanupHead,
+  readCleanupThreads,
+  type CleanupThread,
+  cleanupFilesChangedRecently,
+  WORKTREE_CLEANUP_GRACE_MS,
+} from "./worktree-cleanup";
 
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
@@ -24,6 +34,25 @@ export interface AgedEntry {
 
 export function olderThan<T extends AgedEntry>(entries: T[], days: number, now: number): T[] {
   return entries.filter((entry) => now - entry.mtimeMs > days * DAY_MS);
+}
+
+/** Children past `days`, plus children whose project is gone once untouched for `projectGoneHours`. */
+export function staleChildren<T extends AgedEntry & { projectGone: boolean }>(
+  children: T[],
+  options: { days: number; projectGoneHours?: number; now: number },
+): T[] {
+  return children.filter((child) => {
+    const age = options.now - child.mtimeMs;
+    const gone = child.projectGone && options.projectGoneHours !== undefined && age > options.projectGoneHours * HOUR_MS;
+    return age > options.days * DAY_MS || gone;
+  });
+}
+
+/** The project path an Xcode DerivedData `info.plist` records, or undefined when it records none. */
+export function xcodeWorkspacePath(plist: string): string | undefined {
+  const path = plist.match(/<key>WorkspacePath<\/key>\s*<string>([^<]*)<\/string>/)?.[1];
+  const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+  return path?.replace(/&(amp|lt|gt|quot|apos);/g, (_, name: string) => entities[name]);
 }
 
 /** True when a running process holds the path itself or anything inside it open, including as its working directory. */
@@ -45,16 +74,23 @@ export interface WorktreeFacts {
   inUse: boolean;
   lastActivityMs: number;
   mergedIntoBase: boolean;
+  lastCommitMs: number;
+  recentFiles: boolean;
+  prFinishedAt: string | null;
   pr: { state: "OPEN" | "MERGED" | "CLOSED"; headRefOid: string } | undefined;
+  /** Titles of the T3 threads still bound to the worktree that are not running, such as a settled thread. */
+  threads?: string[];
 }
 
 export type WorktreeDecision = { remove: true } | { remove: false; reason: string };
 
 /**
  * A worktree goes only when removing it loses nothing: it has no uncommitted or untracked files, nobody is using it, and
- * its commits stay reachable from the base branch, a finished PR, or its own branch, which is kept. A landed worktree goes
+ * its commits stay reachable from a finished PR or its own branch, which is kept. A landed worktree goes
  * soon after its work is done; one whose branch never landed waits longer in case its work resumes, and stays while its
- * PR is open. Detached commits that never landed have no branch to keep them, so they always stay.
+ * PR is open. Default-branch ancestry without a finished PR keeps a fresh start. Detached unpublished commits always stay.
+ * A thread that is not running keeps only work that has not landed: T3 recreates a landed checkout from its branch if the
+ * thread resumes.
  */
 export function decideWorktree(
   facts: WorktreeFacts,
@@ -64,17 +100,31 @@ export function decideWorktree(
   if (facts.locked) return { remove: false, reason: "locked" };
   if (facts.inUse) return { remove: false, reason: "in use by a running process" };
   if (facts.dirty) return { remove: false, reason: "uncommitted changes" };
+  if (!facts.branch) return { remove: false, reason: "detached HEAD" };
 
   // Git activity during the run itself can land after `now`.
   const idle = Math.max(0, now - facts.lastActivityMs) / DAY_MS;
   const active = `active ${Math.floor(idle)}d ago`;
-  const prFinished = facts.pr !== undefined && facts.pr.state !== "OPEN" && facts.pr.headRefOid === facts.head;
-  if (facts.mergedIntoBase || prFinished) {
-    return idle < idleDays.landed ? { remove: false, reason: `landed, ${active}` } : { remove: true };
+  const prFinished = finishedCleanupHead(facts.head, facts.pr?.headRefOid, facts.pr?.state);
+  if (
+    facts.recentFiles ||
+    facts.lastCommitMs >= now - WORKTREE_CLEANUP_GRACE_MS ||
+    (prFinished &&
+      (!facts.prFinishedAt ||
+        !Number.isFinite(Date.parse(facts.prFinishedAt)) ||
+        Date.parse(facts.prFinishedAt) >= now - WORKTREE_CLEANUP_GRACE_MS))
+  )
+    return { remove: false, reason: "four-hour activity grace period" };
+  if (facts.mergedIntoBase && !prFinished)
+    return { remove: false, reason: "default-branch ancestry alone does not prove finished work" };
+  if (prFinished) {
+    return idle < idleDays.landed
+      ? { remove: false, reason: `landed, ${active}` }
+      : { remove: true };
   }
 
-  if (!facts.branch) return { remove: false, reason: "detached HEAD" };
   if (facts.pr?.state === "OPEN") return { remove: false, reason: "PR open" };
+  if (facts.threads?.length) return { remove: false, reason: `T3 thread: ${facts.threads.join(", ")}` };
   if (idle < idleDays.abandoned) return { remove: false, reason: active };
   return { remove: true };
 }
@@ -91,7 +141,11 @@ export function nativeBuildCandidates(
 }
 
 /** Installed Codex versions to delete: every one but the current version and the newest others up to `keep` in all. */
-export function codexReleasesToDelete<T extends AgedEntry>(releases: T[], current: string, keep: number): T[] {
+export function codexReleasesToDelete<T extends AgedEntry>(
+  releases: T[],
+  current: string,
+  keep: number,
+): T[] {
   const others = releases.filter((release) => basename(release.path) !== current);
   return others.sort((a, b) => b.mtimeMs - a.mtimeMs).slice(Math.max(0, keep - 1));
 }
@@ -108,7 +162,10 @@ export function codexThreadsToDelete(
   threads: CodexThreadFacts[],
   options: { idleDays: number; now: number },
 ): CodexThreadFacts[] {
-  return threads.filter((thread) => !thread.sessionFileExists && options.now - thread.updatedMs > options.idleDays * DAY_MS);
+  return threads.filter(
+    (thread) =>
+      !thread.sessionFileExists && options.now - thread.updatedMs > options.idleDays * DAY_MS,
+  );
 }
 
 export interface TempEntry extends AgedEntry {
@@ -120,9 +177,16 @@ export interface TempEntry extends AgedEntry {
 }
 
 /** Temp entries agent runs left behind: this user's plain files and folders that no live service may still need. */
-export function tempLeftovers(entries: TempEntry[], options: { days: number; skip: RegExp; now: number }): TempEntry[] {
+export function tempLeftovers(
+  entries: TempEntry[],
+  options: { days: number; skip: RegExp; now: number },
+): TempEntry[] {
   return olderThan(entries, options.days, options.now).filter(
-    (entry) => entry.kind !== "other" && entry.ownedByUser && !entry.holdsSocket && !options.skip.test(entry.name),
+    (entry) =>
+      entry.kind !== "other" &&
+      entry.ownedByUser &&
+      !entry.holdsSocket &&
+      !options.skip.test(entry.name),
   );
 }
 
@@ -131,7 +195,8 @@ export function childrenInUse(dir: string, openPaths: Set<string>): Set<string> 
   const prefix = dir.endsWith(sep) ? dir : `${dir}${sep}`;
   const children = new Set<string>();
   for (const open of openPaths) {
-    if (open.startsWith(prefix)) children.add(join(dir, open.slice(prefix.length).split(sep)[0] ?? ""));
+    if (open.startsWith(prefix))
+      children.add(join(dir, open.slice(prefix.length).split(sep)[0] ?? ""));
   }
   return children;
 }
@@ -145,8 +210,13 @@ export interface DeviceFacts extends AgedEntry {
 }
 
 /** Simulators and emulators nobody uses: not running, unused for `days`, and not a device to keep. */
-export function devicesToDelete(devices: DeviceFacts[], options: { days: number; keep: RegExp; now: number }): DeviceFacts[] {
-  return olderThan(devices, options.days, options.now).filter((device) => !device.running && !options.keep.test(device.name));
+export function devicesToDelete(
+  devices: DeviceFacts[],
+  options: { days: number; keep: RegExp; now: number },
+): DeviceFacts[] {
+  return olderThan(devices, options.days, options.now).filter(
+    (device) => !device.running && !options.keep.test(device.name),
+  );
 }
 
 export interface TestDatabaseFacts {
@@ -168,7 +238,12 @@ export function testDatabaseFamily(name: string): string {
  */
 export function testDatabasesToDrop(
   databases: TestDatabaseFacts[],
-  options: { now: number; unmarkedDays: number; prefixes: string[]; checkoutExists: (path: string) => boolean },
+  options: {
+    now: number;
+    unmarkedDays: number;
+    prefixes: string[];
+    checkoutExists: (path: string) => boolean;
+  },
 ): TestDatabaseFacts[] {
   const families = new Map<string, TestDatabaseFacts[]>();
   for (const database of databases) {
@@ -201,10 +276,14 @@ const reportSchema = z.object({
   worktreesRemoved: z.array(z.object({ path: z.string(), bytes: z.number() })),
   worktreesKept: z.array(z.object({ path: z.string(), reason: z.string(), idleDays: z.number() })),
   nativeBuildsCleared: z.array(z.object({ path: z.string(), bytes: z.number() })).default([]),
-  codexThreadsDeleted: z.object({ threads: z.number(), bytes: z.number() }).default({ threads: 0, bytes: 0 }),
+  codexThreadsDeleted: z
+    .object({ threads: z.number(), bytes: z.number() })
+    .default({ threads: 0, bytes: 0 }),
   testDatabasesDropped: z.array(z.object({ name: z.string(), bytes: z.number() })).default([]),
   devicesDeleted: z
-    .array(z.object({ kind: z.enum(["simulator", "emulator"]), name: z.string(), bytes: z.number() }))
+    .array(
+      z.object({ kind: z.enum(["simulator", "emulator"]), name: z.string(), bytes: z.number() }),
+    )
     .default([]),
   /** Steps that took at least a minute, so a run that ran long shows where its time went. */
   slowSteps: z.array(z.object({ step: z.string(), seconds: z.number() })).default([]),
@@ -232,7 +311,9 @@ export function summarizePrune(report: PruneReport): string {
   ];
   if (report.skipped.length > 0) parts.push(`skipped: ${report.skipped.join("; ")}`);
   if (report.slowSteps.length > 0) {
-    parts.push(`slow steps: ${report.slowSteps.map((slow) => `${slow.step} ${Math.round(slow.seconds / 60)} min`).join("; ")}`);
+    parts.push(
+      `slow steps: ${report.slowSteps.map((slow) => `${slow.step} ${Math.round(slow.seconds / 60)} min`).join("; ")}`,
+    );
   }
   if (report.errors.length > 0) parts.push(`errors: ${report.errors.length}`);
   return parts.join(", ");
@@ -242,13 +323,23 @@ export function summarizePrune(report: PruneReport): string {
 // Filesystem
 // =============================================================================
 
-async function run(command: string, args: string[], options: { cwd?: string; timeout?: number } = {}) {
-  return execa(command, args, { reject: false, timeout: options.timeout ?? 60_000, cwd: options.cwd });
+async function run(
+  command: string,
+  args: string[],
+  options: { cwd?: string; timeout?: number } = {},
+) {
+  return execa(command, args, {
+    reject: false,
+    timeout: options.timeout ?? 60_000,
+    cwd: options.cwd,
+  });
 }
 
 /** Every path any of this user's processes holds open, including working directories; undefined when lsof fails. */
 async function listOpenPaths(): Promise<Set<string> | undefined> {
-  const result = await run("lsof", ["-nP", "-w", "-Fn", "-u", String(process.getuid?.() ?? 0)], { timeout: 120_000 });
+  const result = await run("lsof", ["-nP", "-w", "-Fn", "-u", String(process.getuid?.() ?? 0)], {
+    timeout: 120_000,
+  });
   if (!result.stdout) return undefined;
   const paths = result.stdout
     .split("\n")
@@ -263,6 +354,18 @@ async function sizeBytes(path: string): Promise<number> {
 }
 
 /** A folder's age is its newest direct entry, so a run folder that is still being written counts as fresh. */
+/**
+ * True when the project an Xcode DerivedData folder builds no longer exists. A project on an unmounted volume counts as
+ * present, because it comes back when the volume does.
+ */
+async function xcodeProjectGone(dir: string): Promise<boolean> {
+  const path = xcodeWorkspacePath(await readFile(join(dir, "info.plist"), "utf8").catch(() => ""));
+  if (!path || existsSync(path)) return false;
+
+  const volume = path.match(/^\/Volumes\/[^/]+/)?.[0];
+  return !volume || existsSync(volume);
+}
+
 async function childrenWithAge(dir: string): Promise<AgedEntry[]> {
   if (!existsSync(dir)) return [];
   const entries = await readdir(dir, { withFileTypes: true });
@@ -284,7 +387,9 @@ async function childrenWithAge(dir: string): Promise<AgedEntry[]> {
 async function totalSizeBytes(paths: string[]): Promise<number> {
   let total = 0;
   for (let start = 0; start < paths.length; start += 500) {
-    const result = await run("du", ["-sck", ...paths.slice(start, start + 500)], { timeout: 180_000 });
+    const result = await run("du", ["-sck", ...paths.slice(start, start + 500)], {
+      timeout: 180_000,
+    });
     total += Number(result.stdout.trim().split("\n").at(-1)?.split("\t")[0] ?? 0) * 1024;
   }
   return total;
@@ -300,7 +405,15 @@ async function userTempDir(): Promise<string | undefined> {
 /** Children macOS protects from deletion, such as its services' sandbox folders in the per-user temp folder. */
 async function protectedChildren(dir: string): Promise<Set<string>> {
   const flagged = ["(", "-flags", "+sunlnk", "-o", "-flags", "+restricted", ")"];
-  const result = await run("find", [dir, "-mindepth", "1", "-maxdepth", "1", ...flagged, "-print0"]);
+  const result = await run("find", [
+    dir,
+    "-mindepth",
+    "1",
+    "-maxdepth",
+    "1",
+    ...flagged,
+    "-print0",
+  ]);
   if (result.exitCode !== 0) throw new Error(`cannot list protected entries in ${dir}`);
   return new Set(result.stdout.split("\0").filter(Boolean));
 }
@@ -351,7 +464,9 @@ async function moveFile(source: string, target: string): Promise<void> {
   const copied = await run("cp", ["-p", source, target], { timeout: ARCHIVE_COPY_TIMEOUT_MS });
   if (copied.exitCode !== 0) {
     await rm(target, { force: true });
-    throw new Error(`cannot copy ${source}${copied.timedOut ? " within the time limit" : `: ${copied.stderr.trim()}`}`);
+    throw new Error(
+      `cannot copy ${source}${copied.timedOut ? " within the time limit" : `: ${copied.stderr.trim()}`}`,
+    );
   }
   if ((await lstat(target)).size !== (await lstat(source)).size) {
     throw new Error(`copy size mismatch for ${source}`);
@@ -363,7 +478,8 @@ async function moveFile(source: string, target: string): Promise<void> {
 async function removeEmptyParents(files: string[], root: string): Promise<void> {
   const dirs = new Set<string>();
   for (const file of files) {
-    for (let dir = dirname(file); dir.startsWith(`${root}${sep}`); dir = dirname(dir)) dirs.add(dir);
+    for (let dir = dirname(file); dir.startsWith(`${root}${sep}`); dir = dirname(dir))
+      dirs.add(dir);
   }
   for (const dir of [...dirs].sort((a, b) => b.length - a.length)) {
     if ((await readdir(dir)).length === 0) await rmdir(dir);
@@ -388,7 +504,13 @@ function mysqlClient(home: string): MysqlQuery | undefined {
   if (!binary) return undefined;
 
   return async (sql) => {
-    const result = await run(binary, [...MAC_WATCHER.storage.testDatabases.mysqlArgs, "-N", "-B", "-e", sql]);
+    const result = await run(binary, [
+      ...MAC_WATCHER.storage.testDatabases.mysqlArgs,
+      "-N",
+      "-B",
+      "-e",
+      sql,
+    ]);
     if (result.exitCode !== 0) return undefined;
     return result.stdout
       .split("\n")
@@ -401,7 +523,9 @@ function mysqlClient(home: string): MysqlQuery | undefined {
 async function newestChangeMs(dir: string): Promise<number> {
   try {
     const names = await readdir(dir);
-    const times = await Promise.all(names.map(async (name) => (await lstat(join(dir, name))).mtimeMs));
+    const times = await Promise.all(
+      names.map(async (name) => (await lstat(join(dir, name))).mtimeMs),
+    );
     return Math.max(statSync(dir).mtimeMs, ...times);
   } catch {
     // Unknown age counts as fresh, so the age rule never drops it.
@@ -414,22 +538,39 @@ async function newestChangeMs(dir: string): Promise<number> {
 // =============================================================================
 
 const simulatorListSchema = z.object({
-  devices: z.record(z.string(), z.array(z.object({ udid: z.string(), name: z.string(), state: z.string(), dataPath: z.string() }))),
+  devices: z.record(
+    z.string(),
+    z.array(
+      z.object({ udid: z.string(), name: z.string(), state: z.string(), dataPath: z.string() }),
+    ),
+  ),
 });
 
 /** A simulator's last use is when it last changed state or wrote data. */
 async function simulatorFacts(): Promise<DeviceFacts[]> {
   const result = await run("xcrun", ["simctl", "list", "devices", "-j"]);
-  if (result.exitCode !== 0) throw new Error(`simctl list failed: ${result.stderr.trim().slice(0, 200)}`);
-  const devices = Object.values(simulatorListSchema.parse(JSON.parse(result.stdout)).devices).flat();
+  if (result.exitCode !== 0)
+    throw new Error(`simctl list failed: ${result.stderr.trim().slice(0, 200)}`);
+  const devices = Object.values(
+    simulatorListSchema.parse(JSON.parse(result.stdout)).devices,
+  ).flat();
 
   return Promise.all(
     devices.map(async (device) => {
       const path = dirname(device.dataPath);
       const times = await Promise.all(
-        [join(path, "device.plist"), device.dataPath].map(async (file) => (await lstat(file).catch(() => undefined))?.mtimeMs ?? Date.now()),
+        [join(path, "device.plist"), device.dataPath].map(
+          async (file) => (await lstat(file).catch(() => undefined))?.mtimeMs ?? Date.now(),
+        ),
       );
-      return { kind: "simulator", id: device.udid, name: device.name, running: device.state !== "Shutdown", path, mtimeMs: Math.max(...times) };
+      return {
+        kind: "simulator",
+        id: device.udid,
+        name: device.name,
+        running: device.state !== "Shutdown",
+        path,
+        mtimeMs: Math.max(...times),
+      };
     }),
   );
 }
@@ -445,8 +586,18 @@ async function emulatorFacts(home: string): Promise<DeviceFacts[]> {
     const path = (await Bun.file(join(avdRoot, file)).text()).match(/^path=(.+)$/m)?.[1]?.trim();
     if (!path || !existsSync(path)) continue;
     // Lock files outlive a crashed emulator, so only a live process counts as running.
-    const running = new RegExp(`(-avd\\s+|@)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`, "m").test(commands);
-    facts.push({ kind: "emulator", id: name, name, running, path, mtimeMs: await newestChangeMs(path) });
+    const running = new RegExp(
+      `(-avd\\s+|@)${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(\\s|$)`,
+      "m",
+    ).test(commands);
+    facts.push({
+      kind: "emulator",
+      id: name,
+      name,
+      running,
+      path,
+      mtimeMs: await newestChangeMs(path),
+    });
   }
   return facts;
 }
@@ -470,10 +621,17 @@ function codexDatabase(home: string, name: string): string | undefined {
 
 /** Runs SQL against a Codex database, waiting while Codex holds a lock, and returns its rows. */
 async function sqlite(database: string, sql: string): Promise<string[][]> {
-  const result = await run("sqlite3", ["-bail", "-cmd", ".timeout 10000", "-separator", "\t", database, sql], {
-    timeout: 300_000,
-  });
-  if (result.exitCode !== 0) throw new Error(`sqlite3 failed on ${basename(database)}: ${result.stderr.trim().slice(0, 200)}`);
+  const result = await run(
+    "sqlite3",
+    ["-bail", "-cmd", ".timeout 10000", "-separator", "\t", database, sql],
+    {
+      timeout: 300_000,
+    },
+  );
+  if (result.exitCode !== 0)
+    throw new Error(
+      `sqlite3 failed on ${basename(database)}: ${result.stderr.trim().slice(0, 200)}`,
+    );
   return result.stdout
     .split("\n")
     .filter((line) => line.length > 0)
@@ -492,19 +650,28 @@ async function codexThreadFacts(state: string): Promise<CodexThreadFacts[]> {
 /** The given Codex threads that still exist; an id that is unsafe to query counts as existing. */
 async function codexThreadsLeft(state: string, ids: string[]): Promise<string[]> {
   const safe = ids.filter((id) => /^[\w-]+$/.test(id));
-  const rows = safe.length > 0 ? await sqlite(state, `select id from threads where id in ('${safe.join("', '")}')`) : [];
+  const rows =
+    safe.length > 0
+      ? await sqlite(state, `select id from threads where id in ('${safe.join("', '")}')`)
+      : [];
   return [...rows.map(([id = ""]) => id), ...ids.filter((id) => !safe.includes(id))];
 }
 
 /** Returns the space deleted threads left inside Codex's history database to the disk; resolves to the bytes saved. */
 async function shrinkCodexHistory(history: string): Promise<number> {
   const size = () =>
-    [history, `${history}-wal`].reduce((total, file) => total + (statSync(file, { throwIfNoEntry: false })?.size ?? 0), 0);
+    [history, `${history}-wal`].reduce(
+      (total, file) => total + (statSync(file, { throwIfNoEntry: false })?.size ?? 0),
+      0,
+    );
   const before = size();
 
   const [[free = "0"] = []] = await sqlite(history, "pragma freelist_count");
   for (let left = Number(free); left > 0; left -= VACUUM_PAGES) {
-    await sqlite(history, `pragma incremental_vacuum(${VACUUM_PAGES}); pragma wal_checkpoint(truncate)`);
+    await sqlite(
+      history,
+      `pragma incremental_vacuum(${VACUUM_PAGES}); pragma wal_checkpoint(truncate)`,
+    );
   }
 
   return Math.max(0, before - size());
@@ -516,24 +683,32 @@ async function testDatabaseFacts(mysql: MysqlQuery): Promise<TestDatabaseFacts[]
   if (!schemas) return undefined;
 
   // Only plain names, since they are interpolated into the queries below.
-  const names = schemas.map(([name]) => name ?? "").filter((name) => /^\w+$/.test(name) && rules.match.test(name));
+  const names = schemas
+    .map(([name]) => name ?? "")
+    .filter((name) => /^\w+$/.test(name) && rules.match.test(name));
   if (names.length === 0) return [];
 
   const dataDir = (await mysql("select @@datadir"))?.[0]?.[0] ?? "";
   const sizes = new Map(
-    ((await mysql("select table_schema, sum(data_length + index_length) from information_schema.tables group by table_schema")) ?? []).map(
-      ([schema, bytes]) => [schema ?? "", Number(bytes ?? 0)],
-    ),
+    (
+      (await mysql(
+        "select table_schema, sum(data_length + index_length) from information_schema.tables group by table_schema",
+      )) ?? []
+    ).map(([schema, bytes]) => [schema ?? "", Number(bytes ?? 0)]),
   );
   const marked = (
-    (await mysql(`select table_schema from information_schema.tables where table_name = '${rules.markerTable}'`)) ?? []
+    (await mysql(
+      `select table_schema from information_schema.tables where table_name = '${rules.markerTable}'`,
+    )) ?? []
   )
     .map(([schema]) => schema ?? "")
     .filter((schema) => names.includes(schema));
   const checkouts = new Map<string, string[]>();
   if (marked.length > 0) {
     const rows = await mysql(
-      marked.map((schema) => `(select '${schema}', path from \`${schema}\`.${rules.markerTable})`).join(" union all "),
+      marked
+        .map((schema) => `(select '${schema}', path from \`${schema}\`.${rules.markerTable})`)
+        .join(" union all "),
     );
     for (const [schema, path] of rows ?? []) {
       if (schema && path) checkouts.set(schema, [...(checkouts.get(schema) ?? []), path]);
@@ -566,7 +741,8 @@ export function parseWorktreeList(porcelain: string): ListedWorktree[] {
     .split("\n\n")
     .map((block) => block.split("\n"))
     .map((lines) => {
-      const value = (key: string) => lines.find((line) => line.startsWith(`${key} `))?.slice(key.length + 1);
+      const value = (key: string) =>
+        lines.find((line) => line.startsWith(`${key} `))?.slice(key.length + 1);
       return {
         path: value("worktree") ?? "",
         head: value("HEAD") ?? "",
@@ -582,25 +758,51 @@ async function worktreeFacts(
   baseBranch: string,
   worktree: ListedWorktree,
   openPaths: Set<string>,
+  now: number,
 ): Promise<WorktreeFacts> {
-  const git = (...args: string[]) => run("git", ["--no-optional-locks", "-C", worktree.path, ...args]);
-  const [status, gitDir, merged, pr] = await Promise.all([
+  const git = (...args: string[]) =>
+    run("git", ["--no-optional-locks", "-C", worktree.path, ...args]);
+  const [status, gitDir, merged, pr, commit, recentFiles] = await Promise.all([
     git("status", "--porcelain"),
     git("rev-parse", "--absolute-git-dir"),
     git("merge-base", "--is-ancestor", "HEAD", `origin/${baseBranch}`),
     worktree.branch
-      ? run("gh", ["pr", "list", "--head", worktree.branch, "--state", "all", "--json", "state,headRefOid", "--limit", "1"], {
-          cwd: root,
-        })
+      ? run(
+          "gh",
+          [
+            "pr",
+            "list",
+            "--head",
+            worktree.branch,
+            "--state",
+            "all",
+            "--json",
+            "state,headRefOid,mergedAt,closedAt",
+            "--limit",
+            "1",
+          ],
+          {
+            cwd: root,
+          },
+        )
       : Promise.resolve(undefined),
+    git("show", "-s", "--format=%ct", "HEAD"),
+    cleanupFilesChangedRecently(worktree.path, now),
   ]);
 
-  const activityFiles = ["index", "HEAD", "logs/HEAD"].map((name) => join(gitDir.stdout.trim(), name));
+  const activityFiles = ["index", "HEAD", "logs/HEAD"].map((name) =>
+    join(gitDir.stdout.trim(), name),
+  );
   const lastActivityMs = Math.max(
     ...activityFiles.map((file) => statSync(file, { throwIfNoEntry: false })?.mtimeMs ?? 0),
   );
-  if (gitDir.exitCode !== 0 || lastActivityMs === 0) throw new Error(`cannot read git state for ${worktree.path}`);
+  if (gitDir.exitCode !== 0 || lastActivityMs === 0)
+    throw new Error(`cannot read git state for ${worktree.path}`);
   if (pr && pr.exitCode !== 0) throw new Error(`gh pr list failed for ${worktree.branch}`);
+  const finishedPr = pr ? JSON.parse(pr.stdout || "[]")[0] : undefined;
+  const lastCommitMs = Number(commit.stdout.trim()) * 1000;
+  if (commit.exitCode !== 0 || !Number.isFinite(lastCommitMs))
+    throw new Error("cannot prove worktree commit age");
 
   return {
     path: worktree.path,
@@ -611,30 +813,60 @@ async function worktreeFacts(
     inUse: isInUse(worktree.path, openPaths),
     lastActivityMs,
     mergedIntoBase: merged.exitCode === 0,
-    pr: pr ? JSON.parse(pr.stdout || "[]")[0] : undefined,
+    pr: finishedPr,
+    prFinishedAt: finishedPr?.mergedAt ?? finishedPr?.closedAt ?? null,
+    lastCommitMs,
+    recentFiles,
   };
 }
 
 /** A worktree's native build output as absolute paths; empty while any of it changed within the idle window. */
 async function idleNativeBuilds(worktree: string): Promise<string[]> {
   const rule = MAC_WATCHER.storage.nativeBuilds;
-  const listed = await run("git", ["-C", worktree, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"]);
+  const listed = await run("git", [
+    "-C",
+    worktree,
+    "ls-files",
+    "-z",
+    "--others",
+    "--ignored",
+    "--exclude-standard",
+    "--directory",
+  ]);
   if (listed.exitCode !== 0) throw new Error(`cannot list ignored files in ${worktree}`);
-  const { outputs, dependencyDirs } = nativeBuildCandidates(listed.stdout.split("\0").filter(Boolean), rule);
+  const { outputs, dependencyDirs } = nativeBuildCandidates(
+    listed.stdout.split("\0").filter(Boolean),
+    rule,
+  );
 
   let dependencyBuilds: string[] = [];
   if (dependencyDirs.length > 0) {
-    const builds = rule.dependencies.builds.flatMap((pattern, index) => [...(index > 0 ? ["-o"] : []), "-path", pattern]);
+    const builds = rule.dependencies.builds.flatMap((pattern, index) => [
+      ...(index > 0 ? ["-o"] : []),
+      "-path",
+      pattern,
+    ]);
     const dirs = dependencyDirs.map((dir) => join(worktree, dir));
-    const found = await run("find", [...dirs, "-type", "d", "(", ...builds, ")", "-prune", "-print0"], { timeout: 180_000 });
+    const found = await run(
+      "find",
+      [...dirs, "-type", "d", "(", ...builds, ")", "-prune", "-print0"],
+      { timeout: 180_000 },
+    );
     if (found.exitCode !== 0) throw new Error(`cannot search dependencies in ${worktree}`);
     dependencyBuilds = found.stdout.split("\0").filter(Boolean);
   }
-  const paths = [...outputs.map((path) => join(worktree, path).replace(/\/$/, "")), ...dependencyBuilds];
+  const paths = [
+    ...outputs.map((path) => join(worktree, path).replace(/\/$/, "")),
+    ...dependencyBuilds,
+  ];
   if (paths.length === 0) return [];
 
   // One recent file means a build may still need the rest; find stops at the first.
-  const recent = await run("find", [...paths, "-mmin", `-${rule.idleHours * 60}`, "-print", "-quit"], { timeout: 180_000 });
+  const recent = await run(
+    "find",
+    [...paths, "-mmin", `-${rule.idleHours * 60}`, "-print", "-quit"],
+    { timeout: 180_000 },
+  );
   if (recent.stdout.trim()) return [];
   if (recent.exitCode !== 0) throw new Error(`cannot check native build ages in ${worktree}`);
   return paths;
@@ -677,7 +909,9 @@ export async function pruneStorage(options: {
     try {
       await step();
     } catch (error) {
-      report.errors.push(`${label}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300));
+      report.errors.push(
+        `${label}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300),
+      );
     }
 
     const seconds = Math.round((Date.now() - started) / 1000);
@@ -691,13 +925,47 @@ export async function pruneStorage(options: {
     return report;
   }
 
+  let cleanupThreads: CleanupThread[] | null = null;
+  let worktreeVisibility = false;
+  const protectedWorktreePaths = new Set(openPaths);
+  await attempt("worktree bindings", async () => {
+    cleanupThreads = await readCleanupThreads(home);
+    const protect = (path: string) => {
+      protectedWorktreePaths.add(existsSync(path) ? realpathSync(path) : path);
+    };
+    for (const thread of cleanupThreads) {
+      protect(thread.projectRoot);
+      if (thread.worktreePath) protect(thread.worktreePath);
+    }
+    for (const project of ACTIVE_PROJECTS) {
+      if (!existsSync(project.canonicalRoot)) continue;
+      const result = await run("git", [
+        "-C",
+        project.canonicalRoot,
+        "worktree",
+        "list",
+        "--porcelain",
+      ]);
+      if (result.exitCode !== 0) throw new Error(`cannot list worktrees for ${project.name}`);
+      for (const tree of parseWorktreeList(result.stdout)) protect(tree.path);
+    }
+    worktreeVisibility = true;
+  });
+
   for (const rule of rules.deleteChildren) {
     await attempt(rule.path, async () => {
       const match = "match" in rule ? rule.match : undefined;
-      const children = (await childrenWithAge(join(home, rule.path))).filter(
-        (child) => !match || match.test(child.path),
+      const projectGoneHours = "projectGoneHours" in rule ? rule.projectGoneHours : undefined;
+      const children = await Promise.all(
+        (await childrenWithAge(join(home, rule.path)))
+          .filter((child) => !match || match.test(child.path))
+          .map(async (child) => ({
+            ...child,
+            projectGone: projectGoneHours !== undefined && (await xcodeProjectGone(child.path)),
+          })),
       );
-      for (const child of olderThan(children, rule.days, now)) {
+
+      for (const child of staleChildren(children, { days: rule.days, projectGoneHours, now })) {
         if (isInUse(child.path, openPaths)) continue;
         const bytes = await sizeBytes(child.path);
         if (!dryRun) await rm(child.path, { recursive: true, force: true });
@@ -708,16 +976,26 @@ export async function pruneStorage(options: {
   }
 
   await attempt("temp", async () => {
+    if (!worktreeVisibility) {
+      report.skipped.push("worktree visibility unavailable; temporary directories kept");
+      return;
+    }
     const uid = process.getuid?.() ?? -1;
-    const dirs = ["/private/tmp", await userTempDir()].filter((dir): dir is string => Boolean(dir && existsSync(dir)));
+    const dirs = ["/private/tmp", await userTempDir()].filter((dir): dir is string =>
+      Boolean(dir && existsSync(dir)),
+    );
     for (const dir of dirs.map((dir) => realpathSync(dir))) {
-      const kept = new Set([...childrenInUse(dir, openPaths), ...(await protectedChildren(dir))]);
+      const kept = new Set([
+        ...childrenInUse(dir, protectedWorktreePaths),
+        ...(await protectedChildren(dir)),
+      ]);
       const leftovers = tempLeftovers(await tempEntries(dir, uid), { ...rules.temp, now }).filter(
         (entry) => !kept.has(entry.path),
       );
       const bytes = await totalSizeBytes(leftovers.map((entry) => entry.path));
       if (!dryRun) {
-        for (const entry of leftovers) await attempt(entry.path, () => rm(entry.path, { recursive: true, force: true }));
+        for (const entry of leftovers)
+          await attempt(entry.path, () => rm(entry.path, { recursive: true, force: true }));
       }
       report.temp.entries += leftovers.length;
       report.temp.bytes += bytes;
@@ -735,12 +1013,20 @@ export async function pruneStorage(options: {
           (file) => !isInUse(file.path, openPaths),
         );
         for (const file of files) {
-          if (!dryRun) await moveFile(file.path, join(rules.archiveRoot, rule.to, relative(source, file.path)));
+          if (!dryRun)
+            await moveFile(
+              file.path,
+              join(rules.archiveRoot, rule.to, relative(source, file.path)),
+            );
           report.archived.files += 1;
           report.archived.bytes += file.size;
           report.freedBytes += file.size;
         }
-        if (!dryRun) await removeEmptyParents(files.map((file) => file.path), source);
+        if (!dryRun)
+          await removeEmptyParents(
+            files.map((file) => file.path),
+            source,
+          );
       });
     }
   }
@@ -749,7 +1035,10 @@ export async function pruneStorage(options: {
   const codexHistory = codexDatabase(home, "thread_history");
   if (codexState && codexHistory) {
     await attempt("codex threads", async () => {
-      const idle = codexThreadsToDelete(await codexThreadFacts(codexState), { idleDays: rules.codex.threadIdleDays, now });
+      const idle = codexThreadsToDelete(await codexThreadFacts(codexState), {
+        idleDays: rules.codex.threadIdleDays,
+        now,
+      });
       if (dryRun) {
         report.codexThreadsDeleted.threads = idle.length;
         return;
@@ -764,7 +1053,8 @@ export async function pruneStorage(options: {
       }
       const left = failed.length > 0 ? await codexThreadsLeft(codexState, failed) : [];
       report.codexThreadsDeleted.threads += idle.length - left.length;
-      if (left.length > 0) throw new Error(`codex delete failed for ${left.length} threads, such as ${left[0]}`);
+      if (left.length > 0)
+        throw new Error(`codex delete failed for ${left.length} threads, such as ${left[0]}`);
     });
 
     // Also returns space left by a run that stopped partway.
@@ -781,7 +1071,11 @@ export async function pruneStorage(options: {
     const standalone = join(home, ".codex/packages/standalone");
     if (!existsSync(join(standalone, "current"))) return;
     const current = basename(realpathSync(join(standalone, "current")));
-    const releases = codexReleasesToDelete(await childrenWithAge(join(standalone, "releases")), current, rules.codex.keepReleases);
+    const releases = codexReleasesToDelete(
+      await childrenWithAge(join(standalone, "releases")),
+      current,
+      rules.codex.keepReleases,
+    );
     for (const release of releases.filter((release) => !isInUse(release.path, openPaths))) {
       const bytes = await sizeBytes(release.path);
       if (!dryRun) await rm(release.path, { recursive: true, force: true });
@@ -795,14 +1089,20 @@ export async function pruneStorage(options: {
   });
 
   await attempt("devices", async () => {
-    const devices = [...(Bun.which("xcrun") ? await simulatorFacts() : []), ...(await emulatorFacts(home))];
-    const unused = devicesToDelete(devices, { ...rules.devices, now }).filter((device) => !isInUse(device.path, openPaths));
+    const devices = [
+      ...(Bun.which("xcrun") ? await simulatorFacts() : []),
+      ...(await emulatorFacts(home)),
+    ];
+    const unused = devicesToDelete(devices, { ...rules.devices, now }).filter(
+      (device) => !isInUse(device.path, openPaths),
+    );
     for (const device of unused) {
       await attempt(`${device.kind} ${device.name}`, async () => {
         const bytes = await sizeBytes(device.path);
         if (!dryRun && device.kind === "simulator") {
           const deleted = await run("xcrun", ["simctl", "delete", device.id]);
-          if (deleted.exitCode !== 0) throw new Error(deleted.stderr.trim() || "simctl delete failed");
+          if (deleted.exitCode !== 0)
+            throw new Error(deleted.stderr.trim() || "simctl delete failed");
         }
         if (!dryRun && device.kind === "emulator") {
           await rm(device.path, { recursive: true, force: true });
@@ -817,7 +1117,17 @@ export async function pruneStorage(options: {
   for (const project of ACTIVE_PROJECTS) {
     if (!existsSync(project.canonicalRoot)) continue;
     await attempt(project.name, async () => {
-      const listed = await run("git", ["-C", project.canonicalRoot, "worktree", "list", "--porcelain"]);
+      if (!cleanupThreads) {
+        report.skipped.push(`${project.name}: T3 thread visibility unavailable; worktrees kept`);
+        return;
+      }
+      const listed = await run("git", [
+        "-C",
+        project.canonicalRoot,
+        "worktree",
+        "list",
+        "--porcelain",
+      ]);
       if (listed.exitCode !== 0) throw new Error("git worktree list failed");
       const agentWorktrees = parseWorktreeList(listed.stdout).filter((worktree) =>
         rules.agentWorktreeDirs.some((dir) => worktree.path.includes(dir)),
@@ -825,25 +1135,66 @@ export async function pruneStorage(options: {
       for (const worktree of agentWorktrees) {
         await attempt(worktree.path, async () => {
           if (!existsSync(worktree.path)) return;
-          const facts = await worktreeFacts(project.canonicalRoot, project.baseBranch, worktree, openPaths);
+          const bound = cleanupBoundThreads(
+            project.canonicalRoot,
+            worktree.path,
+            worktree.branch ?? null,
+            cleanupThreads!,
+          );
+          const running = bound.filter((thread) => thread.running).map((thread) => thread.title);
+          // A worktree made in the last four hours may not be bound to its thread yet, so any busy thread in its project
+          // keeps it.
+          const young = now - statSync(worktree.path).birthtimeMs < WORKTREE_CLEANUP_GRACE_MS;
+          const busy = young
+            ? cleanupProjectThreadTitles(project.canonicalRoot, cleanupThreads!, now)
+            : [];
+          if (
+            !cleanupWorktreeAllowed(worktree.path, project.canonicalRoot, home) ||
+            running.length ||
+            busy.length
+          ) {
+            report.worktreesKept.push({
+              path: worktree.path,
+              reason: running.length
+                ? `running T3 thread: ${running.join(", ")}`
+                : busy.length
+                  ? `new worktree in a busy T3 project: ${busy.join(", ")}`
+                  : "outside managed worktree roots",
+              idleDays: 0,
+            });
+            return;
+          }
+          const facts: WorktreeFacts = {
+            ...(await worktreeFacts(project.canonicalRoot, project.baseBranch, worktree, openPaths, now)),
+            threads: bound.filter((thread) => !thread.running).map((thread) => thread.title),
+          };
           const decision = decideWorktree(facts, now, rules.worktreeIdleDays);
           if (!decision.remove) {
             const idleDays = Math.max(0, Math.floor((now - facts.lastActivityMs) / DAY_MS));
             report.worktreesKept.push({ path: worktree.path, reason: decision.reason, idleDays });
 
-            if (facts.inUse || now - facts.lastActivityMs < rules.nativeBuilds.idleHours * HOUR_MS) return;
+            if (facts.inUse || now - facts.lastActivityMs < rules.nativeBuilds.idleHours * HOUR_MS)
+              return;
             const builds = await idleNativeBuilds(worktree.path);
             if (builds.length === 0) return;
             const buildBytes = await totalSizeBytes(builds);
-            if (!dryRun) for (const path of builds) await rm(path, { recursive: true, force: true });
+            if (!dryRun)
+              for (const path of builds) await rm(path, { recursive: true, force: true });
             report.nativeBuildsCleared.push({ path: worktree.path, bytes: buildBytes });
             report.freedBytes += buildBytes;
             return;
           }
           const bytes = await sizeBytes(worktree.path);
           if (!dryRun) {
-            const removed = await run("git", ["-C", project.canonicalRoot, "worktree", "remove", worktree.path]);
-            if (removed.exitCode !== 0) throw new Error(removed.stderr.trim() || "git worktree remove failed");
+            const removed = await run("git", [
+              "-C",
+              project.canonicalRoot,
+              "worktree",
+              "remove",
+              worktree.path,
+            ]);
+            if (removed.exitCode !== 0)
+              throw new Error(removed.stderr.trim() || "git worktree remove failed");
           }
           report.worktreesRemoved.push({ path: worktree.path, bytes });
           report.freedBytes += bytes;
@@ -868,7 +1219,8 @@ export async function pruneStorage(options: {
     // One call per database, so a slow drop on a busy disk never times out the rest.
     for (const database of doomed) {
       await attempt(`test database ${database.name}`, async () => {
-        if (!dryRun && !(await mysql(`drop database if exists \`${database.name}\``))) throw new Error("drop failed");
+        if (!dryRun && !(await mysql(`drop database if exists \`${database.name}\``)))
+          throw new Error("drop failed");
         report.testDatabasesDropped.push({ name: database.name, bytes: database.bytes });
         report.freedBytes += database.bytes;
       });

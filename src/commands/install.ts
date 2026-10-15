@@ -4,6 +4,8 @@
  * Internal local installer used by `mise run install`.
  */
 
+import { agentOutput } from "../lib/agent-output";
+
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import {
   readFile,
@@ -42,7 +44,7 @@ import { claudePoolPaths, installClaudePool, retireLegacyClaudeFiles } from "../
 import { secureManagedCredentials } from "../lib/credentials";
 import { readDeviceProfile, selectRemoteSkillSources } from "../lib/device";
 import { installMacWatcher } from "../lib/mac-watcher";
-import { colors, compactOutput, print, printBox, printSeparator } from "../lib/print";
+import { print } from "../lib/print";
 import { assertCentralizedModels, renderManagedMarkdown } from "../lib/models";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
 import { discoverLocalSkills, findUnknownSkillReferences } from "../lib/skills";
@@ -117,6 +119,7 @@ const SETUP_ROOT_PLACEHOLDER = "{{SETUP_ROOT}}";
 const SHARED_BIN_COMMANDS = [
   "my-setup",
   "system-tools",
+  "worktree-cleanup",
   "hugeicons",
   "doctor",
   "pk",
@@ -124,6 +127,8 @@ const SHARED_BIN_COMMANDS = [
   "html-artifact",
   "store-build",
   "device-queue",
+  "heavy-run",
+  "ci-runner",
 ];
 
 // =============================================================================
@@ -387,7 +392,10 @@ async function installClaude(profile: DeviceProfile): Promise<void> {
   if (profile.mcpServers) await installClaudeMcpServers(paths.configDir);
 }
 
-async function mergeClaudeSettingsAsync(profile: DeviceProfile, settingsPath: string): Promise<void> {
+async function mergeClaudeSettingsAsync(
+  profile: DeviceProfile,
+  settingsPath: string,
+): Promise<void> {
   print.info(`Merging Claude Code settings into ${settingsPath}...`);
   await ensureParentDir(settingsPath);
   let existing: Record<string, unknown> = {};
@@ -936,59 +944,9 @@ export async function install(): Promise<DeviceProfile> {
   const claude = claudePaths(profile);
   const rtk = profile.opencode && (await detectRtk(profile));
 
-  if (!compactOutput) {
-    console.log();
-    printBox("My Setup - Installer");
-    console.log();
-    printSeparator();
-    console.log(colors.blue(`Installing from local repo for the ${profile.name} profile`));
-    console.log();
-    if (profile.opencode) {
-      console.log(colors.blue("  OpenCode:"));
-      console.log(`    Rules:    ${OPENCODE_PATHS.rules}`);
-      console.log(`    Config:   ${OPENCODE_PATHS.config} (merge)`);
-      console.log();
-    }
-    console.log(colors.blue("  Codex:"));
-    console.log(`    Rules:    ${CODEX_PATHS.rules}`);
-    console.log(`    Config:   ${CODEX_PATHS.config} (managed merge)`);
-    console.log();
-    console.log(
-      colors.blue(
-        `  Claude Code (${profile.claude === "pool" ? "Claude Pool" : "direct sign-in"}):`,
-      ),
-    );
-    console.log(`    Rules:    ${claude.rules}`);
-    console.log(`    Settings: ${claude.settings} (merge)`);
-    console.log(`    Skills:   ${claude.skills} -> ${SHARED_PATHS.skills}`);
-    console.log();
-    console.log(colors.yellow("  Shared:"));
-    console.log(
-      `    Skills:   ${SHARED_PATHS.skills} (managed sync, prune invalid, preserve valid custom)`,
-    );
-    if (profile.shell) {
-      console.log(`    Zsh:      ${SHARED_PATHS.zsh}`);
-      console.log(`    Zshenv:   ${SHARED_PATHS.zshenv}`);
-      console.log(`    Secrets:  ${SHARED_PATHS.secrets}`);
-      console.log(`    Bin:      ${SHARED_PATHS.binDir} (${SHARED_BIN_COMMANDS.join(", ")})`);
-    }
-    if (profile.vscodeKeymap) {
-      console.log(
-        `    VS Code:  ${vscodeKeybindingsPath(HOME)} (replace) + IntelliJ keymap extension`,
-      );
-    }
-    console.log(`    T3 Code:  ${t3StateDir(HOME)} (managed merge + theme, when installed)`);
-    printSeparator();
-    console.log();
-  }
-
   if (profile.shell) await assertThinUserZshrc();
   await configureRepoGitHooks();
 
-  if (!compactOutput) {
-    console.log();
-    console.log(colors.blue("Installing in parallel..."));
-  }
   await Promise.all([
     installSharedSkills(profile),
     profile.opencode && installOpencode(profile, rtk),
@@ -1045,12 +1003,6 @@ export async function install(): Promise<DeviceProfile> {
     }),
   ]);
 
-  if (!compactOutput) {
-    console.log();
-    printBox("Installation completed successfully!", "green");
-    console.log();
-  }
-
   return profile;
 }
 
@@ -1065,6 +1017,8 @@ async function detectRtk(profile: DeviceProfile): Promise<boolean> {
 }
 
 if (import.meta.main) {
+  agentOutput("install", { nativeJson: false });
+
   install().catch((err: Error) => {
     console.error(err);
     process.exit(1);

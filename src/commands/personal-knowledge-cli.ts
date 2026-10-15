@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { agentOutput, parseCli } from "../lib/agent-output";
 import { cac } from "cac";
 
 import {
@@ -13,6 +14,14 @@ import {
   type PersonalKnowledgeNewOptions,
   type PersonalKnowledgeOptions,
 } from "./personal-knowledge";
+
+agentOutput("pk", {
+  nativeJson:
+    process.argv.includes("--format=json") ||
+    (process.argv.includes("--format") &&
+      process.argv[process.argv.indexOf("--format") + 1] === "json"),
+  summary: (output) => (process.argv[2] === "new" ? output.trim().split("\n")[0] : "pk: ok"),
+});
 
 const cli = cac("pk");
 const rootOption = "--root <path>";
@@ -60,9 +69,7 @@ cli
   .option(rootOption, rootDescription)
   .action((options: PersonalKnowledgeOptions) => personalKnowledgeReindex(options));
 
+cli.option("--json", "Emit structured results");
+cli.option("--verbose", "Print details");
 cli.help();
-cli.addEventListener("command:*", () => {
-  console.error(`Unknown command: ${cli.args.join(" ")}`);
-  process.exitCode = 1;
-});
-cli.parse();
+parseCli(cli);

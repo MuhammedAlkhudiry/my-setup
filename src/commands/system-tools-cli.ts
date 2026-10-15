@@ -1,8 +1,14 @@
 #!/usr/bin/env bun
 
+import { agentOutput, parseCli } from "../lib/agent-output";
 import { cac } from "cac";
 
 import { toolsStatus, toolsUpdatePlan } from "./tools";
+
+agentOutput("system-tools", {
+  nativeJson: true,
+  failures: (_output, errors) => errors.trim().split("\n").filter(Boolean),
+});
 
 const cli = cac("system-tools");
 
@@ -12,9 +18,7 @@ cli
   .command("update-plan", "Print safe update commands for external CLI tools")
   .action(toolsUpdatePlan);
 
+cli.option("--json", "Emit structured results");
+cli.option("--verbose", "Print details");
 cli.help();
-cli.addEventListener("command:*", () => {
-  console.error(`Unknown command: ${cli.args.join(" ")}`);
-  process.exitCode = 1;
-});
-cli.parse();
+parseCli(cli);

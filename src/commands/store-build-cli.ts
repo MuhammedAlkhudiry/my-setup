@@ -3,6 +3,7 @@
 // Builds a store app on this Mac with `eas build --local`, then uploads it with `eas submit`, so a store build spends
 // no EAS cloud build. Run it from the app folder that holds eas.json. The mobile-app-infra skill documents when to use it.
 
+import { agentOutput, parseCli } from "../lib/agent-output";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, statfsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -64,16 +65,26 @@ function run(command: string[], env: NodeJS.ProcessEnv, dryRun = false): boolean
   return dryRun || spawnSync(command[0], command.slice(1), { env, stdio: "inherit" }).status === 0;
 }
 
-function capture(command: string[], env = process.env): { ok: boolean; stdout: string; stderr: string } {
+function capture(
+  command: string[],
+  env = process.env,
+): { ok: boolean; stdout: string; stderr: string } {
   const result = spawnSync(command[0], command.slice(1), { encoding: "utf8", env });
 
   return { ok: result.status === 0, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 }
 
-function profileValue<T>(eas: EasJson, name: string, read: (profile: BuildProfile) => T | undefined): T | undefined {
+function profileValue<T>(
+  eas: EasJson,
+  name: string,
+  read: (profile: BuildProfile) => T | undefined,
+): T | undefined {
   const profile = eas.build?.[name];
 
-  return profile && (read(profile) ?? (profile.extends ? profileValue(eas, profile.extends, read) : undefined));
+  return (
+    profile &&
+    (read(profile) ?? (profile.extends ? profileValue(eas, profile.extends, read) : undefined))
+  );
 }
 
 // A folder under /Volumes stays behind when its disk is unmounted, so only a separate device counts as mounted.
@@ -84,10 +95,13 @@ function isMounted(path: string): boolean {
 // A build needs about 20 GB, more than the internal disk keeps free.
 function buildRoot(): string {
   const root =
-    process.env.EAS_LOCAL_BUILD_ROOT || (isMounted(EXTERNAL_DISK) ? join(EXTERNAL_DISK, "eas-builds") : undefined);
+    process.env.EAS_LOCAL_BUILD_ROOT ||
+    (isMounted(EXTERNAL_DISK) ? join(EXTERNAL_DISK, "eas-builds") : undefined);
 
   if (!root) {
-    fail(`${EXTERNAL_DISK} is not mounted. Mount it, or set EAS_LOCAL_BUILD_ROOT to a folder with ${MIN_FREE_GB} GB free.`);
+    fail(
+      `${EXTERNAL_DISK} is not mounted. Mount it, or set EAS_LOCAL_BUILD_ROOT to a folder with ${MIN_FREE_GB} GB free.`,
+    );
   }
 
   mkdirSync(root, { recursive: true });
@@ -114,7 +128,8 @@ function checkSecrets(environment: string, allowMissing: string[]): void {
   const sentryLogin = join(homedir(), ".sentryclirc");
   const missing = missingSecrets(parseEasVariables(listing.stdout), process.env, {
     allowMissing,
-    hasSentryLogin: existsSync(sentryLogin) && /^\s*token\s*=\s*\S/m.test(readFileSync(sentryLogin, "utf8")),
+    hasSentryLogin:
+      existsSync(sentryLogin) && /^\s*token\s*=\s*\S/m.test(readFileSync(sentryLogin, "utf8")),
     fileExists: existsSync,
   });
 
@@ -133,7 +148,9 @@ function easAuthHeaders(): Record<string, string> {
   }
 
   const state = join(homedir(), ".expo", "state.json");
-  const session = existsSync(state) ? (JSON.parse(readFileSync(state, "utf8")) as ExpoState).auth?.sessionSecret : "";
+  const session = existsSync(state)
+    ? (JSON.parse(readFileSync(state, "utf8")) as ExpoState).auth?.sessionSecret
+    : "";
 
   if (!session) {
     fail("Run eas login, or set EXPO_TOKEN, so store-build can read the EAS iOS credentials.");
@@ -155,7 +172,8 @@ async function readEasProfiles(projectId: string): Promise<Map<string, string>> 
   }
 
   if (!response.data?.app?.byId) {
-    const reason = response.errors?.map((error) => error.message).join("; ") ?? "the response has no project";
+    const reason =
+      response.errors?.map((error) => error.message).join("; ") ?? "the response has no project";
     fail(`Could not read the EAS iOS credentials of project ${projectId}: ${reason}`);
   }
 
@@ -165,7 +183,11 @@ async function readEasProfiles(projectId: string): Promise<Map<string, string>> 
 // Runs before a cloud build too, because EAS hands it the same stored profiles. A project that keeps its own profiles
 // in credentials.json signs with those, and EAS assigns none.
 async function checkAppGroups(eas: EasJson, buildProfile: string): Promise<void> {
-  const source = profileValue(eas, buildProfile, (profile) => profile.ios?.credentialsSource ?? profile.credentialsSource);
+  const source = profileValue(
+    eas,
+    buildProfile,
+    (profile) => profile.ios?.credentialsSource ?? profile.credentialsSource,
+  );
 
   if (source === "local") {
     return;
@@ -188,7 +210,9 @@ async function checkAppGroups(eas: EasJson, buildProfile: string): Promise<void>
   }
 
   if (!projectId) {
-    fail("The app config has no extra.eas.projectId, so store-build cannot find its EAS credentials.");
+    fail(
+      "The app config has no extra.eas.projectId, so store-build cannot find its EAS credentials.",
+    );
   }
 
   const gaps = appGroupGaps(targets, await readEasProfiles(projectId));
@@ -201,12 +225,24 @@ async function checkAppGroups(eas: EasJson, buildProfile: string): Promise<void>
 function buildInCloud(platform: Platform, submitProfile: string, options: Options): void {
   const command = ["eas", "build", "--platform", platform, "--profile", options.profile];
 
-  if (!run([...command, "--auto-submit-with-profile", submitProfile, "--non-interactive"], process.env, options.dryRun)) {
+  if (
+    !run(
+      [...command, "--auto-submit-with-profile", submitProfile, "--non-interactive"],
+      process.env,
+      options.dryRun,
+    )
+  ) {
     fail("The EAS build or its submission failed; see the build on expo.dev.");
   }
 }
 
-function buildLocally(appDir: string, platform: Platform, submitProfile: string, eas: EasJson, options: Options): void {
+function buildLocally(
+  appDir: string,
+  platform: Platform,
+  submitProfile: string,
+  eas: EasJson,
+  options: Options,
+): void {
   const env = storeBuildEnv(process.env);
 
   if (platform === "ios") {
@@ -226,19 +262,42 @@ function buildLocally(appDir: string, platform: Platform, submitProfile: string,
     }
   }
 
-  const environment = profileValue(eas, options.profile, (profile) => profile.environment) ?? options.profile;
+  const environment =
+    profileValue(eas, options.profile, (profile) => profile.environment) ?? options.profile;
   checkSecrets(environment, options.allowMissing?.split(",").filter(Boolean) ?? []);
 
   const root = buildRoot();
-  const runDir = join(root, `${basename(appDir)}-${platform}-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+  const runDir = join(
+    root,
+    `${basename(appDir)}-${platform}-${new Date().toISOString().replace(/[:.]/g, "-")}`,
+  );
   const archive = join(runDir, `${basename(appDir)}.${ARCHIVE_EXTENSION[platform]}`);
   // Temporary files and the Xcode archive stay on the build disk and go with the run.
   env.EAS_LOCAL_BUILD_WORKINGDIR = join(runDir, "work");
   env.TMPDIR = join(runDir, "tmp");
   env.GYM_BUILD_PATH = join(runDir, "xcode-archive");
 
-  const build = ["eas", "build", "--local", "--platform", platform, "--profile", options.profile, "--non-interactive"];
-  const submit = ["eas", "submit", "--platform", platform, "--profile", submitProfile, "--path", archive, "--non-interactive"];
+  const build = [
+    "eas",
+    "build",
+    "--local",
+    "--platform",
+    platform,
+    "--profile",
+    options.profile,
+    "--non-interactive",
+  ];
+  const submit = [
+    "eas",
+    "submit",
+    "--platform",
+    platform,
+    "--profile",
+    submitProfile,
+    "--path",
+    archive,
+    "--non-interactive",
+  ];
 
   if (options.dryRun) {
     run([...build, "--output", archive], env, true);
@@ -258,7 +317,9 @@ function buildLocally(appDir: string, platform: Platform, submitProfile: string,
     submitted = run(submit, env);
 
     if (!submitted) {
-      fail(`The submission failed. The build is kept at ${archive}; retry from ${appDir} with:\n${submit.join(" ")}`);
+      fail(
+        `The submission failed. The build is kept at ${archive}; retry from ${appDir} with:\n${submit.join(" ")}`,
+      );
     }
   } finally {
     rmSync(env.EAS_LOCAL_BUILD_WORKINGDIR, { recursive: true, force: true });
@@ -272,7 +333,11 @@ function buildLocally(appDir: string, platform: Platform, submitProfile: string,
   }
 }
 
-async function storeBuild(platform: string, submitProfile: string, options: Options): Promise<void> {
+async function storeBuild(
+  platform: string,
+  submitProfile: string,
+  options: Options,
+): Promise<void> {
   const appDir = process.cwd();
   const easPath = join(appDir, "eas.json");
 
@@ -306,6 +371,8 @@ async function storeBuild(platform: string, submitProfile: string, options: Opti
   }
 }
 
+agentOutput("store-build", { nativeJson: false });
+
 const cli = cac("store-build");
 
 cli
@@ -316,7 +383,10 @@ cli
   .option("--profile <name>", "EAS build profile", { default: "production" })
   .option("--cloud", "Build on EAS instead, and submit when the build finishes")
   .option("--allow-missing <names>", "Comma-separated secret EAS variables the build does not use")
-  .option("--dry-run", "Run the checks and print the build and submit commands without running them")
+  .option(
+    "--dry-run",
+    "Run the checks and print the build and submit commands without running them",
+  )
   .action(async (platform: string, submitProfile: string, options: Options) => {
     try {
       await storeBuild(platform, submitProfile, options);
@@ -330,5 +400,7 @@ cli
     }
   });
 
+cli.option("--json", "Emit structured results");
+cli.option("--verbose", "Print details");
 cli.help();
-cli.parse();
+parseCli(cli);

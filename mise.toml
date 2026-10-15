@@ -1,47 +1,52 @@
+[settings]
+task.quiet = true
+task.output = "interleave"
+task.timings = false
+
 [tasks.install]
 description = "Generate outputs and install synced local config"
-run = "bun run install:local"
+run = "bun src/cli.ts install"
 
 [tasks.check]
 description = "Run all project checks"
-depends = ["format:check", "lint", "typecheck", "test"]
+run = "bun src/commands/check-cli.ts check"
 
 [tasks.format]
 description = "Format TypeScript and project config files"
-run = "bun run format"
+run = "bun src/commands/check-cli.ts format"
 
 [tasks."format:check"]
 description = "Check formatting for TypeScript and project config files"
-run = "bun run format:check"
+run = "bun src/commands/check-cli.ts format:check"
 
 [tasks.lint]
 description = "Lint TypeScript files"
-run = "bun run lint"
+run = "bun src/commands/check-cli.ts lint"
 
 [tasks."lint:fix"]
 description = "Auto-fix lint issues"
-run = "bun run lint:fix"
+run = "bun src/commands/check-cli.ts lint:fix"
 
 [tasks.typecheck]
 description = "Type-check TypeScript without emitting files"
-run = "bun run typecheck"
+run = "bun src/commands/check-cli.ts typecheck"
 
 [tasks.test]
 description = "Run Bun tests"
-run = "bun test"
+run = "bun src/commands/check-cli.ts test"
 
 [tasks.doctor]
 description = "Check local required and optional tools"
-run = "bun run doctor"
+run = "zsh shell/doctor.zsh"
 
 [tasks."tools:status"]
 description = "Show installed external CLI tool versions"
-run = "bun run tools:status"
+run = "bun src/commands/system-tools-cli.ts status"
 
 [tasks."tools:update:plan"]
 description = "Print safe update commands for external CLI tools"
-run = "bun run tools:update:plan"
+run = "bun src/commands/system-tools-cli.ts update-plan"
 
 [tasks.watcher]
 description = "Show the Mac watcher's alerts and memory, run it now, or resolve an alert"
-run = "bun run watcher"
+run = "bun src/commands/mac-watcher.ts"

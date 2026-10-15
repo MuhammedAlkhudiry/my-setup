@@ -37,10 +37,14 @@ export function createOpencodePermission(
 
 export function createClaudePermissionAllowList(profile: Allowlist): string[] {
   return [
-    ...profile.allowedDirectories.flatMap((directory) => [
-      `Edit(${directory})`,
-      `Read(${directory})`,
-    ]),
+    ...profile.allowedDirectories.flatMap((directory) => {
+      // These are directory grants. Claude's gitignore syntax needs ** for descendants
+      // and // for filesystem-root paths; ~/ already anchors at the user's home.
+      const recursive = directory.endsWith("/*") ? `${directory}*` : directory;
+      const path = recursive.startsWith("/") ? `/${recursive}` : recursive;
+
+      return [`Edit(${path})`, `Read(${path})`];
+    }),
     ...ALLOWED_READ_PATTERNS.map((pattern) => `Read(${pattern})`),
     ...profile.allowedCommands.map((command) => `Bash(${command} *)`),
   ];

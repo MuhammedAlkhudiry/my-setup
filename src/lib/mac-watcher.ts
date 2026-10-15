@@ -200,7 +200,11 @@ export function sharedPorts(listeners: Listener[], parentOf: Map<number, number>
   }
 
   const inherits = (pid: number, others: Map<number, string>) => {
-    for (let parent = parentOf.get(pid); parent !== undefined && parent > 1; parent = parentOf.get(parent)) {
+    for (
+      let parent = parentOf.get(pid);
+      parent !== undefined && parent > 1;
+      parent = parentOf.get(parent)
+    ) {
       if (others.has(parent)) return true;
     }
     return false;
@@ -215,7 +219,8 @@ export function sharedPorts(listeners: Listener[], parentOf: Map<number, number>
     .map(([port, pids]) => {
       const owners = new Map<number, string>();
       for (const [pid, command] of pids) {
-        if (!inherits(pid, pids) && !owners.has(owner(pid))) owners.set(owner(pid), `${command} (${pid})`);
+        if (!inherits(pid, pids) && !owners.has(owner(pid)))
+          owners.set(owner(pid), `${command} (${pid})`);
       }
       return { port, processes: [...owners.values()] };
     })
@@ -226,7 +231,10 @@ export function sharedPorts(listeners: Listener[], parentOf: Map<number, number>
 function topCommands(rows: ProcessSummary[]): string {
   return rows
     .slice(0, 3)
-    .map((row) => `${row.command.slice(0, 80)} (${row.ageMinutes} min${row.cpuLifetime ? `, ${row.cpuLifetime}% CPU` : ""})`)
+    .map(
+      (row) =>
+        `${row.command.slice(0, 80)} (${row.ageMinutes} min${row.cpuLifetime ? `, ${row.cpuLifetime}% CPU` : ""})`,
+    )
     .join("; ");
 }
 
@@ -328,7 +336,7 @@ export function thresholdAlerts(input: AlertInput): ObservedAlert[] {
       severity: "warning",
       title: "memcap is not running normally",
       evidence: "service not loaded, paused, or no recent pass",
-      fix: "Run memcap status, then mise run install -- --compact.",
+      fix: "Run memcap status, then mise run install.",
     });
   }
 
@@ -368,7 +376,13 @@ export function mergeAlerts(
     if (alert.status !== "open") return alert;
     const clearReviews = alert.clearReviews + 1;
     if (clearReviews < autoResolveAfter) return { ...alert, clearReviews };
-    const next: Alert = { ...alert, clearReviews, status: "resolved", resolvedAt: now, resolvedBy: "auto" };
+    const next: Alert = {
+      ...alert,
+      clearReviews,
+      status: "resolved",
+      resolvedAt: now,
+      resolvedBy: "auto",
+    };
     resolved.push(next);
     return next;
   });
@@ -391,7 +405,8 @@ export function mergeAlerts(
 export function pruneAlerts(alerts: Alert[], now: Date): Alert[] {
   const cutoff = now.getTime() - 30 * 24 * 60 * 60 * 1000;
   return alerts.filter(
-    (alert) => alert.status === "open" || !alert.resolvedAt || Date.parse(alert.resolvedAt) >= cutoff,
+    (alert) =>
+      alert.status === "open" || !alert.resolvedAt || Date.parse(alert.resolvedAt) >= cutoff,
   );
 }
 
@@ -399,8 +414,13 @@ export function pruneAlerts(alerts: Alert[], now: Date): Alert[] {
 // Installed files
 // =============================================================================
 
-export function renderMemcapConfig(config: Record<string, string | number> = MEMCAP_CONFIG): string {
-  const lines = ["# Managed by my-setup. Do not edit by hand.", "# Source of truth: config/mac-watcher.ts"];
+export function renderMemcapConfig(
+  config: Record<string, string | number> = MEMCAP_CONFIG,
+): string {
+  const lines = [
+    "# Managed by my-setup. Do not edit by hand.",
+    "# Source of truth: config/mac-watcher.ts",
+  ];
   for (const [key, value] of Object.entries(config)) {
     lines.push(`${key}=${typeof value === "number" ? value : JSON.stringify(value)}`);
   }
@@ -482,7 +502,9 @@ function launchdDomain(): string {
 }
 
 export async function isLaunchAgentLoaded(label: string): Promise<boolean> {
-  const result = await execa("launchctl", ["print", `${launchdDomain()}/${label}`], { reject: false });
+  const result = await execa("launchctl", ["print", `${launchdDomain()}/${label}`], {
+    reject: false,
+  });
   return result.exitCode === 0;
 }
 

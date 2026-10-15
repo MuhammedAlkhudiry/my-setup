@@ -16,8 +16,10 @@ description: Use before changing tests, fixing bugs, or reporting code changes a
 2. Before reporting, run the gate from `docs/runbooks/checklist.md` once, plus applicable conditional checks. Without a checklist, discover
    commands from manifests, task runners, tool configuration, and installed help. Prefer one repo-level command; include builds only when
    the project requires them.
-3. Run independent checks in parallel through the task runner, such as `mise run a ::: b`. Run commands longer than two minutes in the
-   background with a completion notification, not a polling loop.
+3. On hosts with `heavy-run`, wrap full gates/sign-offs, benchmarks, native builds, and renders once: `heavy-run --class checks -- mise run signoff`,
+   or class `benchmark` or `build`; keep independent stages parallel inside it. Light checks need no slot; exit 75 means no child started.
+   Run long commands, builds, and device or server startups in the background and act on the notification; never wait in a foreground
+   loop that sleeps or rereads their output.
 4. Prove visible changes in the running app through a browser, simulator, or real request using $browser-simulator-routing. Passing tests
    alone do not prove them. Use $guide-qa when the user wants to inspect the result step by step.
 5. Run the full command before a release. Run end-to-end journeys, mutation testing, coverage, packaging, and paid evals when requested;

@@ -12,6 +12,7 @@ import { execa } from "execa";
 // R2 API token whose access key ID is in PARENT_KEY_ENV; only short-lived child keys leave this Mac.
 export const SHARE_BUCKET = "shared-html";
 export const SHARE_HOST = "share.harium.app";
+export const SHARE_ZONE = "harium.app";
 export const SHARE_ACCOUNT_ID = "79e2c6100c3c858bea905f9f200823b5";
 export const RETENTION_DAYS = 30;
 export const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
@@ -23,6 +24,9 @@ export const PARENT_KEY_ENV = "SHARE_HTML_R2_PARENT_ACCESS_KEY_ID";
 const WRITABLE_INDEX = join(homedir(), ".local", "state", "share-html", "writable.json");
 const WRITABLE_INDEX_LIMIT = 50;
 const PREFIX_PATTERN = /^(?:https?:\/\/[^/]+\/)?(\d{4}-\d{2}-\d{2}-[a-z0-9-]+-[0-9a-f]{8})(?:\/|$)/;
+const SHARE_URL_PATTERN = new RegExp(
+  `^https?://${SHARE_HOST.replaceAll(".", "\\.")}/([a-z0-9-]+)(?:/|$)`,
+);
 
 const UPLOAD_CONCURRENCY = 4;
 const LOCAL_ONLY_REFERENCE =
@@ -34,6 +38,7 @@ interface ShareOptions {
   name?: string;
   dryRun?: boolean;
   writable?: boolean;
+  stable?: boolean;
 }
 
 interface WritablePage {
@@ -71,6 +76,11 @@ export function artifactPrefix(
   suffix = randomBytes(4).toString("hex"),
 ): string {
   return `${now.toISOString().slice(0, 10)}-${slugify(name)}-${suffix}`;
+}
+
+/** A stable page keeps one URL across publishes: the slug alone, with no date or random suffix. */
+export function stablePrefix(name: string): string {
+  return slugify(name);
 }
 
 export function findLocalOnlyReferences(html: string): string[] {
@@ -150,11 +160,11 @@ export async function assertPortable(files: ArtifactFile[]): Promise<void> {
 }
 
 async function assertAccessProtected(): Promise<void> {
-  const response = await fetch(`https://${SHARE_HOST}/`, { redirect: "manual" }).catch(
-    (error: Error) => {
-      throw new Error(`Cannot reach ${SHARE_HOST}: ${error.message}`);
-    },
-  );
+  const response = await fetch(`https://${SHARE_HOST}/`, {
+    redirect: "manual",
+  }).catch((error: Error) => {
+    throw new Error(`Cannot reach ${SHARE_HOST}: ${error.message}`);
+  });
   const location = response.headers.get("location") ?? "";
   if (
     !(response.status >= 300 && response.status < 400 && location.includes("cloudflareaccess.com"))
@@ -223,6 +233,77 @@ async function upload(prefix: string, files: ArtifactFile[]): Promise<void> {
   await Promise.all(Array.from({ length: UPLOAD_CONCURRENCY }, worker));
 }
 
+async function listKeys(prefix: string): Promise<string[]> {
+  const keys: string[] = [];
+  for (let startAfter: string | undefined; ; ) {
+    const { stdout } = await execa(
+      "cf",
+      [
+        "r2",
+        "objects",
+        "list",
+        "--bucket-name",
+        SHARE_BUCKET,
+        "--prefix",
+        `${prefix}/`,
+        "--per-page",
+        "1000",
+        ...(startAfter ? ["--start-after", startAfter] : []),
+      ],
+      { cwd: tmpdir() },
+    );
+    const page = (JSON.parse(stdout) as { key: string }[]).map((object) => object.key);
+    keys.push(...page);
+    if (page.length < 1000) return keys;
+    startAfter = page.at(-1);
+  }
+}
+
+/** Keys under a stable prefix that the new publish no longer has; saved feedback stays. */
+export function staleKeys(existing: string[], prefix: string, published: ArtifactFile[]): string[] {
+  const kept = new Set([
+    ...published.map((file) => `${prefix}/${file.key}`),
+    `${prefix}/${FEEDBACK_KEY}`,
+  ]);
+  return existing.filter((key) => !kept.has(key));
+}
+
+async function deleteKeys(keys: string[]): Promise<void> {
+  for (let start = 0; start < keys.length; start += 1000) {
+    await execa(
+      "cf",
+      [
+        "r2",
+        "objects",
+        "bulk-delete",
+        "--bucket-name",
+        SHARE_BUCKET,
+        "--force",
+        "--body",
+        JSON.stringify(keys.slice(start, start + 1000)),
+      ],
+      { cwd: tmpdir() },
+    );
+  }
+}
+
+/** A stable URL serves new bytes under old paths, so the edge must forget the old ones. */
+async function purgeCache(prefix: string): Promise<void> {
+  await execa(
+    "cf",
+    [
+      "cache",
+      "purge",
+      "--zone",
+      SHARE_ZONE,
+      "--force",
+      "--body",
+      JSON.stringify({ prefixes: [`${SHARE_HOST}/${prefix}/`] }),
+    ],
+    { cwd: tmpdir() },
+  );
+}
+
 function formatBytes(bytes: number): string {
   return bytes >= 1024 * 1024
     ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
@@ -233,7 +314,8 @@ const pageUrl = (prefix: string) => `https://${SHARE_HOST}/${prefix}/index.html`
 
 /** Pulls the artifact prefix out of a share URL or a bare prefix. */
 export function prefixFromRef(ref: string): string | undefined {
-  return ref.trim().match(PREFIX_PATTERN)?.[1];
+  const trimmed = ref.trim();
+  return trimmed.match(PREFIX_PATTERN)?.[1] ?? trimmed.match(SHARE_URL_PATTERN)?.[1];
 }
 
 /** Finds the credentials in `cf r2 temporary-credentials create` output, whatever its envelope. */
@@ -241,11 +323,13 @@ export function parseTemporaryCredentials(output: string): TemporaryCredentials 
   const pick = (value: unknown): TemporaryCredentials | undefined => {
     if (!value || typeof value !== "object") return undefined;
     const record = value as Record<string, unknown>;
-    const field = (...names: string[]) => names.map((name) => record[name]).find((v) => typeof v === "string") as string | undefined;
+    const field = (...names: string[]) =>
+      names.map((name) => record[name]).find((v) => typeof v === "string") as string | undefined;
     const accessKeyId = field("accessKeyId", "access_key_id");
     const secretAccessKey = field("secretAccessKey", "secret_access_key");
     const sessionToken = field("sessionToken", "session_token");
-    if (accessKeyId && secretAccessKey && sessionToken) return { accessKeyId, secretAccessKey, sessionToken };
+    if (accessKeyId && secretAccessKey && sessionToken)
+      return { accessKeyId, secretAccessKey, sessionToken };
     return Object.values(record).map(pick).find(Boolean);
   };
 
@@ -272,7 +356,8 @@ async function readWritableIndex(): Promise<WritablePage[]> {
 }
 
 async function rememberWritablePage(prefix: string): Promise<void> {
-  const pages = [{ prefix, publishedAt: new Date().toISOString() }, ...(await readWritableIndex())];
+  const earlier = (await readWritableIndex()).filter((page) => page.prefix !== prefix);
+  const pages = [{ prefix, publishedAt: new Date().toISOString() }, ...earlier];
   await mkdir(dirname(WRITABLE_INDEX), { recursive: true });
   await writeFile(WRITABLE_INDEX, JSON.stringify(pages.slice(0, WRITABLE_INDEX_LIMIT), null, 2));
 }
@@ -319,7 +404,10 @@ async function createFeedbackEndpoint(prefix: string, parentKeyId: string): Prom
     bucket: SHARE_BUCKET,
     endpoint: `https://${SHARE_ACCOUNT_ID}.r2.cloudflarestorage.com`,
   });
-  const put = client.presign(key, { method: "PUT", expiresIn: FEEDBACK_TTL_SECONDS });
+  const put = client.presign(key, {
+    method: "PUT",
+    expiresIn: FEEDBACK_TTL_SECONDS,
+  });
   const expires = new Date(Date.now() + FEEDBACK_TTL_SECONDS * 1000).toISOString();
 
   const path = join(await mkdtemp(join(tmpdir(), "share-html-endpoint-")), FEEDBACK_ENDPOINT_KEY);
@@ -328,6 +416,10 @@ async function createFeedbackEndpoint(prefix: string, parentKeyId: string): Prom
 }
 
 export async function shareHtml(input: string, options: ShareOptions): Promise<void> {
+  if (options.stable && !options.name) {
+    throw new Error("--stable needs --name, so two folders with the same name never share a URL");
+  }
+
   const { files, name } = await resolveArtifact(input);
   await assertPortable(files);
 
@@ -335,36 +427,77 @@ export async function shareHtml(input: string, options: ShareOptions): Promise<v
 
   if (options.dryRun) {
     // Each publish draws a new random suffix, so a dry run can only show the URL's shape.
-    const example = artifactPrefix(options.name || name, new Date(), "<random>");
+    const example = options.stable
+      ? stablePrefix(options.name || name)
+      : artifactPrefix(options.name || name, new Date(), "<random>");
+    if (process.argv.includes("--json")) {
+      console.log(
+        JSON.stringify({
+          dryRun: true,
+          url: `https://${SHARE_HOST}/${example}/index.html`,
+          files: files.map((file) => ({ key: file.key, size: file.size })),
+          totalBytes: total,
+          writable: !!options.writable,
+        }),
+      );
+      return;
+    }
     console.log(
       `Would publish ${files.length} files (${formatBytes(total)}) to https://${SHARE_HOST}/${example}/index.html`,
     );
     for (const file of files) console.log(`  ${file.key} (${formatBytes(file.size)})`);
-    if (options.writable) console.log(`  + ${FEEDBACK_ENDPOINT_KEY} (lets the page save feedback for 7 days)`);
+    if (options.writable)
+      console.log(`  + ${FEEDBACK_ENDPOINT_KEY} (lets the page save feedback for 7 days)`);
     return;
   }
 
   const parentKeyId = options.writable ? parentAccessKeyId() : undefined;
-  const prefix = artifactPrefix(options.name || name);
+  const prefix = options.stable
+    ? stablePrefix(options.name || name)
+    : artifactPrefix(options.name || name);
   await assertAccessProtected();
 
   const endpoint = parentKeyId ? await createFeedbackEndpoint(prefix, parentKeyId) : undefined;
-  await upload(prefix, endpoint ? [...files, endpoint] : files);
+  const published = endpoint ? [...files, endpoint] : files;
+  await upload(prefix, published);
+  if (options.stable) {
+    await deleteKeys(staleKeys(await listKeys(prefix), prefix, published));
+    await purgeCache(prefix);
+  }
   if (endpoint) await rememberWritablePage(prefix);
 
   const expires = new Date(Date.now() + RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  if (process.argv.includes("--json")) {
+    console.log(
+      JSON.stringify({
+        url: pageUrl(prefix),
+        files: files.length,
+        totalBytes: total,
+        expiresAt: expires.toISOString(),
+        writable: !!endpoint,
+        stable: !!options.stable,
+      }),
+    );
+    return;
+  }
   console.log(pageUrl(prefix));
   console.log(
-    `${files.length} files, ${formatBytes(total)}. Deleted automatically after ${expires.toISOString().slice(0, 10)}.`,
+    `${files.length} files, ${formatBytes(total)}. Deleted automatically after ${expires.toISOString().slice(0, 10)}` +
+      (options.stable ? " unless published again; the URL stays the same." : "."),
   );
-  if (endpoint) console.log('Writable for 7 days. When the user says "see", run `share-html feedback`.');
+  if (endpoint)
+    console.log('Writable for 7 days. When the user says "see", run `share-html feedback`.');
 }
 
 /** Prints the feedback a writable page saved, for the agent to act on. */
 export async function readFeedback(ref?: string): Promise<void> {
   const prefix = resolveWritablePage(await readWritableIndex(), ref);
   if (!prefix) {
-    throw new Error(ref ? `No writable page matches "${ref}".` : "No writable page has been published from this Mac yet.");
+    throw new Error(
+      ref
+        ? `No writable page matches "${ref}".`
+        : "No writable page has been published from this Mac yet.",
+    );
   }
 
   const result = await execa(
@@ -374,13 +507,28 @@ export async function readFeedback(ref?: string): Promise<void> {
   );
   if (result.exitCode !== 0) {
     if (/does not exist|10007/.test(result.stderr)) {
-      console.log(`No feedback saved yet on ${pageUrl(prefix)}`);
+      console.log(
+        process.argv.includes("--json")
+          ? JSON.stringify({
+              url: pageUrl(prefix),
+              savedAt: null,
+              markdown: null,
+            })
+          : `No feedback saved yet on ${pageUrl(prefix)}`,
+      );
       return;
     }
     throw new Error(`Reading feedback failed: ${result.stderr.trim()}`);
   }
 
-  const saved = JSON.parse(result.stdout) as { markdown?: string; savedAt?: string };
+  const saved = JSON.parse(result.stdout) as {
+    markdown?: string;
+    savedAt?: string;
+  };
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify({ url: pageUrl(prefix), ...saved }));
+    return;
+  }
   console.log(`Saved ${saved.savedAt ?? "at an unknown time"} on ${pageUrl(prefix)}\n`);
   console.log(saved.markdown?.trim() || "(The page saved no summary.)");
 }

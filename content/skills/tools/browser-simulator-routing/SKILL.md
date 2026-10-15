@@ -29,11 +29,11 @@ description: Use before any browser, simulator, or emulator automation to pick t
 device-queue acquire <udid-or-avd-name> --owner "<thread title>"
 ```
 
-- When every slot is taken, `acquire` waits its turn; run it in the background and keep working. Exit code 75 means still queued; run it
-  again within two minutes to keep your place.
+- Run `acquire` in the background when queued. Exit 75 means still queued; retry within two minutes to keep your place.
 - Reuse your leased device instead of creating another.
-- Run `acquire` again before each round of device work; it renews your lease at once. After 15 minutes without renewal or a running
-  build aimed at the device, a waiting agent can take it. Run `device-queue release <id>` when device work ends; it shuts the device down.
+- Use `--json` for receipts or `--verbose` for details. Acquire the device before `heavy-run --class build -- <argv...>`; never wait for a device while holding host capacity.
+- Renew with `acquire` before each round. After 15 idle minutes without renewal or a device build, a waiting agent can take it.
+  Release and shut down with `device-queue release <id>`.
 
 ## Tools
 

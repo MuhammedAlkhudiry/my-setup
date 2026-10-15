@@ -65,9 +65,13 @@ export const MAC_WATCHER = {
   storage: {
     archiveVolume: "/Volumes/DevSSD",
     archiveRoot: "/Volumes/DevSSD/archive",
-    /** Each direct child older than `days` is deleted; `match` limits which children count. */
+    /**
+     * Each direct child older than `days` is deleted; `match` limits which children count. Xcode records the project
+     * each DerivedData folder builds; a folder whose project is gone, such as a removed worktree's or a cleared native
+     * build's, goes once untouched for `projectGoneHours`, because agents leave 3 to 4 GB behind per worktree build.
+     */
     deleteChildren: [
-      { path: "Library/Developer/Xcode/DerivedData", days: 14, match: /-[a-z]{28}$/ },
+      { path: "Library/Developer/Xcode/DerivedData", days: 14, match: /-[a-z]{28}$/, projectGoneHours: 1 },
     ],
     /**
      * Leftovers that agent runs drop in `/private/tmp` and the per-user temp folder, such as demo renders, QA copies, and
@@ -99,11 +103,12 @@ export const MAC_WATCHER = {
     codex: { threadIdleDays: 14, keepReleases: 2 },
     /**
      * Linked worktrees of active projects are removed once clean, unlocked, unused, and idle; their branches stay, so no
-     * commit is lost. A landed worktree, whose commits are on the base branch or in a finished PR, goes after `landed`
-     * idle days, so 0 removes it at the next run; T3 recreates a thread's checkout from its branch if the thread resumes.
-     * Any other branch without an open PR counts as abandoned after `abandoned` idle days. Agents open several
-     * worktrees a day, each holding gigabytes of dependencies and native builds, so a long wait fills the disk. Only
-     * worktrees under these agent-managed folders count; worktrees a person placed elsewhere are never touched.
+     * commit is lost. An exact finished PR head goes after `landed` idle days and the four-hour PR/commit/file grace period;
+     * ancestry alone never proves work finished. Detached heads stay.
+     * Unlanded branches without an open PR count as abandoned after `abandoned` idle days. A running T3 thread protects its
+     * checkout; an unarchived thread that is not running protects only unlanded work, since T3 recreates a landed checkout
+     * from its branch if the thread resumes. A worktree under four hours old stays while any thread in its project is busy,
+     * since it may not be bound to its thread yet. Only agent-managed folders under ~/.t3/worktrees or a project root count. Registered worktrees also protect their parent temporary directory from ordinary temp pruning.
      */
     worktreeIdleDays: { landed: 0, abandoned: 7 },
     agentWorktreeDirs: ["/.claude/worktrees/", "/.codex/worktrees/", "/.t3/worktrees/"],

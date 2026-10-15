@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 
 // Ranks a GitHub repository's open pull requests from easiest to hardest to merge, with stacks, CI, conflicts and a merge order.
-// Usage: bun triage-prs.ts [repo-path] [--remote <name>] [--no-fetch] [--json]
+// Usage: bun triage-prs.ts [repo-path] [--remote <name>] [--no-fetch] [--json] [--verbose]
+
+import { agentOutput } from "../../prs/scripts/agent-output";
 
 import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
@@ -173,39 +175,66 @@ export function mergeOrder(assessments: Assessment[]): number[][] {
     });
 }
 
-function runner(cwd: string) {
-  return (command: string, args: string[]): { ok: boolean; out: string } => {
+export function runner(cwd: string) {
+  return (command: string, args: string[], allowedStatuses = [0]) => {
     const result = spawnSync(command, args, {
       cwd,
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
     });
 
-    return { ok: result.status === 0, out: result.stdout ?? "" };
+    if (result.error || result.status === null || !allowedStatuses.includes(result.status)) {
+      throw new Error(
+        `${command} ${args.join(" ")} failed (exit ${result.status}): ${result.error?.message || result.stderr?.trim() || result.stdout?.trim()}`,
+      );
+    }
+
+    return {
+      ok: result.status === 0,
+      out: result.stdout ?? "",
+      err: result.stderr ?? "",
+      status: result.status,
+    };
   };
 }
 
-function assess(options: { cwd: string; remote: string; fetch: boolean }): {
+export const baseRef = (branch: string): string => `refs/triage-prs/base/${branch}`;
+
+/** Narrow explicit refspecs also work in single-branch clones, without changing their fetch configuration. */
+export function fetchRefs(
+  run: ReturnType<typeof runner>,
+  remote: string,
+  bases: string[],
+  prs: number[],
+): void {
+  run("git", [
+    "fetch",
+    "--quiet",
+    "--no-tags",
+    "--no-write-fetch-head",
+    remote,
+    ...[...new Set(bases)].map((branch) => `+refs/heads/${branch}:${baseRef(branch)}`),
+    ...prs.map((number) => `+refs/pull/${number}/head:refs/triage-prs/pr/${number}`),
+  ]);
+}
+
+export function assess(options: { cwd: string; remote: string; fetch: boolean }): {
   defaultBranch: string;
   assessments: Assessment[];
 } {
   const run = runner(options.cwd);
-  const git = (args: string[]) => run("git", args);
-  const ref = (branch: string) => `${options.remote}/${branch}`;
+  const git = (args: string[], allowedStatuses = [0]) => run("git", args, allowedStatuses);
+  const ref = (branch: string) => {
+    const cached = baseRef(branch);
 
-  if (!git(["rev-parse", "--git-dir"]).ok) {
-    throw new Error(`${options.cwd} is not a git repository.`);
-  }
+    return options.fetch || git(["show-ref", "--verify", "--quiet", cached], [0, 1]).ok
+      ? cached
+      : `${options.remote}/${branch}`;
+  };
 
-  if (options.fetch) {
-    git(["fetch", "--quiet", options.remote, "--prune"]);
-  }
+  git(["rev-parse", "--git-dir"]);
 
   const repo = run("gh", ["repo", "view", "--json", "defaultBranchRef"]);
-
-  if (!repo.ok) {
-    throw new Error("gh repo view failed; check that gh is authenticated for this repository.");
-  }
 
   const defaultBranch = (JSON.parse(repo.out) as { defaultBranchRef: { name: string } })
     .defaultBranchRef.name;
@@ -219,10 +248,6 @@ function assess(options: { cwd: string; remote: string; fetch: boolean }): {
     "--json",
     "number,title,url,baseRefName,headRefName,headRefOid,isDraft,statusCheckRollup",
   ]);
-
-  if (!listed.ok) {
-    throw new Error("gh pr list failed.");
-  }
 
   const raw = JSON.parse(listed.out) as {
     number: number;
@@ -243,6 +268,24 @@ function assess(options: { cwd: string; remote: string; fetch: boolean }): {
     headSha: item.headRefOid,
     draft: item.isDraft,
   }));
+  if (options.fetch) {
+    const bases = new Set([defaultBranch, ...prs.map((pr) => pr.base)]);
+    fetchRefs(
+      run,
+      options.remote,
+      [...bases],
+      prs.map((pr) => pr.number),
+    );
+  }
+
+  // Resolve every input before assessment; --no-fetch requires these objects locally.
+  for (const branch of new Set([defaultBranch, ...prs.map((pr) => pr.base)])) {
+    git(["rev-parse", "--verify", `${ref(branch)}^{commit}`]);
+  }
+  for (const pr of prs) {
+    git(["rev-parse", "--verify", `${pr.headSha}^{commit}`]);
+  }
+
   const stacks = stackOf(prs);
 
   // GitHub attaches no checks to PRs whose base branch CI does not target, such as stacked PRs; read the head commit's runs instead.
@@ -261,14 +304,12 @@ function assess(options: { cwd: string; remote: string; fetch: boolean }): {
       "--json",
       "workflowName,status,conclusion,createdAt",
     ]);
-    const all = runs.ok
-      ? (JSON.parse(runs.out || "[]") as {
-          workflowName: string;
-          status: string;
-          conclusion: string;
-          createdAt: string;
-        }[])
-      : [];
+    const all = JSON.parse(runs.out) as {
+      workflowName: string;
+      status: string;
+      conclusion: string;
+      createdAt: string;
+    }[];
     const latest = new Map<string, (typeof all)[number]>();
 
     for (const item of all) {
@@ -283,7 +324,7 @@ function assess(options: { cwd: string; remote: string; fetch: boolean }): {
   };
 
   const conflictingPaths = (left: string, right: string): string[] => {
-    const result = git(["merge-tree", "--write-tree", "--name-only", left, right]);
+    const result = git(["merge-tree", "--write-tree", "--name-only", left, right], [0, 1]);
 
     if (result.ok) {
       return [];
@@ -305,22 +346,22 @@ function assess(options: { cwd: string; remote: string; fetch: boolean }): {
       });
 
   const mainRef = ref(defaultBranch);
-  const headOf = new Map(prs.map((pr) => [pr.number, pr.head]));
+  const headOf = new Map(prs.map((pr) => [pr.number, pr.headSha]));
 
   const assessments = prs.map((pr, index): Assessment => {
-    const head = ref(pr.head);
+    const head = pr.headSha;
     const stack = stacks.get(pr.number) as { parent: number | null; root: number };
 
     // A stacked PR's own changes: when its head already contains the default branch, compare it with its base branch
     // merged into the default branch; otherwise the default branch's newer changes would count as the PR's own.
-    const headHasMain = git(["merge-base", "--is-ancestor", mainRef, head]).ok;
+    const headHasMain = git(["merge-base", "--is-ancestor", mainRef, head], [0, 1]).ok;
     const mergedBase =
       pr.base === defaultBranch || !headHasMain
         ? null
-        : git(["merge-tree", "--write-tree", mainRef, ref(pr.base)])
+        : git(["merge-tree", "--write-tree", mainRef, ref(pr.base)], [0, 1])
             .out.split("\n")[0]
             .trim();
-    const baseline = mergedBase || git(["merge-base", ref(pr.base), head]).out.trim() || mainRef;
+    const baseline = mergedBase || git(["merge-base", ref(pr.base), head]).out.trim();
     const files = numstat(baseline, head);
 
     return {
@@ -329,7 +370,7 @@ function assess(options: { cwd: string; remote: string; fetch: boolean }): {
       parent: stack.parent,
       behindParent:
         stack.parent !== null &&
-        !git(["merge-base", "--is-ancestor", ref(headOf.get(stack.parent) as string), head]).ok,
+        !git(["merge-base", "--is-ancestor", headOf.get(stack.parent) as string, head], [0, 1]).ok,
       ci: ciState(pr, raw[index].statusCheckRollup ?? []),
       mainConflicts: conflictingPaths(mainRef, head),
       codeLines: files
@@ -353,7 +394,7 @@ function assess(options: { cwd: string; remote: string; fetch: boolean }): {
         continue;
       }
 
-      const paths = conflictingPaths(ref(left.pr.head), ref(right.pr.head));
+      const paths = conflictingPaths(left.pr.headSha, right.pr.headSha);
 
       if (paths.length > 0) {
         left.conflictsWith.set(right.pr.number, paths);
@@ -375,93 +416,33 @@ function assess(options: { cwd: string; remote: string; fetch: boolean }): {
   return { defaultBranch, assessments };
 }
 
-function basename(path: string): string {
-  return path.split("/").pop() ?? path;
-}
-
-function markdown(defaultBranch: string, assessments: Assessment[]): string {
-  const urls = new Map(assessments.map((item) => [item.pr.number, item.pr.url]));
-  const link = (number: number) => `[#${number}](${urls.get(number)})`;
-  const counts = TIER_ORDER.map(
-    (tier) => `${assessments.filter((item) => item.tier === tier).length} ${tier}`,
-  );
-  const lines: string[] = [
-    `# PR triage: ${assessments.length} open PRs`,
-    "",
-    counts.join(" · "),
-    "",
-    "Lines count application code only; tests, docs, lockfiles and generated data are excluded.",
-    "",
-  ];
+function textReport(defaultBranch: string, assessments: Assessment[]): string {
+  const lines = [`triage-prs: ${assessments.length} open PRs; base=${defaultBranch}`];
 
   for (const tier of TIER_ORDER) {
-    const items = assessments
-      .filter((item) => item.tier === tier)
-      .sort((a, b) => a.codeLines - b.codeLines);
-
-    if (items.length === 0) {
-      continue;
+    for (const item of assessments.filter((item) => item.tier === tier).sort((a, b) => a.codeLines - b.codeLines)) {
+      lines.push(JSON.stringify({
+        pr: item.pr.url, title: item.pr.title, tier: TIER_TITLES[tier],
+        codeLines: item.codeLines, testLines: item.testLines, ci: item.ci,
+        draft: item.pr.draft, parent: item.parent, behindParent: item.behindParent,
+        migrations: item.migrations, mainConflicts: item.mainConflicts,
+        conflictsWith: Object.fromEntries(item.conflictsWith),
+      }));
     }
-
-    lines.push(
-      `## ${TIER_TITLES[tier]}`,
-      "",
-      "| PR | Lines | Tests | CI | Notes |",
-      "|---|---|---|---|---|",
-    );
-
-    for (const item of items) {
-      const notes: string[] = [];
-
-      if (item.parent) {
-        notes.push(`stacked on ${link(item.parent)}${item.behindParent ? ", behind it" : ""}`);
-      }
-
-      if (item.migrations > 0) {
-        notes.push(`${item.migrations} migration${item.migrations > 1 ? "s" : ""}`);
-      }
-
-      if (item.mainConflicts.length > 0) {
-        notes.push(
-          `conflicts with ${defaultBranch}: ${item.mainConflicts.map(basename).join(", ")}`,
-        );
-      }
-
-      if (item.conflictsWith.size > 0) {
-        const files = [...new Set([...item.conflictsWith.values()].flat().map(basename))];
-        const shown =
-          files.slice(0, 2).join(", ") + (files.length > 2 ? ` +${files.length - 2}` : "");
-        notes.push(
-          `overlaps ${item.conflictsWith.size} PR${item.conflictsWith.size > 1 ? "s" : ""} in ${shown}`,
-        );
-      }
-
-      if (item.pr.draft) {
-        notes.push("draft");
-      }
-
-      lines.push(
-        `| ${link(item.pr.number)} ${item.pr.title} | ${item.codeLines} | ${item.testLines} | ${item.ci} | ${notes.join("; ")} |`,
-      );
-    }
-
-    lines.push("");
   }
-
-  lines.push("## Merge order", "");
-  mergeOrder(assessments).forEach((stack, index) => {
-    lines.push(`${index + 1}. ${stack.map(link).join(" → ")}`);
-  });
+  lines.push(`mergeOrder=${JSON.stringify(mergeOrder(assessments))}`);
 
   return lines.join("\n");
 }
 
 if (import.meta.main) {
+  agentOutput("triage-prs", { nativeJson: true, summary: (output) => output.split("\n")[0] });
+
   const argv = process.argv.slice(2);
 
   if (argv.includes("--help")) {
     console.log(
-      "Usage: bun triage-prs.ts [repo-path] [--remote <name>] [--no-fetch] [--json]\n\n" +
+      "Usage: bun triage-prs.ts [repo-path] [--remote <name>] [--no-fetch] [--json] [--verbose]\n\n" +
         "Ranks the repository's open GitHub PRs by merge effort. repo-path defaults to the current directory;\n" +
         "--remote defaults to origin. Needs git 2.38+ and an authenticated gh.",
     );
@@ -491,6 +472,6 @@ if (import.meta.main) {
       ),
     );
   } else {
-    console.log(markdown(defaultBranch, assessments));
+    console.log(textReport(defaultBranch, assessments));
   }
 }

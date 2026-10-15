@@ -1,3 +1,5 @@
+import { emptyHostCapacity, type HostCapacity } from "./host-capacity";
+
 export type Platform = "ios" | "android";
 
 export const DEVICE_QUEUE = {
@@ -32,7 +34,7 @@ export interface Lease {
   /** The agent CLI process the lease belongs to; the lease ends when it exits. 0 when none was found. */
   agentPid: number;
   acquiredAt: number;
-  /** Last acquire, renew, or device activity by the holder. */
+  /** Last acquire by the holder, or the last time it was seen running a command aimed at the device. */
   renewedAt: number;
 }
 
@@ -46,6 +48,7 @@ export interface Ticket {
 }
 
 export interface QueueState {
+  host: HostCapacity;
   leases: Record<string, Lease>;
   tickets: Record<string, Ticket>;
   unleasedSince: Record<string, number>;
@@ -63,7 +66,12 @@ export type Decision =
   | { granted: true; adopted: boolean; renewed: boolean; waitedMs: number }
   | { granted: false; report: string };
 
-export const emptyQueueState = (): QueueState => ({ leases: {}, tickets: {}, unleasedSince: {} });
+export const emptyQueueState = (): QueueState => ({
+  leases: {},
+  tickets: {},
+  unleasedSince: {},
+  host: emptyHostCapacity(),
+});
 
 const ticketKey = (request: Pick<Ticket, "id" | "agentPid" | "owner">) =>
   `${request.id}:${request.agentPid}:${request.owner}`;
@@ -180,13 +188,6 @@ export function decide(
       ? `waiting for ${held.name}, leased to "${held.owner}"`
       : `queued: ${ahead + 1} in line, ${inUse.size}/${maxRunning} ${request.platform} slots in use`,
   };
-}
-
-export function renewLease(state: QueueState, id: string, owner: string, now: number): boolean {
-  const lease = state.leases[id];
-  if (!lease || lease.owner !== owner) return false;
-  lease.renewedAt = now;
-  return true;
 }
 
 export function releaseLease(state: QueueState, id: string): Lease | undefined {

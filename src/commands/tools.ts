@@ -116,47 +116,48 @@ function currentText(status: ToolStatus): string {
   return "missing";
 }
 
-export async function toolsStatus(): Promise<void> {
-  for (const group of SYSTEM_TOOL_GROUPS) {
-    console.log(`\n## ${group.title}`);
-    const statuses = await Promise.all(group.tools.map(toolStatus));
+async function reportTools(plan: boolean): Promise<void> {
+  const groups = await Promise.all(
+    SYSTEM_TOOL_GROUPS.map(async (group) => ({
+      title: group.title,
+      tools: await Promise.all(group.tools.map(toolStatus)),
+    })),
+  );
+  const statuses = groups.flatMap((group) => group.tools);
+  const failed = statuses.filter(
+    (status) => (!status.path && status.tool.level === "required") || status.versionError,
+  );
 
+  if (process.argv.includes("--json")) {
+    console.log(
+      JSON.stringify(
+        groups.map((group) => ({
+          ...group,
+          tools: group.tools.map((status) => ({ ...status, status: statusLabel(status) })),
+        })),
+      ),
+    );
+  } else {
     for (const status of statuses) {
-      const location = status.path ? ` ${status.path}` : "";
       console.log(
-        `[${statusLabel(status)}] ${status.tool.name.padEnd(13)} current: ${currentText(status)} | latest: ${status.latest || "unknown"}${location}`,
+        `${status.tool.name}: ${statusLabel(status)}; current=${currentText(status)}; latest=${status.latest || "unknown"}${status.path ? `; path=${status.path}` : ""}`,
       );
+      if (plan) {
+        for (const command of status.tool.update.commands ?? []) console.log(command);
+        if (status.tool.update.note) console.log(status.tool.update.note);
+      }
     }
   }
+
+  for (const status of failed)
+    console.error(`${status.tool.name}: ${status.versionError ?? "required tool missing"}`);
+  if (failed.length) process.exitCode = 1;
+}
+
+export async function toolsStatus(): Promise<void> {
+  await reportTools(false);
 }
 
 export async function toolsUpdatePlan(): Promise<void> {
-  console.log("Tool update plan");
-  console.log("Review these commands before running them. They are grouped by install owner.");
-
-  for (const group of SYSTEM_TOOL_GROUPS) {
-    console.log(`\n## ${group.title}`);
-    const statuses = await Promise.all(group.tools.map(toolStatus));
-
-    for (const status of statuses) {
-      console.log(`\n${status.tool.name}`);
-      console.log(`  status: ${statusLabel(status)}`);
-      console.log(`  current: ${currentText(status)}`);
-      console.log(`  latest: ${status.latest || "unknown"}`);
-      if (status.path) {
-        console.log(`  path: ${status.path}`);
-      }
-
-      if (status.tool.update.commands) {
-        console.log("  update:");
-        for (const command of status.tool.update.commands) {
-          console.log(`    ${command}`);
-        }
-      }
-
-      if (status.tool.update.note) {
-        console.log(`  note: ${status.tool.update.note}`);
-      }
-    }
-  }
+  await reportTools(true);
 }

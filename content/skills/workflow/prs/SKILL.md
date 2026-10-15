@@ -23,9 +23,23 @@ approval does not authorize PR/MR creation.
    confirm each blocker is fixed and the fixes add none, then answer `APPROVED` or the blockers left, with no new follow-ups. A PR gets no
    third round, even after later pushes; bring the user anything that still blocks. Fix small follow-ups; batch the rest into a later PR or
    $project-docs.
-4. After the final push to an existing GitHub PR, run [marking files viewed](references/viewed-files.md).
 
 Report results in one line, such as `✅ Simplified, framework checks, docs · {{models.codex.review.shortName}} approved` or `· {{models.codex.review.shortName}} skipped: small, low risk`.
+
+## After a GitHub merge
+
+Run `bun <skill-dir>/scripts/postmerge-check.ts <pr-url|merge-sha> --repo <owner/repo|checkout> --workflow <name> --timeout 600 --json`.
+Use the installed $prs directory for `<skill-dir>`; the script runs from any working directory. It selects the exact merge commit's push
+workflow run and reports its attempt, conclusion, failed stages, and links. Exit 75 means pending or not discovered yet; resume the check
+before proceeding. Exit 1 requires inspecting and fixing or deliberately reverting the failure; the script never reverts. Use `--help` for
+the full interface. This bounded CLI wait is the fallback when the harness cannot watch a merged-commit workflow.
+
+<!-- profile:personal -->
+
+For queued CI during a confirmed Ubicloud incident, use `ci-runner github`; restore with `ci-runner ubicloud` only after its status page marks it resolved.
+Read [runner outage recovery](references/ci-runners.md) before switching or dispatching.
+
+<!-- /profile -->
 
 ## Sections
 

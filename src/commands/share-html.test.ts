@@ -13,6 +13,8 @@ import {
   resolveWritablePage,
   shareHtml,
   slugify,
+  stablePrefix,
+  staleKeys,
   withRetry,
 } from "./share-html";
 
@@ -106,35 +108,91 @@ describe("share-html", () => {
     });
   });
 
+  test("a stable page keeps one URL and needs a name", async () => {
+    expect(stablePrefix("Harium Roadmap")).toBe("harium-roadmap");
+
+    await withDir(async (dir) => {
+      await writeFile(join(dir, "index.html"), "<p>roadmap</p>");
+      await expect(shareHtml(dir, { dryRun: true, stable: true })).rejects.toThrow("needs --name");
+
+      const output: string[] = [];
+      const originalLog = console.log;
+      console.log = (message?: unknown) => output.push(String(message));
+      try {
+        await shareHtml(dir, {
+          dryRun: true,
+          stable: true,
+          name: "harium roadmap",
+        });
+      } finally {
+        console.log = originalLog;
+      }
+
+      expect(output[0]).toEndWith("to https://share.harium.app/harium-roadmap/index.html");
+    });
+  });
+
+  test("staleKeys drops files the new publish lacks and keeps saved feedback", () => {
+    const published = [
+      { path: "/x/index.html", key: "index.html", size: 1 },
+      { path: "/x/a.png", key: "img/a.png", size: 1 },
+    ];
+    const existing = [
+      "road/index.html",
+      "road/img/a.png",
+      "road/img/old.png",
+      "road/feedback.json",
+    ];
+
+    expect(staleKeys(existing, "road", published)).toEqual(["road/img/old.png"]);
+  });
+
   test("prefixFromRef accepts a share URL or a bare prefix", () => {
     const prefix = "2026-10-02-plan-review-v5-7e266e0a";
     expect(prefixFromRef(`https://share.harium.app/${prefix}/index.html`)).toBe(prefix);
     expect(prefixFromRef(prefix)).toBe(prefix);
     expect(prefixFromRef("plan review")).toBeUndefined();
+    expect(prefixFromRef("https://share.harium.app/harium-roadmap/index.html")).toBe(
+      "harium-roadmap",
+    );
+    expect(prefixFromRef("harium-roadmap")).toBeUndefined();
   });
 
   test("resolveWritablePage prefers a direct ref, then the newest name match, then the newest page", () => {
     const pages = [
-      { prefix: "2026-10-01-triage-aaaaaaaa", publishedAt: "2026-10-01T10:00:00Z" },
-      { prefix: "2026-10-02-plan-review-bbbbbbbb", publishedAt: "2026-10-02T09:00:00Z" },
-      { prefix: "2026-10-02-triage-cccccccc", publishedAt: "2026-10-02T11:00:00Z" },
+      {
+        prefix: "2026-10-01-triage-aaaaaaaa",
+        publishedAt: "2026-10-01T10:00:00Z",
+      },
+      {
+        prefix: "2026-10-02-plan-review-bbbbbbbb",
+        publishedAt: "2026-10-02T09:00:00Z",
+      },
+      {
+        prefix: "2026-10-02-triage-cccccccc",
+        publishedAt: "2026-10-02T11:00:00Z",
+      },
     ];
 
     expect(resolveWritablePage(pages)).toBe("2026-10-02-triage-cccccccc");
     expect(resolveWritablePage(pages, "Plan Review")).toBe("2026-10-02-plan-review-bbbbbbbb");
-    expect(resolveWritablePage(pages, "https://share.harium.app/2026-10-01-triage-aaaaaaaa/index.html")).toBe(
-      "2026-10-01-triage-aaaaaaaa",
-    );
+    expect(
+      resolveWritablePage(pages, "https://share.harium.app/2026-10-01-triage-aaaaaaaa/index.html"),
+    ).toBe("2026-10-01-triage-aaaaaaaa");
     expect(resolveWritablePage(pages, "audit")).toBeUndefined();
     expect(resolveWritablePage([])).toBeUndefined();
   });
 
   test("parseTemporaryCredentials reads camelCase or snake_case inside any envelope", () => {
     expect(
-      parseTemporaryCredentials('{"result":{"accessKeyId":"a","secretAccessKey":"s","sessionToken":"t"}}'),
+      parseTemporaryCredentials(
+        '{"result":{"accessKeyId":"a","secretAccessKey":"s","sessionToken":"t"}}',
+      ),
     ).toEqual({ accessKeyId: "a", secretAccessKey: "s", sessionToken: "t" });
     expect(
-      parseTemporaryCredentials('Created\n{"access_key_id":"a","secret_access_key":"s","session_token":"t"}'),
+      parseTemporaryCredentials(
+        'Created\n{"access_key_id":"a","secret_access_key":"s","session_token":"t"}',
+      ),
     ).toEqual({ accessKeyId: "a", secretAccessKey: "s", sessionToken: "t" });
     expect(() => parseTemporaryCredentials('{"result":{}}')).toThrow("no temporary credentials");
   });

@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import { agentOutput } from "../lib/agent-output";
+
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative } from "node:path";
@@ -8,6 +10,12 @@ import { OPTIONAL_EXTERNAL_SKILL_NAMES, REMOTE_SKILL_SOURCES } from "../../confi
 import { readDeviceProfile, selectRemoteSkillSources } from "../lib/device";
 import { renderManagedMarkdown } from "../lib/models";
 import { discoverLocalSkills } from "../lib/skills";
+
+if (process.env.MY_SETUP_DOCTOR_DETAIL !== "1") {
+  agentOutput("check-installed-skills", {
+    failures: (output) => output.trim().split("\n").filter(Boolean),
+  });
+}
 
 const HOME = homedir();
 const PROFILE = readDeviceProfile(HOME);

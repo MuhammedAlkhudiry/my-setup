@@ -8,6 +8,7 @@
  * `review` asks Codex for a read-only diagnosis of a fresh snapshot and stores nothing.
  */
 
+import { agentOutput } from "../lib/agent-output";
 import { existsSync, readFileSync, statfsSync, writeFileSync } from "node:fs";
 import { appendFile, open, rm } from "node:fs/promises";
 import { cpus, loadavg } from "node:os";
@@ -50,6 +51,9 @@ import {
 } from "../lib/mac-watcher";
 import { pruneStorage, summarizePrune } from "../lib/storage-prune";
 
+/** launchd runs `run` and `guard` and appends their output to the watcher log, which keeps each run's full report. */
+if (!["run", "guard"].includes(process.argv[2] ?? "")) agentOutput("mac-watcher", { nativeJson: false });
+
 const ROOT_DIR = join(import.meta.dir, "..", "..");
 const HOME = process.env.HOME || "";
 const paths = macWatcherPaths(HOME);
@@ -82,7 +86,10 @@ function shortCommand(command: string): string {
   return command.replace(HOME, "~").slice(0, 160);
 }
 
-async function readNewLines(path: string, offset: number): Promise<{ lines: string[]; offset: number }> {
+async function readNewLines(
+  path: string,
+  offset: number,
+): Promise<{ lines: string[]; offset: number }> {
   if (!existsSync(path)) return { lines: [], offset: 0 };
   const handle = await open(path, "r");
   try {
@@ -91,10 +98,7 @@ async function readNewLines(path: string, offset: number): Promise<{ lines: stri
     const start = offset > size ? 0 : offset;
     const buffer = Buffer.alloc(size - start);
     await handle.read(buffer, 0, buffer.length, start);
-    const lines = buffer
-      .toString("utf8")
-      .split("\n")
-      .filter(Boolean);
+    const lines = buffer.toString("utf8").split("\n").filter(Boolean);
     return { lines, offset: size };
   } finally {
     await handle.close();
@@ -119,12 +123,23 @@ async function measureLargestDiskUsers(): Promise<Array<{ path: string; gib: num
     .split("\n")
     .map((line) => line.match(/^(\d+)\s+(.+)$/))
     .filter((match): match is RegExpMatchArray => Boolean(match))
-    .map((match) => ({ path: shortCommand(match[2]), gib: Number((Number(match[1]) / 1024 ** 2).toFixed(1)) }));
+    .map((match) => ({
+      path: shortCommand(match[2]),
+      gib: Number((Number(match[1]) / 1024 ** 2).toFixed(1)),
+    }));
 }
 
 async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) {
-  const [pressureText, pressureLevelText, swapText, processes, simsJson, adbText, memcapStatus, listenersText] =
-    await Promise.all([
+  const [
+    pressureText,
+    pressureLevelText,
+    swapText,
+    processes,
+    simsJson,
+    adbText,
+    memcapStatus,
+    listenersText,
+  ] = await Promise.all([
     run("memory_pressure", []),
     run("sysctl", ["-n", "kern.memorystatus_vm_pressure_level"]),
     run("sysctl", ["-n", "vm.swapusage"]),
@@ -136,13 +151,15 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
   ]);
 
   const freePercent = Number(pressureText.match(/free percentage: (\d+)%/)?.[1]);
-  const pressureLevel = ({ "1": "normal", "2": "warning", "4": "critical" } as const)[
-    pressureLevelText.trim() as "1" | "2" | "4"
-  ] ?? "unknown";
+  const pressureLevel =
+    ({ "1": "normal", "2": "warning", "4": "critical" } as const)[
+      pressureLevelText.trim() as "1" | "2" | "4"
+    ] ?? "unknown";
   const swapUsedGib = Number(swapText.match(/used = ([\d.]+)M/)?.[1] ?? 0) / 1024;
   const disk = statfsSync(HOME);
   const diskFreeGib = (disk.bavail * disk.bsize) / GIB;
-  const largestDiskUsers = diskFreeGib < MAC_WATCHER.thresholds.minDiskFreeGib ? await measureLargestDiskUsers() : [];
+  const largestDiskUsers =
+    diskFreeGib < MAC_WATCHER.thresholds.minDiskFreeGib ? await measureLargestDiskUsers() : [];
 
   const families = new Map<string, { processes: number; rssMib: number }>();
   for (const row of processes) {
@@ -157,7 +174,8 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
   const orphans = processes
     .filter(
       (row) =>
-        isOrphanedAgentTooling(row, uid) && row.ageSeconds >= MAC_WATCHER.thresholds.orphanMinAgeMinutes * 60,
+        isOrphanedAgentTooling(row, uid) &&
+        row.ageSeconds >= MAC_WATCHER.thresholds.orphanMinAgeMinutes * 60,
     )
     .map((row) => ({
       pid: row.pid,
@@ -194,7 +212,9 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
   try {
     const devices = JSON.parse(simsJson || "{}").devices ?? {};
     bootedSimulators = Object.entries(devices).flatMap(([runtime, list]) =>
-      (list as Array<{ name: string }>).map((device) => `${device.name} (${runtime.split(".").pop()})`),
+      (list as Array<{ name: string }>).map(
+        (device) => `${device.name} (${runtime.split(".").pop()})`,
+      ),
     );
   } catch {
     bootedSimulators = [];
@@ -337,7 +357,9 @@ async function runOnce(): Promise<void> {
 
   try {
     // A failed cleanup must not cost the alerts, which still report low disk.
-    await prune(false, now, markStep).catch((error) => console.error(`[${at}] storage prune failed: ${String(error)}`));
+    await prune(false, now, markStep).catch((error) =>
+      console.error(`[${at}] storage prune failed: ${String(error)}`),
+    );
 
     markStep("snapshot");
     const { snapshot, memcapLogOffset, guardLogOffset } = await collectSnapshot(
@@ -370,7 +392,9 @@ async function runOnce(): Promise<void> {
 
     state.memcapLogOffset = memcapLogOffset;
     state.guardLogOffset = guardLogOffset;
-    state.runs = [...state.runs, { at, alerts: observed.map((alert) => alert.key) }].slice(-MAC_WATCHER.historyLimit);
+    state.runs = [...state.runs, { at, alerts: observed.map((alert) => alert.key) }].slice(
+      -MAC_WATCHER.historyLimit,
+    );
     state.lastSuccessAt = at;
     state.lastError = undefined;
   } catch (error) {
@@ -388,7 +412,10 @@ const runStepSchema = z.object({ pid: z.number(), step: z.string(), since: z.str
 /** Records the step this run is on, for the guard to name if it stops the run. A failed note never stops the run. */
 function markStep(step: string): void {
   try {
-    writeFileSync(paths.runStep, JSON.stringify({ pid: process.pid, step, since: new Date().toISOString() }));
+    writeFileSync(
+      paths.runStep,
+      JSON.stringify({ pid: process.pid, step, since: new Date().toISOString() }),
+    );
   } catch {
     // The note only explains a stuck run; the cleanup matters more.
   }
@@ -412,11 +439,17 @@ async function review(): Promise<void> {
 
   console.log(result.runNote);
   for (const alert of result.alerts) {
-    console.log(`\n[${alert.severity}] ${alert.title}\n  evidence: ${alert.evidence}\n  fix: ${alert.fix}`);
+    console.log(
+      `\n[${alert.severity}] ${alert.title}\n  evidence: ${alert.evidence}\n  fix: ${alert.fix}`,
+    );
   }
 }
 
-async function prune(dryRun: boolean, now = new Date(), onStep?: (step: string) => void): Promise<void> {
+async function prune(
+  dryRun: boolean,
+  now = new Date(),
+  onStep?: (step: string) => void,
+): Promise<void> {
   const report = await pruneStorage({ home: HOME, now, dryRun, onStep });
   if (!dryRun) await writeJson(paths.storagePrune, report);
 
@@ -426,16 +459,24 @@ async function prune(dryRun: boolean, now = new Date(), onStep?: (step: string) 
     console.log(`  remove ${(entry.bytes / 1024 ** 3).toFixed(2)}G ${shortCommand(entry.path)}`);
   }
   for (const entry of report.nativeBuildsCleared) {
-    console.log(`  clear native builds ${(entry.bytes / 1024 ** 3).toFixed(2)}G ${shortCommand(entry.path)}`);
+    console.log(
+      `  clear native builds ${(entry.bytes / 1024 ** 3).toFixed(2)}G ${shortCommand(entry.path)}`,
+    );
   }
   for (const database of report.testDatabasesDropped) {
-    console.log(`  drop test database ${database.name} (${(database.bytes / 1024 ** 2).toFixed(0)}M)`);
+    console.log(
+      `  drop test database ${database.name} (${(database.bytes / 1024 ** 2).toFixed(0)}M)`,
+    );
   }
   for (const device of report.devicesDeleted) {
-    console.log(`  delete ${device.kind} ${device.name} (${(device.bytes / 1024 ** 3).toFixed(1)}G)`);
+    console.log(
+      `  delete ${device.kind} ${device.name} (${(device.bytes / 1024 ** 3).toFixed(1)}G)`,
+    );
   }
   for (const kept of report.worktreesKept) {
-    console.log(`  keep worktree ${shortCommand(kept.path)} (${kept.reason}, idle ${kept.idleDays}d)`);
+    console.log(
+      `  keep worktree ${shortCommand(kept.path)} (${kept.reason}, idle ${kept.idleDays}d)`,
+    );
   }
   for (const error of report.errors) console.log(`  error ${error}`);
 }
@@ -499,10 +540,13 @@ function printStatus(): void {
   if (state.lastError) console.log(`Last error: ${state.lastError}`);
   console.log(`\nOpen alerts (${open.length}):`);
   for (const alert of open) {
-    console.log(`- [${alert.severity}] ${alert.key}: ${alert.title}\n  evidence: ${alert.evidence}\n  fix: ${alert.fix}`);
+    console.log(
+      `- [${alert.severity}] ${alert.key}: ${alert.title}\n  evidence: ${alert.evidence}\n  fix: ${alert.fix}`,
+    );
   }
   console.log("\nRecent runs:");
-  for (const entry of state.runs.slice(-10)) console.log(`- ${entry.at}: ${entry.alerts.join(", ") || "no alerts"}`);
+  for (const entry of state.runs.slice(-10))
+    console.log(`- ${entry.at}: ${entry.alerts.join(", ") || "no alerts"}`);
 }
 
 async function resolveAlert(key: string | undefined): Promise<void> {
@@ -538,6 +582,8 @@ switch (command) {
     await resolveAlert(args[0]);
     break;
   default:
-    console.error("usage: mac-watcher run | review | prune [--dry-run] | guard | status | resolve <alert-key>");
+    console.error(
+      "usage: mac-watcher run | review | prune [--dry-run] | guard | status | resolve <alert-key>",
+    );
     process.exitCode = 2;
 }

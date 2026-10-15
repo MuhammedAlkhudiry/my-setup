@@ -244,6 +244,61 @@ test("labels legacy last-only usage explicitly", () => {
   expect(session).toMatchObject({ usageMode: "last-only", totalInput: 24 });
 });
 
+test("deduplicates inherited Codex turns before a child sorted ahead of its parent", () => {
+  const started = (id: string, timestamp: string) =>
+    at(timestamp, "event_msg", { type: "task_started", turn_id: id });
+  const inherited = [
+    started("parent-turn", "2026-09-01T00:00:01Z"),
+    at("2026-09-01T00:00:02Z", "turn_context", {
+      turn_id: "parent-turn",
+      user_instructions: "rules",
+    }),
+    usage("2026-09-01T00:00:03Z", 100, 100),
+  ];
+  const { root, stateDb } = fixture([]);
+  writeFileSync(
+    join(root, "rollout-z-parent.jsonl"),
+    [meta("parent", "2026-09-01T00:00:00Z"), ...inherited]
+      .map((event) => JSON.stringify(event))
+      .join("\n"),
+  );
+  writeFileSync(
+    join(root, "rollout-a-child.jsonl"),
+    [
+      at("2026-09-01T00:01:00Z", "session_meta", {
+        id: "child",
+        cwd: "/projects/example",
+        timestamp: "2026-09-01T00:01:00Z",
+        parent_thread_id: "parent",
+      }),
+      ...inherited,
+      started("child-turn", "2026-09-01T00:01:01Z"),
+      usage("2026-09-01T00:01:02Z", 50, 150),
+      usage("2026-09-01T00:01:03Z", 50, 150),
+    ]
+      .map((event) => JSON.stringify(event))
+      .join("\n"),
+  );
+
+  const report = JSON.parse(run(root, stateDb, "--since", "2026-09-01").stdout.toString());
+  expect(report.totals).toMatchObject({
+    turns: 2,
+    inheritedTurnCopies: 1,
+    input: 150,
+    cachedInput: 75,
+    output: 15,
+  });
+  expect(report.sessions.find((item: any) => item.id === "child")).toMatchObject({
+    turns: 1,
+    totalInput: 50,
+    turnContextInstructionBytes: 0,
+  });
+  expect(report.sessions.find((item: any) => item.id === "parent")).toMatchObject({
+    turns: 1,
+    totalInput: 100,
+  });
+});
+
 test("aggregates descendant context by root task tree", () => {
   const directory = mkdtempSync(join(tmpdir(), "codex-context-audit-"));
   temporaryDirectories.push(directory);
@@ -434,12 +489,21 @@ test("counts each Claude API response once and attributes tool output to the cal
         message: {
           role: "user",
           content: [
-            { type: "text", text: "<system-reminder>injected</system-reminder>Repair the analyzer" },
+            {
+              type: "text",
+              text: "<system-reminder>injected</system-reminder>Repair the analyzer",
+            },
           ],
         },
       },
       assistant("2026-09-01T00:00:01Z", "msg-1", usageBlock, [{ type: "thinking", thinking: "" }]),
-      assistant("2026-09-01T00:00:02Z", "msg-1", usageBlock, [toolCall], { apiBlockIndex: 1 }),
+      assistant(
+        "2026-09-01T00:00:02Z",
+        "msg-1",
+        { ...usageBlock, output_tokens: 1000 },
+        [toolCall],
+        { apiBlockIndex: 1 },
+      ),
       {
         type: "user",
         timestamp: "2026-09-01T00:00:03Z",
@@ -494,6 +558,7 @@ test("counts each Claude API response once and attributes tool output to the cal
     sessions: 2,
     subagents: 1,
     requests: 2,
+    output: 1005,
     input: 1660,
     cachedInput: 1500,
     compactions: 1,
@@ -502,6 +567,7 @@ test("counts each Claude API response once and attributes tool output to the cal
   expect(main).toMatchObject({
     requests: 1,
     totalInput: 1150,
+    totalOutput: 1000,
     firstInput: 1150,
     humanRequests: 1,
     firstUserMessage: "Repair the analyzer",
@@ -553,7 +619,14 @@ test("splits Claude task time by what the agent waited on", () => {
     type: "assistant",
     timestamp: ts(seconds),
     uuid: `a${seconds}`,
-    message: { id, model, role: "assistant", content, stop_reason: stop, usage: { input_tokens: 1 } },
+    message: {
+      id,
+      model,
+      role: "assistant",
+      content,
+      stop_reason: stop,
+      usage: { input_tokens: 1 },
+    },
   });
   const notification = (status: string, summary: string) => ({
     ...user(0, `<task-notification>\n<status>${status}</status>\n<summary>${summary}</summary>`),
@@ -562,10 +635,20 @@ test("splits Claude task time by what the agent waited on", () => {
   const { root } = claudeFixture({
     "example/main.jsonl": [
       user(0, "Fix the build"),
-      reply(10, "msg-1", [
-        { type: "tool_use", id: "test", name: "Bash", input: { command: "bun test" } },
-        { type: "tool_use", id: "ci", name: "Bash", input: { command: "sleep 30; gh pr checks" } },
-      ], "tool_use"),
+      reply(
+        10,
+        "msg-1",
+        [
+          { type: "tool_use", id: "test", name: "Bash", input: { command: "bun test" } },
+          {
+            type: "tool_use",
+            id: "ci",
+            name: "Bash",
+            input: { command: "sleep 30; gh pr checks" },
+          },
+        ],
+        "tool_use",
+      ),
       user(30, [{ type: "tool_result", tool_use_id: "test", content: "pass" }]),
       user(50, [{ type: "tool_result", tool_use_id: "ci", content: "green" }]),
       reply(60, "msg-2", [{ type: "text", text: "Started the audit" }], "end_turn"),

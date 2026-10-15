@@ -4,6 +4,8 @@
  * Local hygiene checks used by `doctor`. Prints one `<level>\t<label>: <detail>` line per finding.
  */
 
+import { agentOutput } from "../lib/agent-output";
+
 import {
   existsSync,
   lstatSync,
@@ -30,7 +32,12 @@ import {
 } from "../lib/mac-watcher";
 import { readDeviceProfile } from "../lib/device";
 import { parsePruneReport } from "../lib/storage-prune";
+import { cleanupDoctorHint } from "../lib/worktree-cleanup";
 import { claudePaths, renderBaseRules } from "./install";
+
+if (process.env.MY_SETUP_DOCTOR_DETAIL !== "1") {
+  agentOutput("doctor-checks", { failures: (output) => output.trim().split("\n").filter(Boolean) });
+}
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
 const HOME = homedir();
@@ -63,6 +70,7 @@ if (/^\s*(alias\s+zsh=|zsh\s*\(\)|function\s+zsh\b)/m.test(zshCustom)) {
   });
 }
 
+const registeredT3Worktrees = new Set<string>();
 for (const root of [
   ROOT_DIR,
   ...(PROFILE.activeProjects ? ACTIVE_PROJECTS.map((project) => project.canonicalRoot) : []),
@@ -71,8 +79,12 @@ for (const root of [
   const result = execaSync("git", ["worktree", "list", "--porcelain"], {
     cwd: root,
     reject: false,
+    timeout: 200,
   });
   if (result.exitCode !== 0) continue;
+  for (const path of result.stdout.matchAll(/^worktree (.+)$/gm)) {
+    if (path[1].startsWith(`${join(HOME, ".t3/worktrees")}/`)) registeredT3Worktrees.add(path[1]);
+  }
   const prunable = result.stdout
     .split(/\n\n+/)
     .filter((block) => /^prunable/m.test(block))
@@ -85,6 +97,11 @@ for (const root of [
       detail: `${root}: ${prunable.join(", ")}; run git worktree prune`,
     });
   }
+}
+
+if (PROFILE.activeProjects) {
+  const detail = await cleanupDoctorHint(HOME, registeredT3Worktrees.size);
+  if (detail) findings.push({ level: "optional", label: "worktree storage", detail });
 }
 
 const expectedRules = renderBaseRules(
@@ -100,19 +117,30 @@ if (staleRules.length > 0) {
     label: "stale installed rules",
     detail: `${staleRules
       .map(({ label }) => label)
-      .join(", ")} differ from content/base-rules.md; run mise run install -- --compact`,
+      .join(", ")} differ from content/base-rules.md; run mise run install`,
   });
 }
 
 const rtkPlugin = join(HOME, ".config/opencode/plugins/rtk.ts");
-if (
-  !existsSync(rtkPlugin) ||
-  !readFileSync(rtkPlugin, "utf-8").includes("rtk rewrite ${command}")
-) {
+let rtkPluginValid = false;
+if (PROFILE.opencode && existsSync(rtkPlugin)) {
+  try {
+    const { RtkOpenCodePlugin } = await import(rtkPlugin);
+    const hooks =
+      typeof RtkOpenCodePlugin === "function"
+        ? await RtkOpenCodePlugin({ $: Bun.$ })
+        : await RtkOpenCodePlugin?.server?.();
+
+    rtkPluginValid = typeof hooks?.["tool.execute.before"] === "function";
+  } catch {
+    // A plugin that cannot load or register its hook is unusable.
+  }
+}
+if (PROFILE.opencode && !rtkPluginValid) {
   findings.push({
     level: "required",
     label: "RTK OpenCode plugin",
-    detail: `${rtkPlugin} is missing or invalid; run mise run install -- --compact`,
+    detail: `${rtkPlugin} is missing or invalid; run mise run install`,
   });
 }
 
@@ -167,7 +195,7 @@ if (existsSync(pool.config)) {
       level: "required",
       label: "Claude pool configuration",
       detail:
-        "local routing, dashboard, or model aliases differ from the managed setup; run mise run install -- --compact",
+        "local routing, dashboard, or model aliases differ from the managed setup; run mise run install",
     });
   }
 }
@@ -187,8 +215,7 @@ if (existsSync(pool.claudeSettings) && existsSync(pool.clientKey)) {
     findings.push({
       level: "required",
       label: "Claude pool credentials",
-      detail:
-        "isolated Claude settings do not match the local client key; run mise run install -- --compact",
+      detail: "isolated Claude settings do not match the local client key; run mise run install",
     });
   }
 }
@@ -198,7 +225,7 @@ if (legacyClaudeFiles.length > 0) {
   findings.push({
     level: "required",
     label: "old Claude config",
-    detail: `${legacyClaudeFiles.join(", ")} would load stale rules in Claude Pool sessions; run mise run install -- --compact`,
+    detail: `${legacyClaudeFiles.join(", ")} would load stale rules in Claude Pool sessions; run mise run install`,
   });
 }
 
@@ -213,7 +240,7 @@ if (poolService.exitCode !== 0 || !poolService.stdout.includes("state = running"
   findings.push({
     level: "optional",
     label: "Claude pool service",
-    detail: "launch agent is not running; run mise run install -- --compact",
+    detail: "launch agent is not running; run mise run install",
   });
 }
 const poolListener = execaSync("lsof", ["-nP", `-iTCP:${CLAUDE_POOL.port}`, "-sTCP:LISTEN"], {
@@ -316,7 +343,7 @@ if (
   findings.push({
     level: "required",
     label: "memcap config",
-    detail: `${watcher.memcapConfig} differs from config/mac-watcher.ts; run mise run install -- --compact`,
+    detail: `${watcher.memcapConfig} differs from config/mac-watcher.ts; run mise run install`,
   });
 }
 if (Bun.which("memcap")) {
@@ -346,7 +373,7 @@ if (!launchd(MAC_WATCHER.guardLabel)) {
   findings.push({
     level: "required",
     label: "CPU guard service",
-    detail: "launch agent is not loaded; run mise run install -- --compact",
+    detail: "launch agent is not loaded; run mise run install",
   });
 } else if (guardAge === undefined || guardAge > 600) {
   findings.push({
@@ -359,7 +386,7 @@ if (!launchd(MAC_WATCHER.label)) {
   findings.push({
     level: "required",
     label: "Mac watcher service",
-    detail: "launch agent is not loaded; run mise run install -- --compact",
+    detail: "launch agent is not loaded; run mise run install",
   });
 }
 try {

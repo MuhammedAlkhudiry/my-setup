@@ -5,9 +5,9 @@ description: Use to triage a repository's open pull requests or babysit them, ra
 
 ## Triage
 
-1. Run `bun scripts/triage-prs.ts <repo-path>` (`--help` for options). It ranks open PRs by application-code lines and migrations. It also lists
+1. Run `bun scripts/triage-prs.ts <repo-path> --json` (`--help` for options). It ranks open PRs by application-code lines and migrations. It also lists
    stacks, stacked PRs behind their parent, CI state, conflicts with the default branch, and overlaps between PRs, then proposes a parent-first
-   merge order. Use `--json` for the conflicting paths.
+   merge order. Use `--verbose` for the detailed text report.
 2. Check what the script cannot see, for each PR:
    - **Review state:** requested changes, unresolved threads, and unanswered questions.
    - **Decisions:** product or owner decisions the PR waits on, and PRs the owner asked to keep, pause, or close.
@@ -24,15 +24,19 @@ description: Use to triage a repository's open pull requests or babysit them, ra
 
 Run when the user asks to babysit the PRs or keep them mergeable, after triage. Never merge; the user merges.
 
-1. In merge order, parents first, fix each PR's mechanical blockers on its branch, in its own worktree:
-   - **Behind the default branch or conflicting with it:** merge the default branch in; never rebase a shared branch.
-   - **Behind its parent:** merge the parent branch in.
+1. Parents first, check owner holds, review feedback, drafts, and checkout ownership. In a clean PR worktree, run
+   `bun <skill-dir>/scripts/pr-refresh.ts <pr-url> --repo <checkout> --expected-head <full-pr-head-sha> --json`;
+   `<skill-dir>` is the installed $triage-prs directory. Use `--dry-run` for reads only; `--help` lists prerequisites and exits.
+   - **Behind its base or parent:** the script merges the actual base, checks, pushes normally, and signs off.
+   - **Conflicting:** resolve and commit mechanical conflicts, then rerun with the original expected head. The receipt gives paths and resume
+     state. Exit 4 means remote movement; inspect it before restarting.
    - **Parent squash-merged:** rebase the child onto the default branch with `git rebase --onto` and push with `--force-with-lease`.
-   - **Failing CI:** fix lint, type, and test failures caused by the default branch moving or by the merge itself.
-   - **Drafts:** respect an existing draft's status; do not mark it ready unless the user requests it and the project's checks pass.
-2. Run the project's local checks before every push.
-3. Stop on a PR and report it when the fix needs a logic decision, changes behavior, or answers review feedback. Use $code-review and $prs
-   for an authorized follow-up. Coordinate with another agent only for conflicting work in the same checkout or shared resources.
+   - **Failing CI:** fix mechanical lint, type, and test failures.
+   - **Drafts:** mark ready only when requested and checks pass.
+2. Keep squash-restacking and CI fixes with the agent: local checks before every push, pushed-head sign-off afterward. The script requires
+   same-repository GitHub branches and local `check`/`signoff` mise tasks; it never force-pushes or answers feedback.
+3. Stop for logic decisions, behavior changes, or review feedback; use $code-review and $prs for an authorized follow-up. Coordinate only
+   conflicting work in the same checkout or shared resources.
 4. Watch every open PR with the harness's pull request watcher, or rerun this section on a schedule where there is none. When a PR merges, CI
    fails, or a branch starts conflicting, repeat from step 1.
 5. Stop when every PR is mergeable, merged, closed, or waiting on the user, and report the table from triage with what changed.

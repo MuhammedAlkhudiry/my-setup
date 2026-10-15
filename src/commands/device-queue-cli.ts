@@ -3,38 +3,34 @@
 // Leases iOS simulators and Android emulators to agent sessions so only a few run at once; further requests wait in a
 // first-come queue. The browser-simulator-routing skill tells agents when to use it.
 
-import {
-  appendFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
+import { appendFileSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { cac } from "cac";
 import { execa } from "execa";
 
-import {
-  DEVICE_QUEUE,
-  type Device,
-  type QueueState,
-  decide,
-  emptyQueueState,
-  reapQueue,
-  releaseLease,
-  renewLease,
-} from "../lib/device-queue";
+import { DEVICE_QUEUE, type Device, decide, reapQueue, releaseLease } from "../lib/device-queue";
 
-const STATE_DIR = join(
-  process.env.XDG_STATE_HOME || join(homedir(), ".local/state"),
-  "device-queue",
-);
-const STATE_PATH = join(STATE_DIR, "state.json");
-const LOCK_PATH = join(STATE_DIR, "lock");
-const LOG_PATH = join(STATE_DIR, "actions.log");
+import { agentOutput } from "../lib/agent-output";
+import { queueDirectory, withQueueState as withState } from "../lib/queue-store";
+
+agentOutput("device-queue", {
+  nativeJson: true,
+  summary: (output) => {
+    try {
+      const receipt = JSON.parse(output);
+      return `device-queue: ${receipt.status}${receipt.id ? ` ${receipt.id}` : ""}${receipt.needsBoot ? "; start emulator" : ""}`;
+    } catch {
+      return `device-queue: ${output
+        .trim()
+        .split("\n")
+        .filter((line) => /^(ios|android):/.test(line))
+        .join("; ")}`;
+    }
+  },
+});
+
+const LOG_PATH = join(queueDirectory(), "actions.log");
 const ANDROID_SDK = process.env.ANDROID_HOME || join(homedir(), "Library/Android/sdk");
 const ADB = Bun.which("adb") ?? join(ANDROID_SDK, "platform-tools/adb");
 const EMULATOR = join(ANDROID_SDK, "emulator/emulator");
@@ -45,8 +41,10 @@ type Shutdowns = ReturnType<typeof reapQueue>;
 
 const log = (line: string) => appendFileSync(LOG_PATH, `[${new Date().toISOString()}] ${line}\n`);
 
-async function run(command: string, args: string[]): Promise<string> {
+async function run(command: string, args: string[], optional = false): Promise<string> {
   const result = await execa(command, args, { reject: false, timeout: 30_000 });
+  if (result.failed && !optional)
+    throw new Error(`${command} ${args.join(" ")} failed: ${result.stderr || result.shortMessage}`);
   return result.exitCode === 0 ? result.stdout : "";
 }
 
@@ -75,40 +73,13 @@ async function listDevices(): Promise<Map<string, Device>> {
         devices.set(avd, { id: avd, platform: "android", name: avd, booted: false });
     }
   }
-  const serials = (await run(ADB, ["devices"])).match(/^emulator-\d+/gm) ?? [];
+  const serials =
+    (existsSync(ADB) ? (await run(ADB, ["devices"])).match(/^emulator-\d+/gm) : []) ?? [];
   for (const serial of serials) {
     const avd = (await run(ADB, ["-s", serial, "emu", "avd", "name"])).split(/\r?\n/)[0]?.trim();
     if (avd) devices.set(avd, { id: avd, platform: "android", name: avd, booted: true, serial });
   }
   return devices;
-}
-
-async function withState<T>(fn: (state: QueueState) => T): Promise<T> {
-  mkdirSync(STATE_DIR, { recursive: true });
-
-  while (true) {
-    try {
-      mkdirSync(LOCK_PATH);
-      break;
-    } catch {
-      try {
-        if (Date.now() - statSync(LOCK_PATH).mtimeMs > 30_000)
-          rmSync(LOCK_PATH, { recursive: true, force: true });
-      } catch {}
-      await Bun.sleep(100);
-    }
-  }
-
-  try {
-    const state = existsSync(STATE_PATH)
-      ? { ...emptyQueueState(), ...JSON.parse(readFileSync(STATE_PATH, "utf8")) }
-      : emptyQueueState();
-    const result = fn(state);
-    writeFileSync(STATE_PATH, JSON.stringify(state, null, 2));
-    return result;
-  } finally {
-    rmSync(LOCK_PATH, { recursive: true, force: true });
-  }
 }
 
 function isAlive(pid: number): boolean {
@@ -127,7 +98,7 @@ async function findAgentPid(): Promise<number> {
 
   for (let depth = 0; depth < 12 && pid > 1; depth++) {
     const [, parent, command] =
-      (await run("ps", ["-o", "ppid=,command=", "-p", String(pid)]))
+      (await run("ps", ["-o", "ppid=,command=", "-p", String(pid)], true))
         .trim()
         .match(/^(\d+)\s+(.*)$/) ?? [];
     if (!command) return 0;
@@ -211,30 +182,40 @@ async function acquire(id: string, owner: string, waitSeconds: number) {
         );
       if (device.platform === "ios" && !device.booted) await run("xcrun", ["simctl", "boot", id]);
       console.log(
-        JSON.stringify({ status: "granted", platform: device.platform, id, name: device.name }),
+        JSON.stringify({
+          status: "granted",
+          platform: device.platform,
+          id,
+          name: device.name,
+          needsBoot: device.platform === "android" && !device.booted,
+        }),
       );
       if (device.platform === "android" && !device.booted)
         console.error("Start the emulator yourself now.");
       return;
     }
-    if (decision.report !== lastReport) console.error(decision.report);
+    if (process.env.MY_SETUP_OUTPUT === "verbose" && decision.report !== lastReport)
+      console.error(decision.report);
     lastReport = decision.report;
 
-    if (Date.now() > deadline) {
+    if (Date.now() >= deadline) {
+      if (cli.options.json)
+        console.log(
+          JSON.stringify({
+            status: "queued",
+            id,
+            exitCode: STILL_QUEUED_EXIT_CODE,
+            error: "Still queued; retry within two minutes to keep your place",
+            log: join(process.env.MY_SETUP_OUTPUT_LOG_ROOT!, "full.log"),
+          }),
+        );
       console.error(
         "Still queued. Run the same command again within 2 minutes to keep your place.",
       );
       process.exit(STILL_QUEUED_EXIT_CODE);
     }
-    await Bun.sleep(POLL_MS);
+    await Bun.sleep(Math.min(POLL_MS, Math.max(1, deadline - Date.now())));
   }
-}
-
-async function renew(id: string, owner: string) {
-  if (!(await withState((state) => renewLease(state, id, owner, Date.now())))) {
-    throw new Error(`"${owner}" holds no lease on ${id}; run acquire`);
-  }
-  console.log(JSON.stringify({ status: "renewed", id }));
 }
 
 async function release(id: string) {
@@ -246,7 +227,7 @@ async function release(id: string) {
   console.log(JSON.stringify({ status: "released", id }));
 }
 
-async function status() {
+async function status(options: { json?: boolean }) {
   const devices = await listDevices();
   const busy = await busyDevices(devices);
   const now = Date.now();
@@ -255,6 +236,21 @@ async function status() {
     state: structuredClone(state),
   }));
   await shutDownAll(shutdowns);
+
+  if (options.json) {
+    console.log(
+      JSON.stringify({
+        status: "ok",
+        capacity: DEVICE_QUEUE.maxRunning,
+        leases: Object.values(state.leases),
+        waiting: Object.values(state.tickets),
+        unleased: [...devices.values()].filter(
+          (device) => device.booted && !state.leases[device.id],
+        ),
+      }),
+    );
+    return;
+  }
 
   const ago = (since: number) => `${Math.round((now - since) / 60_000)}m`;
   for (const platform of ["ios", "android"] as const) {
@@ -285,13 +281,24 @@ async function status() {
   }
 }
 
+class InputError extends Error {}
+
 function requireOwner(owner: unknown): string {
   if (typeof owner !== "string" || owner.trim() === "")
-    throw new Error('Pass --owner "<thread title>"');
+    throw new InputError('Pass --owner "<thread title>"');
   return owner;
 }
 
-const cli = cac("device-queue");
+function requireWait(value: unknown): number {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0)
+    throw new InputError("Wait must be a finite nonnegative number of seconds");
+  return seconds;
+}
+
+const cli = cac("device-queue")
+  .option("--json", "Return a structured receipt")
+  .option("--verbose", "Print detailed output");
 
 cli
   .command(
@@ -305,13 +312,8 @@ cli
     { default: 540 },
   )
   .action((id: string, options: { owner?: string; waitSeconds: number }) =>
-    acquire(id, requireOwner(options.owner), Number(options.waitSeconds)),
+    acquire(id, requireOwner(options.owner), requireWait(options.waitSeconds)),
   );
-
-cli
-  .command("renew <id>", "Mark a lease active")
-  .option("--owner <title>", "Thread title the lease was taken with")
-  .action((id: string, options: { owner?: string }) => renew(id, requireOwner(options.owner)));
 
 cli.command("release <id>", "End a lease and shut the device down").action(release);
 
@@ -319,14 +321,29 @@ cli.command("status", "Show slots, leases, unleased devices, and the queue").act
 
 cli.help();
 cli.addEventListener("command:*", () => {
-  console.error(`Unknown command: ${cli.args.join(" ")}`);
-  process.exitCode = 1;
+  throw new InputError(`Unknown command: ${cli.args.join(" ")}. Run device-queue --help.`);
 });
+
+let parsed = false;
 
 try {
   cli.parse(process.argv, { run: false });
+  parsed = true;
+  if (!cli.matchedCommand && !cli.options.help && process.argv.length === 2)
+    throw new InputError("Pass acquire, release, or status; see --help");
   await cli.runMatchedCommand();
 } catch (error) {
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
+  const message = error instanceof Error ? error.message : String(error);
+  const exitCode = !parsed || error instanceof InputError ? 2 : 1;
+  if (process.argv.includes("--json"))
+    console.log(
+      JSON.stringify({
+        status: "failed",
+        exitCode,
+        error: message,
+        log: join(process.env.MY_SETUP_OUTPUT_LOG_ROOT!, "full.log"),
+      }),
+    );
+  console.error(message);
+  process.exit(exitCode);
 }

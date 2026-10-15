@@ -4,13 +4,13 @@
 
 ```text
 # Before reporting: the areas this branch changed, in parallel
-mise run check
+heavy-run --class checks -- mise run check
 
 # After the final push to a pull request: what its CI would run, then a green signoff status on GitHub
-mise run signoff
+heavy-run --class checks -- mise run signoff
 
 # Before a release: every area
-mise run premerge
+heavy-run --class checks -- mise run premerge
 
 # One test file
 cd app && bunx jest <path>
@@ -20,6 +20,7 @@ mise run api:check
 ```
 
 - Replace every example with commands confirmed from the project and installed tool help.
+- Reserve full heavy runs with `heavy-run` at the outer command only; individual test files and light checks run directly. See $verification.
 - Use `#` comments for group labels and conditions. Put explanations in the task runner's descriptions, not in the checklist.
 - Give the project one gate command that runs the checks for the areas the branch changed, in parallel, and fixes formatting.
 - Give it one full command that runs every area and everything CI runs.

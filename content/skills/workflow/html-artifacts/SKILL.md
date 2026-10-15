@@ -55,7 +55,8 @@ Cut words, not styling.
 - For separate artifacts, run `html-artifact check <folder>` and inspect its screenshots. Fix issues, then check once more.
   <!-- profile:personal -->
 - Publish separate artifacts with `share-html <folder>`; `--name <words>` gives a readable URL. Links expire after 30 days.
-- Use `--writable` for feedback pages and `share-html feedback` on "see". Hand over the printed URL.
+- For a living page republished over time, such as a roadmap, add `--stable`: it keeps one URL and replaces the old files.
+- Use `--writable` for feedback pages and `share-html feedback --json` on "see". Hand over the printed URL.
 - Repair missing Cloudflare sign-in with $service-access. If the host is not behind Cloudflare Access, stop; never publish another way.
   <!-- /profile -->
   <!-- profile:work -->

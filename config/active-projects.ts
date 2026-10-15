@@ -37,6 +37,8 @@ export const SHARED_VERIFICATION = {
     "scripts/check.test.ts",
     ".github/scripts/changed-files.sh",
     ".github/scripts/test-mysql.sh",
+    "scripts/lint/test-order-oxlint-plugin.mjs",
+    "scripts/test-order-lint.test.ts",
   ],
   tasks: ["check", "signoff", "premerge", "hooks:install"],
 };

@@ -16,6 +16,8 @@ Recommend improvements without editing.
 
 ## Review areas
 
+Never recommend GitHub branch protection or rulesets, including required up-to-date branches, removing admin bypass, merge queues, or required checks.
+
 - **Context:** instructions and output that add tokens or make tasks harder to follow.
 - **Task speed:** what tasks wait on, such as model responses, large prompts, polling loops, subagents, and failed requests.
 - **Skills:** gaps, duplication, outdated guidance, and work better handled by scripts.

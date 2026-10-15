@@ -21,7 +21,8 @@ Prefer: route → controller → Form Request → typed data object → service 
 small endpoint does not need.
 
 - Keep controllers CRUD-only: `index`, `show`, `store`, `update`, `destroy`. Model any other verb as its own resource with its own controller. For
-  example, archiving becomes `ArchiveController@store` and restoring becomes `ArchiveController@destroy`. Nest routes under the parent resource.
+  example, archiving becomes `ArchiveController@store` and restoring becomes `ArchiveController@destroy`. Nest new routes under the parent
+  resource. When splitting an existing endpoint, keep its URI, HTTP method, route name, and middleware; only the handling controller changes.
 - Authorize through policies, in the Form Request's `authorize()` or the controller. Never trust a model ID from the request without checking
   that the user may access it.
 

@@ -1,7 +1,26 @@
 #!/usr/bin/env bun
 
+import { agentOutput, parseCli } from "../lib/agent-output";
 import { cac } from "cac";
 import { addImagesToArtifact, checkArtifact, createArtifact } from "./html-artifact";
+
+agentOutput("html-artifact", {
+  nativeJson: true,
+  summary: (output) => output.trim().split("\n")[0] || "html-artifact: ok",
+  failures: (output, errors) => {
+    try {
+      return JSON.parse(output).problems ?? [];
+    } catch {
+      return [
+        ...output
+          .split("\n")
+          .filter((line) => line.trim().startsWith("- "))
+          .map((line) => line.trim().slice(2)),
+        ...errors.trim().split("\n").filter(Boolean).slice(0, 1),
+      ];
+    }
+  },
+});
 
 const cli = cac("html-artifact");
 
@@ -15,19 +34,31 @@ async function run(task: () => Promise<void>): Promise<void> {
 }
 
 cli
-  .command("new <kind> <topic>", "Create a page folder from a template (options, plan-review, blank) with the project's mockup kit")
+  .command(
+    "new <kind> <topic>",
+    "Create a page folder from a template (options, plan-review, blank) with the project's mockup kit",
+  )
   .option("--images <names>", "Comma-separated kit images to copy, resized, into kit/images/")
   .option("--project <dir>", "Project whose mockup-kit/ to use, defaults to the current repo")
-  .action((kind: string, topic: string, options) => run(() => createArtifact(kind, topic, options)));
+  .action((kind: string, topic: string, options) =>
+    run(() => createArtifact(kind, topic, options)),
+  );
 
 cli
   .command("images <folder> <...names>", "Add more kit images to a page folder")
   .option("--project <dir>", "Project whose mockup-kit/ to use, defaults to the current repo")
-  .action((folder: string, names: string[], options) => run(() => addImagesToArtifact(folder, names, options)));
+  .action((folder: string, names: string[], options) =>
+    run(() => addImagesToArtifact(folder, names, options)),
+  );
 
 cli
-  .command("check <folder>", "Screenshot the page on desktop, mobile, and dark, and report errors, overflow, and clipped text")
+  .command(
+    "check <folder>",
+    "Screenshot the page on desktop, mobile, and dark, and report errors, overflow, and clipped text",
+  )
   .action((folder: string) => run(() => checkArtifact(folder)));
 
+cli.option("--json", "Emit structured results");
+cli.option("--verbose", "Print details");
 cli.help();
-cli.parse();
+parseCli(cli);

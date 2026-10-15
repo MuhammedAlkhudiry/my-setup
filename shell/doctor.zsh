@@ -2,50 +2,31 @@
 
 set -u
 
+MY_SETUP_ROOT="${MY_SETUP_ROOT:-${0:A:h:h}}"
+if [[ "${MY_SETUP_DOCTOR_DETAIL:-}" != "1" ]]; then
+  source "$MY_SETUP_ROOT/shell/agent-command.zsh"
+  agent_command "doctor" "$MY_SETUP_ROOT/src/commands/doctor-cli.ts" "$@"
+  exit $?
+fi
+
 typeset -i required_ok=0
 typeset -i required_missing=0
 typeset -i optional_ok=0
 typeset -i optional_missing=0
 typeset -i link_ok=0
 typeset -i link_missing=0
-GUM_BIN="$(command -v gum 2>/dev/null || true)"
 MY_SETUP_ROOT="${MY_SETUP_ROOT:-${0:A:h:h}}"
 
-has_gum() {
-  [[ -n "$GUM_BIN" ]]
-}
-
 print_header() {
-  printf '\n'
-  if has_gum; then
-    "$GUM_BIN" style --bold --foreground 81 "$1"
-  else
-    printf '%s\n' "$1"
-  fi
+  return 0
 }
 
 print_ok() {
-  if has_gum; then
-    printf '  %s %-14s %s\n' \
-      "$("$GUM_BIN" style --foreground 42 "[ok]")" \
-      "$("$GUM_BIN" style --foreground 252 "$1")" \
-      "$("$GUM_BIN" style --foreground 244 "$2")"
-  else
-    printf '  [ok]   %-14s %s\n' "$1" "$2"
-  fi
+  printf '[ok] %s %s\n' "$1" "$2"
 }
 
 print_missing() {
-  if has_gum; then
-    local color="214"
-    [[ "$1" == "required" ]] && color="196"
-    printf '  %s %-14s %s\n' \
-      "$("$GUM_BIN" style --foreground "$color" "[$1]")" \
-      "$("$GUM_BIN" style --foreground 252 "$2")" \
-      "$("$GUM_BIN" style --foreground 244 "$3")"
-  else
-    printf '  [%s] %-14s %s\n' "$1" "$2" "$3"
-  fi
+  printf '[%s] %s %s\n' "$1" "$2" "$3"
 }
 
 check_gh_extension() {
@@ -72,20 +53,7 @@ check_gh_extension() {
 }
 
 print_summary() {
-  printf '\n'
-  if has_gum; then
-    "$GUM_BIN" style --bold --foreground 81 "Summary"
-    printf '  %s ok=%d missing=%d\n' "$("$GUM_BIN" style --foreground 252 "required:")" "$required_ok" "$required_missing"
-    printf '  %s ok=%d missing=%d\n' "$("$GUM_BIN" style --foreground 252 "optional:")" "$optional_ok" "$optional_missing"
-    printf '  %s ok=%d missing=%d\n' "$("$GUM_BIN" style --foreground 252 "links:")" "$link_ok" "$link_missing"
-    printf '  %s\n' "$("$GUM_BIN" style --foreground 244 "note: this checks command presence and managed local setup, not auth, credentials, or full runtime access.")"
-  else
-    printf 'Summary\n'
-    printf '  required: ok=%d missing=%d\n' "$required_ok" "$required_missing"
-    printf '  optional: ok=%d missing=%d\n' "$optional_ok" "$optional_missing"
-    printf '  links: ok=%d missing=%d\n' "$link_ok" "$link_missing"
-    printf '  note: this checks command presence and managed local setup, not auth, credentials, or full runtime access.\n'
-  fi
+  printf 'doctor: required_missing=%d optional_missing=%d link_missing=%d\n' "$required_missing" "$optional_missing" "$link_missing"
 }
 
 check_tool() {
@@ -313,7 +281,10 @@ main() {
   check_credentials_home
 
   print_header "Git workflow helpers"
-  check_tool gh optional "Used to open GitHub pull requests from the command line."
+  check_tool gh optional "Used for GitHub pull requests, CI runner switching and fresh PR evidence in worktree-cleanup."
+  check_tool lsof required "Checks open files before worktree-cleanup removes finished work."
+  check_tool du required "Measures worktree storage during cleanup; doctor reads cached sizes."
+  check_tool find required "Checks file-change grace periods before worktree cleanup or storage pruning."
   check_gh_extension signoff optional "Install with gh extension install basecamp/gh-signoff; sets up the branch rule that requires the local sign-off status."
   check_tool glab optional "Used to open GitLab merge requests from the command line."
 
@@ -321,12 +292,15 @@ main() {
   check_link zsh "$HOME/.config/zsh-sync/custom.zsh" "$MY_SETUP_ROOT/shell/zsh-custom.zsh"
   check_link my-setup "$HOME/bin/my-setup" "$MY_SETUP_ROOT/shell/my-setup.zsh"
   check_link system-tools "$HOME/bin/system-tools" "$MY_SETUP_ROOT/shell/system-tools.zsh"
+  check_link worktree-cleanup "$HOME/bin/worktree-cleanup" "$MY_SETUP_ROOT/shell/worktree-cleanup.zsh"
   check_link hugeicons "$HOME/bin/hugeicons" "$MY_SETUP_ROOT/shell/hugeicons.zsh"
   check_link doctor "$HOME/bin/doctor" "$MY_SETUP_ROOT/shell/doctor.zsh"
   check_link pk "$HOME/bin/pk" "$MY_SETUP_ROOT/shell/pk.zsh"
   check_link share-html "$HOME/bin/share-html" "$MY_SETUP_ROOT/shell/share-html.zsh"
   check_link store-build "$HOME/bin/store-build" "$MY_SETUP_ROOT/shell/store-build.zsh"
   check_link device-queue "$HOME/bin/device-queue" "$MY_SETUP_ROOT/shell/device-queue.zsh"
+  check_link heavy-run "$HOME/bin/heavy-run" "$MY_SETUP_ROOT/shell/heavy-run.zsh"
+  check_link ci-runner "$HOME/bin/ci-runner" "$MY_SETUP_ROOT/shell/ci-runner.zsh"
   check_link claude-skills "$HOME/.claude_cliproxy/skills" "$HOME/.agents/skills"
 
   print_header "Managed skills"

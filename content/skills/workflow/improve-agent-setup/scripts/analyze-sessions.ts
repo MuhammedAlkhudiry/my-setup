@@ -1,7 +1,10 @@
 #!/usr/bin/env bun
+import { agentOutput } from "../../prs/scripts/agent-output";
 import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { Database } from "bun:sqlite";
+
+agentOutput("analyze-sessions", { nativeJson: true });
 
 type Obj = Record<string, unknown>;
 type Usage = { input: number; cached: number; output: number };
@@ -33,6 +36,7 @@ type Session = {
   parentId: string;
   forkBaselineInput: number;
   tokenEvents: number;
+  turns: number;
   firstInput: number;
   maxInput: number;
   totalInput: number;
@@ -226,7 +230,8 @@ Options:
   --since <date>        Include activity at or after this event timestamp.
   --since-mtime <time>  Diagnostic file prefilter using an epoch timestamp.
   --state-db <path>     Codex state database. Default: ~/.codex/state_5.sqlite.
-  --json                Emit machine-readable output.`);
+  --json                Emit machine-readable output.
+  --verbose             Print the detailed text report.`);
   process.exit(0);
 }
 function positive(value: string, option: string): number {
@@ -427,7 +432,11 @@ function commandLabel(raw: string): string {
     (commandPrefixes.has(tokens[0]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0]))
   )
     tokens.shift();
-  const binary = (tokens[0] || "").replace(/^['"(]+/, "").split("/").pop() || "";
+  const binary =
+    (tokens[0] || "")
+      .replace(/^['"(]+/, "")
+      .split("/")
+      .pop() || "";
   if (!binary || scriptNoise.has(binary) || !/^[A-Za-z0-9_.@+-]+$/.test(binary)) return "";
   if (!subcommandBinaries.has(binary)) return binary;
   const sub = tokens.slice(1).find((token) => !token.startsWith("-"));
@@ -532,28 +541,46 @@ function addCommand(map: Map<string, Command>, call: Call, output: unknown): voi
   }
 }
 function table<T>(items: T[], columns: Array<[string, (item: T) => string | number]>): void {
-  const rows = items.map((item) => columns.map(([, get]) => String(get(item))));
-  const widths = columns.map(([header], i) =>
-    Math.max(header.length, ...rows.map((row) => row[i]?.length || 0)),
-  );
-  console.log(`| ${columns.map(([header], i) => header.padEnd(widths[i])).join(" | ")} |`);
-  console.log(`| ${widths.map((width) => "-".repeat(width)).join(" | ")} |`);
-  for (const row of rows)
-    console.log(`| ${row.map((cell, i) => cell.padEnd(widths[i])).join(" | ")} |`);
+  for (const item of items) {
+    console.log(columns.map(([label, get]) => `${label}=${JSON.stringify(get(item))}`).join(" "));
+  }
 }
 const outsideCwdFilter = (cwd: string): boolean =>
   Boolean(
     cwdFilter &&
-      normalizedPath(cwd) !== normalizedPath(cwdFilter) &&
-      !normalizedPath(cwd).startsWith(`${normalizedPath(cwdFilter)}/`),
+    normalizedPath(cwd) !== normalizedPath(cwdFilter) &&
+    !normalizedPath(cwd).startsWith(`${normalizedPath(cwdFilter)}/`),
   );
 
 const sessions: Session[] = [],
   commands = new Map<string, Command>();
 let candidates: string[] = [];
+const turnOwners = new Map<string, { file: string; at: number; copies: Set<string> }>();
 if (harnesses.has("codex")) {
   if (!existsSync(root)) die(`Codex sessions directory not found: ${root}`);
   candidates = walk(root, (entry) => entry.startsWith("rollout-") && entry.endsWith(".jsonl"));
+  // Read only metadata first, so source sessions precede inherited fork history
+  // without a second full scan of potentially very large rollouts.
+  const created = new Map<string, number>();
+  for (const file of candidates) {
+    let createdAt = Infinity;
+    for await (const line of lines(file)) {
+      let event: Obj;
+      try {
+        event = object(JSON.parse(line));
+      } catch {
+        continue;
+      }
+      const payload = object(event.payload);
+      if (event.type === "session_meta") {
+        createdAt = time(payload.timestamp) || time(event.timestamp) || Infinity;
+        break;
+      }
+    }
+    created.set(file, createdAt);
+  }
+  candidates.sort((left, right) => created.get(left)! - created.get(right)!);
+
   for (const file of candidates) {
     const summary: Session = {
       file: relative(root, file),
@@ -574,6 +601,7 @@ if (harnesses.has("codex")) {
       parentId: "",
       forkBaselineInput: 0,
       tokenEvents: 0,
+      turns: 0,
       firstInput: 0,
       maxInput: 0,
       totalInput: 0,
@@ -601,6 +629,8 @@ if (harnesses.has("codex")) {
       sawCumulative = false;
     const cumulativeDelta: Usage = { input: 0, cached: 0, output: 0 };
     const legacy: Usage = { input: 0, cached: 0, output: 0 };
+    const ownedTurns = new Set<string>();
+    let turnId = "";
     for await (const line of lines(file)) {
       if (!line) continue;
       summary.lines++;
@@ -620,6 +650,14 @@ if (harnesses.has("codex")) {
       const type = string(event.type),
         payload = object(event.payload),
         at = time(event.timestamp) || time(payload.timestamp);
+      if (type === "turn_context" || type === "event_msg") {
+        turnId = string(payload.turn_id) || turnId;
+        if (turnId && !outsideCwdFilter(summary.cwd)) {
+          const owner = turnOwners.get(turnId) ?? { file, at, copies: new Set<string>() };
+          owner.copies.add(file);
+          turnOwners.set(turnId, owner);
+        }
+      }
       if (type === "session_meta") {
         summary.id = string(payload.id) || string(payload.session_id) || summary.id;
         summary.cwd = string(payload.cwd) || summary.cwd;
@@ -656,7 +694,17 @@ if (harnesses.has("codex")) {
         const total = object(object(payload.info).total_token_usage);
         if (Object.keys(total).length) previousCumulative = getUsage(total);
       }
+      if (turnId && turnOwners.has(turnId) && turnOwners.get(turnId)!.file !== file) {
+        // Still advance the provider baseline through inherited history, so the
+        // first native turn includes only the usage it actually added.
+        if (type === "event_msg" && payload.type === "token_count") {
+          const total = object(object(payload.info).total_token_usage);
+          if (Object.keys(total).length) previousCumulative = getUsage(total);
+        }
+        continue;
+      }
       if (!at || at < since) continue;
+      if (turnId) ownedTurns.add(turnId);
       active = true;
       summary.firstActivity ||= at;
       summary.lastActivity = Math.max(summary.lastActivity, at);
@@ -679,6 +727,13 @@ if (harnesses.has("codex")) {
             // A forked session inherits the parent's cumulative totals, so its first
             // in-window snapshot is a baseline rather than usage this session caused.
             summary.forkBaselineInput = current.input;
+            // A stable native turn identifies this as new work even when its
+            // inherited baseline was not serialized in the child rollout.
+            if (turnId) {
+              cumulativeDelta.input += last.input;
+              cumulativeDelta.cached += last.cached;
+              cumulativeDelta.output += last.output;
+            }
           } else
             for (const key of ["input", "cached", "output"] as const) {
               const prior = previousCumulative?.[key] ?? 0;
@@ -691,7 +746,11 @@ if (harnesses.has("codex")) {
           legacy.cached += last.cached;
           legacy.output += last.output;
         }
-      } else if (type === "response_item" && payload.type === "message" && payload.role === "user") {
+      } else if (
+        type === "response_item" &&
+        payload.type === "message" &&
+        payload.role === "user"
+      ) {
         const message = text(payload.content),
           result = classify(message);
         if (result.injected) {
@@ -761,6 +820,7 @@ if (harnesses.has("codex")) {
         summary.unknown++;
     }
     if (!active || outsideCwdFilter(summary.cwd)) continue;
+    summary.turns = ownedTurns.size;
     if (sawCumulative) {
       summary.usageMode = "cumulative";
       summary.totalInput = cumulativeDelta.input;
@@ -893,7 +953,11 @@ function claudeToolLabel(name: string, input: Obj): string {
   if (name === "Task") return `Task ${short(string(input.subagent_type) || "default", 40)}`;
   return name;
 }
-function addTool(map: Map<string, ClaudeTool>, call: { tool: string; label: string }, output: string): void {
+function addTool(
+  map: Map<string, ClaudeTool>,
+  call: { tool: string; label: string },
+  output: string,
+): void {
   const existing = map.get(call.label) || {
     tool: call.tool,
     label: call.label,
@@ -1258,7 +1322,7 @@ if (harnesses.has("claude")) {
       time: emptyTime(),
     };
     const calls = new Map<string, { tool: string; label: string }>(),
-      countedRequests = new Set<string>(),
+      requestUsage = new Map<string, Obj>(),
       timeline = claudeTimeline(relativePath);
     let active = false;
     for await (const line of lines(file)) {
@@ -1306,20 +1370,8 @@ if (harnesses.has("claude")) {
           model = string(message.model);
         if (model && !summary.models.includes(model)) summary.models.push(model);
         const key = string(message.id) || string(event.requestId) || string(event.uuid);
-        // One API response is written as one record per content block; count its usage once.
-        if (Object.keys(usage).length && !countedRequests.has(key)) {
-          countedRequests.add(key);
-          const cached = number(usage.cache_read_input_tokens),
-            written = number(usage.cache_creation_input_tokens);
-          const prompt = number(usage.input_tokens) + cached + written;
-          summary.requests++;
-          summary.totalInput += prompt;
-          summary.cachedInput += cached;
-          summary.cacheWriteInput += written;
-          summary.totalOutput += number(usage.output_tokens);
-          summary.maxInput = Math.max(summary.maxInput, prompt);
-          if (summary.createdAt >= since) summary.firstInput ||= prompt;
-        }
+        // Streaming content blocks carry increasing usage; the final block wins.
+        if (Object.keys(usage).length) requestUsage.set(key || `line:${summary.lines}`, usage);
       } else if (type === "user") {
         const content = message.content,
           results = Array.isArray(content)
@@ -1377,6 +1429,19 @@ if (harnesses.has("claude")) {
       }
     }
     if (!active || outsideCwdFilter(summary.cwd)) continue;
+    for (const usage of requestUsage.values()) {
+      const cached = number(usage.cache_read_input_tokens);
+      const written = number(usage.cache_creation_input_tokens);
+      const prompt = number(usage.input_tokens) + cached + written;
+      summary.requests++;
+      summary.totalInput += prompt;
+      summary.cachedInput += cached;
+      summary.cacheWriteInput += written;
+      summary.totalOutput += number(usage.output_tokens);
+      summary.maxInput = Math.max(summary.maxInput, prompt);
+      if (summary.createdAt >= since) summary.firstInput ||= prompt;
+    }
+
     summary.status = !summary.createdAt
       ? "unknown"
       : summary.createdAt < since
@@ -1522,6 +1587,10 @@ const claudeMainTime = sumTime(claudeSessions.filter((item) => !item.sidechain))
 const totals = {
   candidateFiles: candidates.length,
   sessions: sessions.length,
+  turns: sessions.reduce((sum, item) => sum + item.turns, 0),
+  inheritedTurnCopies: [...turnOwners.values()]
+    .filter((turn) => turn.at >= since)
+    .reduce((sum, turn) => sum + turn.copies.size - 1, 0),
   created: sessions.filter((item) => item.status === "created").length,
   resumed: sessions.filter((item) => item.status === "resumed").length,
   unknownStatus: sessions.filter((item) => item.status === "unknown").length,
@@ -1587,13 +1656,13 @@ if (args.has("json")) {
   process.exit(0);
 }
 
-console.log("# Agent Session Audit\n");
+console.log("Agent sessions");
 console.log(`Harnesses: ${[...harnesses].join(", ")}`);
 console.log(`Activity window: since ${new Date(since).toISOString()} (event timestamps)`);
 if (sinceMtime !== undefined)
   console.log(`Diagnostic file prefilter: mtime since ${new Date(sinceMtime).toISOString()}`);
 if (harnesses.has("codex")) {
-  console.log("\n## Codex\n");
+  console.log("\nCodex\n");
   console.log(
     `Sessions with activity: ${totals.sessions}/${totals.candidateFiles} candidates (${totals.created} created, ${totals.resumed} resumed, ${totals.unknownStatus} unknown, ${totals.forked} forked)`,
   );
@@ -1604,7 +1673,7 @@ if (harnesses.has("codex")) {
   console.log(
     `Coverage: ${totals.parsed.toLocaleString()} parsed, ${totals.malformed} malformed, ${totals.unknown} unknown, ${totals.unmatchedToolOutputs} unmatched tool outputs\n`,
   );
-  console.log("### Largest Task Trees\n");
+  console.log("Largest Task Trees\n");
   if (trees.length)
     table(trees.slice(0, limit), [
       ["input usage", (x) => x.totalInput.toLocaleString()],
@@ -1622,7 +1691,7 @@ if (harnesses.has("codex")) {
         ? `Task-tree diagnostics unavailable: ${treeError}`
         : "No multi-task trees detected in this window.",
     );
-  console.log("\n### Largest Sessions\n");
+  console.log("\nLargest Sessions\n");
   table(
     sessions
       .slice()
@@ -1637,7 +1706,7 @@ if (harnesses.has("codex")) {
       ["file", (x) => x.file],
     ],
   );
-  console.log("\n### Noisiest Shell Commands\n");
+  console.log("\nNoisiest Shell Commands\n");
   table([...commands.values()].sort((a, b) => b.bytes - a.bytes).slice(0, limit), [
     ["output bytes", (x) => x.bytes.toLocaleString()],
     ["outputs", (x) => x.outputs],
@@ -1646,7 +1715,7 @@ if (harnesses.has("codex")) {
     ["trunc", (x) => x.truncated],
     ["command", (x) => x.command],
   ]);
-  console.log("\n### Highest Startup Inputs\n");
+  console.log("\nHighest Startup Inputs\n");
   table(
     sessions
       .filter((x) => x.firstInput)
@@ -1664,7 +1733,7 @@ if (harnesses.has("codex")) {
   );
 }
 if (harnesses.has("claude")) {
-  console.log("\n## Claude Code\n");
+  console.log("\nClaude Code\n");
   console.log(
     `Sessions with activity: ${claudeTotals.sessions}/${claudeTotals.candidateFiles} candidates (${claudeTotals.created} created, ${claudeTotals.resumed} resumed, ${claudeTotals.subagents} subagent transcripts)`,
   );
@@ -1678,7 +1747,7 @@ if (harnesses.has("claude")) {
   console.log(
     `Coverage: ${claudeTotals.parsed.toLocaleString()} parsed, ${claudeTotals.malformed} malformed, ${claudeTotals.unmatchedToolOutputs} unmatched tool outputs, ${claudeTotals.compactions} compactions\n`,
   );
-  console.log("### Largest Claude Sessions\n");
+  console.log("Largest Claude Sessions\n");
   table(
     claudeSessions
       .slice()
@@ -1695,19 +1764,21 @@ if (harnesses.has("claude")) {
       ["file", (x) => short(x.file, 64)],
     ],
   );
-  console.log("\n### Subagent Cost by Parent Session\n");
+  console.log("\nSubagent Cost by Parent Session\n");
   if (claudeTaskTrees.length)
     table(claudeTaskTrees.slice(0, limit), [
       ["total input", (x) => x.totalInput.toLocaleString()],
       ["main input", (x) => x.mainInput.toLocaleString()],
       ["subagent input", (x) => x.subagentInput.toLocaleString()],
-      ["subagent share", (x) =>
-        `${Math.round((100 * x.subagentInput) / Math.max(1, x.totalInput))}%`],
+      [
+        "subagent share",
+        (x) => `${Math.round((100 * x.subagentInput) / Math.max(1, x.totalInput))}%`,
+      ],
       ["subagents", (x) => x.subagents],
       ["session", (x) => short(x.title || x.sessionId)],
     ]);
   else console.log("No subagent transcripts in this window.");
-  console.log("\n### Largest Claude Tool Outputs\n");
+  console.log("\nLargest Claude Tool Outputs\n");
   table([...claudeTools.values()].sort((a, b) => b.bytes - a.bytes).slice(0, limit), [
     ["output bytes", (x) => x.bytes.toLocaleString()],
     ["outputs", (x) => x.outputs],
@@ -1715,7 +1786,7 @@ if (harnesses.has("claude")) {
     ["trunc", (x) => x.truncated],
     ["call", (x) => x.label],
   ]);
-  console.log("\n### Claude Tool Output by Tool\n");
+  console.log("\nClaude Tool Output by Tool\n");
   const byTool = new Map<string, { tool: string; outputs: number; bytes: number }>();
   for (const item of claudeTools.values()) {
     const aggregate = byTool.get(item.tool) || { tool: item.tool, outputs: 0, bytes: 0 };
@@ -1728,7 +1799,7 @@ if (harnesses.has("claude")) {
     ["outputs", (x) => x.outputs],
     ["tool", (x) => x.tool],
   ]);
-  console.log("\n### Highest Claude Startup Inputs\n");
+  console.log("\nHighest Claude Startup Inputs\n");
   table(
     claudeSessions
       .filter((x) => x.firstInput)
@@ -1743,7 +1814,7 @@ if (harnesses.has("claude")) {
       ["file", (x) => short(x.file, 64)],
     ],
   );
-  console.log("\n### Where Claude Time Goes\n");
+  console.log("\nWhere Claude Time Goes\n");
   console.log(
     `Human tasks in main sessions: ${claudeHumanTasks.length}; active time median ${duration(claudeTaskSpread.p50)}, p90 ${duration(claudeTaskSpread.p90)}, longest ${duration(claudeTaskSpread.max)}\n`,
   );
@@ -1762,14 +1833,17 @@ if (harnesses.has("claude")) {
   ];
   table(categories, [
     ["main sessions", ([key]) => duration(claudeMainTime[key])],
-    ["main share", ([key]) =>
-      ["user", "idle", "stall"].includes(key)
-        ? "-"
-        : percent(claudeMainTime[key], claudeMainTime.active)],
+    [
+      "main share",
+      ([key]) =>
+        ["user", "idle", "stall"].includes(key)
+          ? "-"
+          : percent(claudeMainTime[key], claudeMainTime.active),
+    ],
     ["subagents", ([key]) => duration(claudeSubagentTime[key])],
     ["category", ([, label]) => label],
   ]);
-  console.log("\n### Slowest Claude Tasks\n");
+  console.log("\nSlowest Claude Tasks\n");
   table(
     claudeHumanTasks
       .slice()
@@ -1782,17 +1856,20 @@ if (harnesses.has("claude")) {
       ["background", (x) => duration(x.backgroundMs)],
       ["requests", (x) => x.requests],
       ["tool calls", (x) => x.toolCalls],
-      ["top tool", (x) => {
-        const top = topTool(x);
-        return top ? `${short(top[0], 32)} (${duration(top[1])})` : "-";
-      }],
+      [
+        "top tool",
+        (x) => {
+          const top = topTool(x);
+          return top ? `${short(top[0], 32)} (${duration(top[1])})` : "-";
+        },
+      ],
       ["task", (x) => short(x.prompt, 56)],
       ["file", (x) => short(x.file, 48)],
     ],
   );
   for (const scope of ["main", "subagent"] as const) {
     const heading = scope === "main" ? "Main Sessions" : "Subagents";
-    console.log(`\n### Slowest Claude Tools in ${heading}\n`);
+    console.log(`\nSlowest Claude Tools in ${heading}\n`);
     table(
       claudeToolRows
         .filter((x) => x.scope === scope)
@@ -1800,8 +1877,11 @@ if (harnesses.has("claude")) {
         .slice(0, limit),
       [
         ["wall time", (x) => duration(x.wallMs)],
-        ["share", (x) =>
-          percent(x.wallMs, scope === "main" ? claudeMainTime.active : claudeSubagentTime.active)],
+        [
+          "share",
+          (x) =>
+            percent(x.wallMs, scope === "main" ? claudeMainTime.active : claudeSubagentTime.active),
+        ],
         ["calls", (x) => x.calls],
         ["p50", (x) => duration(x.p50)],
         ["p90", (x) => duration(x.p90)],
@@ -1813,7 +1893,7 @@ if (harnesses.has("claude")) {
       ],
     );
   }
-  console.log("\n### Claude Model Latency\n");
+  console.log("\nClaude Model Latency\n");
   for (const [rows, label] of [
     [claudeModelRows, "model"],
     [claudeContextRows, "prompt size"],
@@ -1830,13 +1910,13 @@ if (harnesses.has("claude")) {
     console.log("");
   }
 }
-console.log("\n## Limits\n");
+console.log("\nLimits\n");
 if (harnesses.has("codex")) {
   console.log(
-    "- Codex cumulative usage subtracts the last prewindow provider snapshot. Legacy last-only records are summed and may contain duplicates.",
+    "- Codex stable turn IDs select the oldest source session and exclude inherited copies. Legacy records without turn IDs cannot be deduplicated; last-only usage is summed.",
   );
   console.log(
-    "- A forked Codex session (subagent, forked thread, or paginated history base) inherits the parent's cumulative totals, so its first in-window snapshot is used as the baseline and its first turn is not counted.",
+    "- Codex cumulative usage subtracts prewindow and inherited snapshots. A fork without stable turn IDs uses its first in-window snapshot as a baseline and omits that snapshot's usage.",
   );
   console.log(
     "- Task-tree rows include only sessions observed in the window. Known descendants without window activity are not represented.",
