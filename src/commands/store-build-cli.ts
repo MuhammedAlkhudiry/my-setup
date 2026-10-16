@@ -27,6 +27,8 @@ import {
   xcodePinBlocksLocal,
 } from "../lib/store-build";
 
+import { resolveLocalBuildPlugin } from "../lib/store-build-plugin";
+
 const EXTERNAL_DISK = "/Volumes/DevSSD";
 
 interface BuildProfile {
@@ -265,6 +267,8 @@ function buildLocally(
   const environment =
     profileValue(eas, options.profile, (profile) => profile.environment) ?? options.profile;
   checkSecrets(environment, options.allowMissing?.split(",").filter(Boolean) ?? []);
+
+  env.EAS_LOCAL_BUILD_PLUGIN_PATH = resolveLocalBuildPlugin(env);
 
   const root = buildRoot();
   const runDir = join(

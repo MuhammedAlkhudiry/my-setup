@@ -38,6 +38,8 @@ Build store artifacts on the Mac and upload them with EAS Submit; paid EAS cloud
   older Xcode major, and `--cloud` builds that platform on EAS.
 - Before any iOS build, local or `--cloud`, `store-build` stops when a target's EAS provisioning profile lacks an App Group its entitlements
   configure, or the target has no profile; repair it with the `eas credentials` steps it prints, never by skipping the check.
+- `--dry-run` installs and verifies the exact local build plugin required by the installed EAS CLI in a versioned user cache outside the project;
+  it runs no build or submission. Set `EAS_LOCAL_BUILD_PLUGIN_PATH` to use an existing binary, which is verified too.
 - A failed upload keeps the archive and prints the retry command; never rebuild only to resubmit.
 
 Ship every change in a store build. Publish an over-the-air update only when the owner asks for one, and keep the update tooling working so
