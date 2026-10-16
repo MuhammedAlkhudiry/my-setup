@@ -4,21 +4,27 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { heavyStatus, runHeavyCommand } from "../lib/heavy-run";
+import { deferredHeavyCommand, heavyStatus, runHeavyCommand } from "../lib/heavy-run-concurrent";
 import type { HeavyClass } from "../lib/host-capacity";
 
 const help = `Usage: heavy-run [--class checks|benchmark|build] [--wait <seconds>] [--owner <title>] [--json] [--verbose] -- <argv...>
        heavy-run status [--json] [--verbose]
 
-One host slot shared with the device lease store. Class defaults to checks;
+Up to three checks/build jobs share the host; benchmarks reserve it exclusively. Class defaults to checks;
 wait defaults to 540 seconds. Light work does not need a reservation.
 Exit codes: 0 child succeeded, 1 failed/cancelled, 2 invalid input, 75 wait timeout.
 JSON includes the child's original exit code and signal. Output is captured in a
-private log; --verbose prints it. Nested heavy-run calls are rejected. Requesters
+private log; --verbose prints it. Nested reservations are rejected. Projects may
+opt cooperating runners in via package.json heavyRun.deferredCommands, an array
+of argv-prefix arrays. They run without a slot and receive HEAVY_RUN_DEFERRED=1
+and HEAVY_RUN_CLI (this Bun entrypoint); they must reserve each heavy step with
+that CLI. Cache hits and cheap steps run directly. This opt-in is a promise that
+every matching command, including its trailing arguments, cooperates. Undeclared
+commands reserve eagerly. Requesters
 take turns, with FIFO jobs per session (or worktree when no session ID is set).
-Existing pre-upgrade callers drain with their compatible ordering. Every finished
+A running pre-upgrade checks/build job can share the remaining slots with new jobs. Every finished
 run is appended to heavy-run-history.jsonl in the queue's state directory.
-status lists the active job and waiting jobs; --json returns their identities.
+status lists all active and waiting jobs; --json returns a version 2 receipt with active as an array.
 The temporary mkdir lock is respected and held during execution. Commands must
 keep descendants in their process group; escaped/daemonized children are not contained.`;
 const args = process.argv.slice(2);
@@ -38,8 +44,10 @@ try {
     console.log(help);
   } else {
     let className: HeavyClass = "checks";
-    let waitSeconds = 540;
-    let owner = process.env.T3_THREAD_TITLE || `pid ${process.pid}`;
+    let waitSeconds = Number(process.env.HEAVY_RUN_WAIT_SECONDS ?? 540);
+    if (!Number.isFinite(waitSeconds) || waitSeconds < 0)
+      throw new Error("HEAVY_RUN_WAIT_SECONDS must be a finite nonnegative number");
+    let owner = process.env.HEAVY_RUN_OWNER || process.env.T3_THREAD_TITLE || `pid ${process.pid}`;
     const seen = new Set<string>();
 
     for (let i = statusMode ? 1 : 0; i < flags.length; i++) {
@@ -71,10 +79,10 @@ try {
       const receipt = await heavyStatus();
       if (json) console.log(JSON.stringify(receipt));
       else {
-        const describe = (job: NonNullable<typeof receipt.active>) =>
-          `${job.owner.replace(/\s+/g, " ")} (${job.class})`;
+        const describe = (job: (typeof receipt.active)[number]) =>
+          `${job.owner.replace(/\s+/g, " ")} (${job.class}; ${job.protocol})`;
         console.log(
-          `heavy-run: active ${receipt.active ? describe(receipt.active) : "none"}; waiting ${receipt.waiting.map(describe).join(", ") || "none"}${receipt.legacyBlocked && !receipt.active ? "; legacy lock held" : ""}`,
+          `heavy-run: active ${receipt.active.map(describe).join(", ") || "none"}; waiting ${receipt.waiting.map(describe).join(", ") || "none"}${receipt.legacyBlocked && !receipt.active.length ? "; legacy lock held" : ""}`,
         );
         if (verbose) console.log(JSON.stringify(receipt, null, 2));
       }
@@ -85,6 +93,7 @@ try {
         throw new Error(
           "Nested heavy-run would wait for its own host slot; wrap only the outer command",
         );
+      const deferred = !process.env.HEAVY_RUN_DEFERRED && deferredHeavyCommand(argv);
       validated = true;
       const receipt = await runHeavyCommand({
         argv,
@@ -92,6 +101,7 @@ try {
         waitSeconds,
         owner,
         signal: abort.signal,
+        deferred,
         ...(verbose ? { onOutput: (output: string) => process.stderr.write(output) } : {}),
       });
       if (json) console.log(JSON.stringify(receipt));
@@ -99,7 +109,9 @@ try {
         const seconds = (from: string, to: string) =>
           Math.round((Date.parse(to) - Date.parse(from)) / 1000);
         console.log(
-          `heavy-run: ok (waited ${seconds(receipt.queuedAt, receipt.acquiredAt!)}s, ran ${seconds(receipt.acquiredAt!, receipt.finishedAt)}s)`,
+          receipt.reservationMode === "deferred"
+            ? "heavy-run: ok (deferred to heavy steps)"
+            : `heavy-run: ok (waited ${seconds(receipt.queuedAt, receipt.acquiredAt!)}s, ran ${seconds(receipt.acquiredAt!, receipt.finishedAt)}s)`,
         );
       } else
         console.error(

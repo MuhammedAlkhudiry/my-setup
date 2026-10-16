@@ -19,10 +19,27 @@ send({ ready: true });
 
 const input = await Bun.stdin.text();
 if (!input) process.exit(0);
-const { argv } = JSON.parse(input) as { argv: string[] };
+const { argv, deferred, cliPath, owner, waitSeconds } = JSON.parse(input) as {
+  argv: string[];
+  deferred: boolean;
+  cliPath: string;
+  owner: string;
+  waitSeconds: number;
+};
+const env = { ...process.env };
+delete env.HEAVY_RUN_DEFERRED;
+delete env.HEAVY_RUN_RESERVATION_ID;
+if (deferred) {
+  env.HEAVY_RUN_DEFERRED = "1";
+  env.HEAVY_RUN_CLI = cliPath;
+  env.HEAVY_RUN_OWNER = owner;
+  env.HEAVY_RUN_WAIT_SECONDS = String(waitSeconds);
+} else {
+  env.HEAVY_RUN_RESERVATION_ID = process.argv[2];
+}
 const child = spawn(argv[0], argv.slice(1), {
   stdio: ["ignore", "inherit", "inherit"],
-  env: { ...process.env, HEAVY_RUN_RESERVATION_ID: process.argv[2] },
+  env,
 });
 const result = await new Promise<{
   exitCode: number | null;

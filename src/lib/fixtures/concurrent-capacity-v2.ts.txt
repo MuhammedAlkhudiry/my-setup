@@ -1,0 +1,105 @@
+import type { HostJob } from "./host-capacity";
+import { groupIsAlive, matchesProcess, type ProcessRow } from "./process-identity";
+
+export const HEAVY_CAPACITY = 3;
+
+export interface ConcurrentJob extends HostJob {
+  clientVersion?: "concurrent-v2";
+}
+
+export interface ConcurrentCapacity {
+  resource: "host-capacity";
+  capacity: number;
+  nextSequence: number;
+  active: ConcurrentJob[];
+  waiting: ConcurrentJob[];
+  requesters: string[];
+}
+
+export const emptyConcurrentCapacity = (): ConcurrentCapacity => ({
+  resource: "host-capacity",
+  capacity: HEAVY_CAPACITY,
+  nextSequence: 0,
+  active: [],
+  waiting: [],
+  requesters: [],
+});
+
+export function reapConcurrentCapacity(
+  host: ConcurrentCapacity,
+  rows: ProcessRow[],
+  observed: HostJob[],
+): void {
+  host.waiting = host.waiting.filter(
+    (job) =>
+      !observed.some(
+        (ticket) =>
+          ticket.reservationId === job.reservationId &&
+          JSON.stringify(ticket.holder) === JSON.stringify(job.holder),
+      ) || matchesProcess(job.holder, rows),
+  );
+  host.active = host.active.filter((job) =>
+    job.processGroup ? groupIsAlive(job.processGroup, rows) : matchesProcess(job.holder, rows),
+  );
+}
+
+export function claimConcurrentCapacity(
+  host: ConcurrentCapacity,
+  job: HostJob,
+  now: number,
+  blocked: boolean,
+  otherActive: HostJob[] = [],
+): boolean {
+  if (!host.waiting.some((ticket) => ticket.reservationId === job.reservationId)) {
+    job.sequence = host.nextSequence++;
+    host.waiting.push(job);
+  }
+
+  const requester = (ticket: HostJob) => ticket.requester ?? ticket.reservationId;
+  // Loaded v1 clients cannot share a serial holder. A requester whose head
+  // ticket is v1 stays blocked as a whole: never overtake its own FIFO. Other
+  // ready v2 requesters may use the available slots without changing old tickets.
+  const heads = new Map<string, ConcurrentJob>();
+  for (const ticket of host.waiting) {
+    if (!heads.has(requester(ticket))) heads.set(requester(ticket), ticket);
+  }
+  const eligible = otherActive.length
+    ? host.waiting.filter(
+        (ticket) =>
+          ticket.clientVersion === "concurrent-v2" &&
+          heads.get(requester(ticket))?.clientVersion === "concurrent-v2",
+      )
+    : host.waiting;
+  const present = new Set(eligible.map(requester));
+  host.requesters = host.requesters.filter((id) => present.has(id));
+  for (const id of present) {
+    if (!host.requesters.includes(id)) {
+      // An active requester's next batch joins behind newly arriving requesters.
+      const index = host.requesters.findIndex((id) =>
+        host.active.some((ticket) => requester(ticket) === id),
+      );
+      host.requesters.splice(index < 0 ? host.requesters.length : index, 0, id);
+    }
+  }
+  const next = eligible.find((ticket) => requester(ticket) === host.requesters[0]);
+  if (
+    blocked ||
+    host.active.length + otherActive.length >= HEAVY_CAPACITY ||
+    [...host.active, ...otherActive].some((ticket) => ticket.class === "benchmark") ||
+    next?.reservationId !== job.reservationId ||
+    (job.class === "benchmark" && host.active.length + otherActive.length > 0)
+  )
+    return false;
+
+  host.waiting = host.waiting.filter((ticket) => ticket.reservationId !== job.reservationId);
+  Object.assign(job, next, { acquiredAt: now });
+  host.active.push(job);
+  host.requesters = host.requesters.filter((id) => id !== requester(job));
+  host.requesters.push(requester(job));
+  return true;
+}
+
+export function releaseConcurrentCapacity(host: ConcurrentCapacity, reservationId: string): void {
+  host.waiting = host.waiting.filter((job) => job.reservationId !== reservationId);
+  host.active = host.active.filter((job) => job.reservationId !== reservationId);
+}
