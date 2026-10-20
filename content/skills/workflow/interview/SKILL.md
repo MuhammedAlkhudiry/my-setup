@@ -1,24 +1,24 @@
 ---
 name: interview
-description: Use when the user asks for an interview or when linked decisions need a series of questions; to challenge one idea use $workshop.
+description: Use when the user requests an interview or linked decisions need a series of questions.
 ---
+
+Use $workshop to challenge one idea.
 
 ## Workflow
 
-1. Resume a saved `progress` interview with the same objective when one exists. Inspect available evidence first, so you ask only what it cannot
-   answer.
+1. Resume any saved `progress` interview with the same objective. Inspect available evidence before asking what it cannot answer.
 2. Use `Brief` by default. Ask the user to choose a depth only when it would materially change the interview:
    - `Brief`: cover only the most important unknowns.
    - `Standard`: cover every important decision and constraint.
-   - `Exhaustive`: map the topics thoroughly, explore edge cases, and question assumptions that could affect the outcome.
-3. Track the objective, unknowns, and each topic's `resolved`, `open`, `assumed`, or `deferred` state internally. Show this list only when it helps
-   the user answer or when summarizing the interview.
-4. Ask up to three questions together when they are independent and none requires an earlier answer. Ask dependent questions one at a time. For
-   decisions, offer a few short, distinct options with their main trade-offs and identify the recommendation in plain language. When an example would
-   help the user answer, give it in the surrounding reply before the question tool; keep examples out of the tool's questions and options.
-5. Follow up on answers that could change the outcome at the chosen depth. Use evidence to question important assumptions and explain why they matter.
-   Leave harmless unknowns alone.
+   - `Exhaustive`: also explore edge cases and assumptions that could change the outcome.
+3. Track the objective, unknowns, and each topic's `resolved`, `open`, `assumed`, or `deferred` state internally. Show it only to help the user
+   answer or summarize the interview.
+4. Ask in the reply text, never with a question tool, because some hosts collapse the text around it. Ask up to three independent questions
+   together; ask dependent questions one at a time. Number each question and letter its options so the user can answer like "1A 2C". For
+   decisions, offer short, distinct options with trade-offs and a recommendation; give examples beside the question they help answer.
+5. Follow up on answers and assumptions that could change the outcome at the chosen depth. Explain why they matter; leave harmless unknowns alone.
 6. Finish when every important topic required by the chosen depth is resolved, assumed, or deferred. Summarize the decisions, assumptions, open
-   issues, and next step the original task needs. Record each decision that already rules out a change with $project-docs. Save the summary
-   with $project-docs as type `interview` and status `done`, recording the depth; do not turn it into a spec or plan. Then resume the original task.
+   issues, and next step. With $project-docs, record decisions that already rule out a change and save the summary as type `interview`, status
+   `done`, with its depth. Do not turn it into a spec or plan. Resume the original task.
 7. If the user stops, save the partial topic list with $project-docs as type `interview` and status `progress`, then return it.

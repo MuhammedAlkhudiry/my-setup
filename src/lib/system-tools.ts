@@ -1,3 +1,5 @@
+import { execa } from "execa";
+
 export type SystemToolLevel = "required" | "optional";
 
 export interface SystemToolUpdatePlan {
@@ -28,6 +30,140 @@ export interface SystemTool {
 export interface SystemToolGroup {
   title: string;
   tools: readonly SystemTool[];
+}
+
+export interface SystemToolStatus {
+  tool: SystemTool;
+  path?: string;
+  current?: string;
+  latest?: string;
+  probeError?: string;
+  versionError?: string;
+  latestError?: string;
+}
+
+interface ProbeResult {
+  stdout: string;
+  stderr: string;
+  exitCode?: number;
+  timedOut?: boolean;
+}
+
+type Probe = (command: string, args: string[], timeout: number) => Promise<ProbeResult>;
+
+const runProbe: Probe = (command, args, timeout) =>
+  execa(command, args, {
+    env: process.env,
+    reject: false,
+    timeout,
+    forceKillAfterDelay: 1_000,
+  });
+
+function probeError(result: ProbeResult): string | undefined {
+  if (result.timedOut) return "probe timed out";
+  if (result.exitCode !== 0) return "probe failed";
+
+  return undefined;
+}
+
+function firstLine(value: string): string | undefined {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+}
+
+export async function collectSystemToolStatuses(
+  groups: readonly SystemToolGroup[] = SYSTEM_TOOL_GROUPS,
+  probe: Probe = runProbe,
+): Promise<{ title: string; tools: SystemToolStatus[] }[]> {
+  const tools = groups.flatMap((group) => group.tools);
+  const statuses: SystemToolStatus[] = [];
+  let next = 0;
+  const run: Probe = async (command, args, timeout) => {
+    try {
+      return await probe(command, args, timeout);
+    } catch (error) {
+      return {
+        stdout: "",
+        stderr: "",
+        timedOut: Boolean(
+          error && typeof error === "object" && "timedOut" in error && error.timedOut,
+        ),
+      };
+    }
+  };
+  const inspect = async (tool: SystemTool): Promise<SystemToolStatus> => {
+    const status: SystemToolStatus = { tool };
+    const located = await run("zsh", ["-lc", `command -v ${tool.name}`], 15_000);
+    if (located.exitCode === 0 && !located.timedOut) status.path = firstLine(located.stdout);
+    if (located.timedOut || (located.exitCode !== 0 && located.exitCode !== 1)) {
+      status.probeError = probeError(located);
+    }
+
+    if (status.path && tool.versionArgs) {
+      const version = await run(status.path, [...tool.versionArgs], 15_000);
+      status.versionError = probeError(version);
+      if (!status.versionError) {
+        status.current = firstLine(version.stdout) ?? firstLine(version.stderr);
+        if (!status.current) status.versionError = "version unavailable";
+      }
+    }
+
+    if (tool.latest) {
+      const source = tool.latest;
+      const latest = await run(
+        source.type === "homebrew" ? "brew" : source.command,
+        source.type === "homebrew" ? ["info", "--json=v2", source.formula] : [...source.args],
+        30_000,
+      );
+      status.latestError = probeError(latest);
+      if (!status.latestError) {
+        if (source.type === "homebrew") {
+          try {
+            status.latest = JSON.parse(latest.stdout).formulae?.[0]?.versions?.stable;
+          } catch {
+            status.latestError = "invalid latest version response";
+          }
+        } else {
+          status.latest = firstLine(latest.stdout);
+        }
+      }
+    }
+
+    return status;
+  };
+
+  // Each worker runs only one subprocess at a time. Timeouts start after a worker
+  // takes the tool, so queued probes cannot expire while waiting for a slot.
+  await Promise.all(
+    Array.from({ length: Math.min(3, tools.length) }, async () => {
+      while (next < tools.length) {
+        const index = next++;
+        statuses[index] = await inspect(tools[index]);
+      }
+    }),
+  );
+
+  let offset = 0;
+
+  return groups.map((group) => {
+    const tools = statuses.slice(offset, offset + group.tools.length);
+    offset += group.tools.length;
+
+    return { title: group.title, tools };
+  });
+}
+
+export function systemToolStatusLabel(status: SystemToolStatus): string {
+  if (status.probeError || status.versionError) return "unknown";
+  if (!status.path) return status.tool.level;
+  if (!status.latest) return "unknown";
+
+  const normalized = (value: string | undefined) =>
+    value?.match(/\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?/)?.[0] ?? value?.trim();
+
+  return normalized(status.current) === normalized(status.latest) ? "current" : "update";
 }
 
 export const SYSTEM_TOOL_GROUPS = [
@@ -182,10 +318,11 @@ export const SYSTEM_TOOL_GROUPS = [
         latest: {
           type: "command",
           command: "npm",
-          args: ["view", "opencode-ai", "version"],
+          args: ["view", "@opencode/cli", "version"],
         },
         update: {
           commands: ["opencode upgrade"],
+          note: "OpenCode 2 uses @opencode/cli. For a V1 binary, first run opencode upgrade --major; keep the same ~/.opencode/bin/opencode path for T3.",
         },
       },
       {

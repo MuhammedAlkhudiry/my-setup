@@ -1,13 +1,11 @@
 # Decisions
 
-A decision file holds a decision that a future change could reverse by mistake because the code cannot show why it was made. Agents read every
-decision in the areas a change touches, so every line costs attention.
+Read every decision in each area a change touches.
 
 ## What gets an entry
 
-Record a decision only when a plausible change, such as a fix, simplification, or new feature, would reverse it, and its reason is not visible
-in the code, its tests, or its comments. Record it when it is made, even before it is built, if it already rules out a change, such as never
-selling coins. Everything else has another home:
+Record a decision when a plausible change could reverse it and code, tests, or comments cannot explain its reason. Record it as soon as it
+rules out a change, even before implementation. Other content belongs elsewhere:
 
 | Content                                              | Home                         |
 | ---------------------------------------------------- | ---------------------------- |
@@ -20,19 +18,18 @@ selling coins. Everything else has another home:
 
 ## Entry format
 
-`docs/decisions/<area>/<slug>.md` holds one or two lines: the current decision, then `because` or `so` and the reason that stays true.
+Use one or two lines in `docs/decisions/<area>/<slug>.md`: the current decision, then `because` or `so` and its lasting reason.
 
 ```markdown
 Occurrences are computed, never stored ahead, so they survive edits and timezone changes.
 ```
 
-- Name the area folder after a product area in the glossary's words. Create a new area only when no existing one fits.
-- State the decision as it stands, without dates, owner attributions, or what it replaced.
+- Name the folder for a product area using glossary terms; create an area only when none fits.
+- Omit dates, owner attributions, and superseded choices.
 - Name a value only when the value is the decision, such as storing location at city level; otherwise state the rule the code implements.
 - Record a non-goal when someone would plausibly build it.
 - When a decision changes, rewrite its file. When it no longer constrains any change, delete the file.
 
 ## Pruning
 
-When asked to clean up decisions, apply these rules to every file. Before deleting content that belongs elsewhere, check that its home already
-holds it and move it there when it does not. Report what moved where and what was deleted.
+Apply these rules to every decision file. Before deleting misplaced content, ensure its proper home holds it. Report moves and deletions.

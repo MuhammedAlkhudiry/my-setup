@@ -8,6 +8,7 @@ import {
   isMemcapActionLine,
   macWatcherPaths,
   mergeAlerts,
+  parseDaemonFootprints,
   parseListeners,
   pruneAlerts,
   renderMemcapConfig,
@@ -25,12 +26,14 @@ const quiet: AlertInput = {
   cores: 14,
   orphans: [],
   sustainedCpu: [],
+  systemDaemons: [],
   guardStops: [],
   memcapHealthy: true,
   sharedPorts: [],
 };
 
-const keys = (input: Partial<AlertInput>) => thresholdAlerts({ ...quiet, ...input }).map((alert) => alert.key);
+const keys = (input: Partial<AlertInput>) =>
+  thresholdAlerts({ ...quiet, ...input }).map((alert) => alert.key);
 
 const leak = {
   key: "playwright-orphans",
@@ -44,13 +47,111 @@ test("a healthy machine raises no alerts", () => {
   expect(thresholdAlerts(quiet)).toEqual([]);
 });
 
+test("runaway root daemon memory alerts even without memory pressure or swap", () => {
+  const daemon = {
+    pid: 343,
+    command: "/System/Library/Frameworks/FSEvents.framework/Support/fseventsd",
+    started: "Sun Sep 27 16:38:22 2026",
+    rssMib: 13 * 1024,
+    footprintMib: 22 * 1024,
+    cpuNow: 103.8,
+    ageMinutes: 19 * 24 * 60,
+  };
+  const observed = thresholdAlerts({ ...quiet, systemDaemons: [daemon] });
+
+  expect(observed).toHaveLength(1);
+  expect(observed[0]).toMatchObject({ key: "system-daemon-memory-343", severity: "warning" });
+  expect(observed[0]?.evidence).toContain("22.0 GiB footprint");
+  expect(observed[0]?.evidence).toContain("13.0 GiB RSS");
+  expect(observed[0]?.evidence).toContain("103.8% CPU");
+  expect(observed[0]?.evidence).toContain("27360 min");
+
+  const opened = mergeAlerts([], observed, "before-restart");
+  const clear = thresholdAlerts({
+    ...quiet,
+    systemDaemons: [{ ...daemon, rssMib: 50, footprintMib: 80 }],
+  });
+  const once = mergeAlerts(opened.alerts, clear, "after-restart");
+  expect(mergeAlerts(once.alerts, clear, "next-run").resolved).toHaveLength(1);
+});
+
+test("daemon limits are strict, use footprint when available, and otherwise fall back to RSS", () => {
+  const daemon = (pid: number, command: string, rssMib: number, footprintMib?: number) => ({
+    pid,
+    command,
+    rssMib,
+    footprintMib,
+    started: "boot",
+    cpuNow: 0,
+    ageMinutes: 10,
+  });
+  expect(
+    keys({
+      systemDaemons: [
+        daemon(1, "/System/Library/fseventsd", 2048),
+        daemon(2, "/usr/libexec/other", 4096),
+        daemon(3, "/usr/sbin/other", 4096),
+      ],
+    }),
+  ).toEqual([]);
+  expect(
+    keys({
+      systemDaemons: [
+        daemon(1, "/System/Library/fseventsd", 2049),
+        daemon(2, "/usr/libexec/other", 100, 4097),
+        daemon(3, "/usr/sbin/other", 4097),
+        daemon(4, "/System/Library/other", 4097),
+        daemon(5, "/Users/test/fseventsd", 9000),
+        daemon(6, "/usr/libexec-other/tool", 9000),
+      ],
+    }),
+  ).toEqual([
+    "system-daemon-memory-1",
+    "system-daemon-memory-2",
+    "system-daemon-memory-3",
+    "system-daemon-memory-4",
+  ]);
+});
+
+test("top footprint parsing handles compressed footprints, unit suffixes, and unavailable rows", () => {
+  expect([
+    ...parseDaemonFootprints(
+      [
+        "Processes: 1280 total",
+        "PID MEM",
+        "343 25G",
+        "1 29M",
+        "2 1.5G+",
+        "3 1024K-",
+        "4 1024B",
+        "5 2048",
+        "6 N/A",
+        "7 ???",
+      ].join("\n"),
+    ),
+  ]).toEqual([
+    [343, 25600],
+    [1, 29],
+    [2, 1536],
+    [3, 1],
+    [4, 1 / 1024],
+    [5, 2 / 1024],
+  ]);
+});
+
 test("each crossed threshold opens its own stable alert", () => {
   const busy = { command: "qemu-system-aarch64 -avd Awraq_Main", ageMinutes: 600, cpuLifetime: 90 };
 
-  expect(keys({ diskFreeGib: 15 })).toEqual(["low-disk"]);
-  expect(keys({ pressureLevel: "warning" })).toEqual(["memory-pressure"]);
-  expect(keys({ swapUsedGib: 13 })).toEqual(["high-swap"]);
-  expect(keys({ loadAverage15: 21 })).toEqual(["cpu-overload"]);
+  expect(keys({ diskFreeGib: 15 })).toEqual([]);
+  expect(keys({ diskFreeGib: 9 })).toEqual(["low-disk"]);
+  expect(keys({ pressureLevel: "warning" })).toEqual([]);
+  expect(keys({ pressureLevel: "critical" })).toEqual(["memory-pressure"]);
+  expect(keys({ swapUsedGib: 13, swapTotalGib: 14 })).toEqual([]);
+  expect(keys({ swapUsedGib: 13, swapTotalGib: 14, pressureLevel: "warning" })).toEqual([
+    "high-swap",
+  ]);
+  expect(keys({ swapUsedGib: 8, swapTotalGib: 14, pressureLevel: "warning" })).toEqual([]);
+  expect(keys({ loadAverage15: 100 })).toEqual([]);
   expect(keys({ orphans: [busy] })).toEqual(["orphaned-agent-processes"]);
   expect(keys({ sustainedCpu: [busy] })).toEqual(["sustained-cpu"]);
   expect(keys({ guardStops: ["stopped pid 1"] })).toEqual(["cpu-guard-stops"]);
@@ -59,7 +160,10 @@ test("each crossed threshold opens its own stable alert", () => {
 
 test("a stopped watcher run raises its own warning apart from stopped leftovers", () => {
   const stuck = `stopped pid 2 -- ${STUCK_RUN_NOTE} for 61 min, in step ".codex/sessions" since 2026-10-11T18:08:00.000Z`;
-  const alerts = thresholdAlerts({ ...quiet, guardStops: ["stopped pid 1 -- leftover idle", stuck] });
+  const alerts = thresholdAlerts({
+    ...quiet,
+    guardStops: ["stopped pid 1 -- leftover idle", stuck],
+  });
 
   expect(alerts.map((alert) => [alert.key, alert.severity, alert.evidence])).toEqual([
     ["watcher-run-stuck", "warning", stuck],
@@ -67,12 +171,15 @@ test("a stopped watcher run raises its own warning apart from stopped leftovers"
   ]);
 });
 
-test("disk alerts escalate when nearly full and name the largest disk users", () => {
+test("disk alerts open below 10 GiB and name the largest disk users", () => {
   const largestDiskUsers = [{ path: "~/.t3/worktrees/app", gib: 150 }];
-  const [warning] = thresholdAlerts({ ...quiet, diskFreeGib: 15, largestDiskUsers });
+  const [warning] = thresholdAlerts({ ...quiet, diskFreeGib: 9, largestDiskUsers });
   const [critical] = thresholdAlerts({ ...quiet, diskFreeGib: 5 });
 
-  expect(warning).toMatchObject({ severity: "warning", evidence: "largest disk users: ~/.t3/worktrees/app 150G" });
+  expect(warning).toMatchObject({
+    severity: "critical",
+    evidence: "largest disk users: ~/.t3/worktrees/app 150G",
+  });
   expect(critical?.severity).toBe("critical");
 });
 
@@ -206,12 +313,32 @@ test("the guard launch agent runs every minute and at load", () => {
 test("a port two unrelated processes listen on is reported, but a parent's inherited socket is not", () => {
   const listeners = parseListeners(
     [
-      "p9756", "credis-server", "f6", "n*:6379", "f7", "n[::1]:6379",
-      "p61280", "credis-server", "f6", "n127.0.0.1:6379",
-      "p65051", "cnginx", "f6", "n127.0.0.1:80",
-      "p65055", "cnginx", "f6", "n127.0.0.1:80",
-      "p94307", "cnginx-arm64", "f6", "n127.0.0.1:443",
-      "p94308", "cnginx-arm64", "f6", "n127.0.0.1:443",
+      "p9756",
+      "credis-server",
+      "f6",
+      "n*:6379",
+      "f7",
+      "n[::1]:6379",
+      "p61280",
+      "credis-server",
+      "f6",
+      "n127.0.0.1:6379",
+      "p65051",
+      "cnginx",
+      "f6",
+      "n127.0.0.1:80",
+      "p65055",
+      "cnginx",
+      "f6",
+      "n127.0.0.1:80",
+      "p94307",
+      "cnginx-arm64",
+      "f6",
+      "n127.0.0.1:443",
+      "p94308",
+      "cnginx-arm64",
+      "f6",
+      "n127.0.0.1:443",
     ].join("\n"),
   );
   const parentOf = new Map([

@@ -1,0 +1,81 @@
+import type { ConcurrentCapacity, ConcurrentJob } from "./concurrent-capacity";
+import type { HostJob } from "./host-capacity";
+
+export const CURRENT_HEAVY_CLIENT = "concurrent-v3" as const;
+const requester = (job: HostJob) => job.requester ?? job.reservationId;
+
+function rotate(host: ConcurrentCapacity, eligible: ConcurrentJob[]): void {
+  const present = new Set(eligible.map(requester));
+  host.requesters = host.requesters.filter((id) => present.has(id));
+  for (const id of present) {
+    if (host.requesters.includes(id)) continue;
+    const index = host.requesters.findIndex((id) =>
+      host.active.some((job) => requester(job) === id),
+    );
+    host.requesters.splice(index < 0 ? host.requesters.length : index, 0, id);
+  }
+}
+
+/** Only requester heads can backfill; never overtake a requester's own FIFO. */
+export function prepareConcurrentTurns(
+  host: ConcurrentCapacity,
+  otherActive: HostJob[] = [],
+  legacyWaiting: HostJob[] = [],
+  claimingId?: string,
+): { next?: ConcurrentJob; yieldLegacy: boolean } {
+  const heads = new Map<string, ConcurrentJob>();
+  for (const job of host.waiting) if (!heads.has(requester(job))) heads.set(requester(job), job);
+  const activeIds = new Set(host.active.map((job) => job.reservationId));
+  const stillRunning = (anchors: string[]) => anchors.some((id) => activeIds.has(id));
+
+  if (otherActive.length || !legacyWaiting.length) delete host.legacyBackfill;
+  else host.legacyBackfill ??= { anchors: [...activeIds] };
+
+  // Older clients cannot share the serial lane or pass a serial waiter. Their
+  // tickets stay intact, including the FIFO of requesters with an older head.
+  if (otherActive.length || legacyWaiting.length) {
+    const eligible = host.waiting.filter(
+      (job) =>
+        job.clientVersion === CURRENT_HEAVY_CLIENT &&
+        heads.get(requester(job))?.clientVersion === CURRENT_HEAVY_CLIENT,
+    );
+    rotate(host, eligible);
+    return {
+      next: eligible.find((job) => requester(job) === host.requesters[0]),
+      yieldLegacy: !!host.legacyBackfill && !stillRunning(host.legacyBackfill.anchors),
+    };
+  }
+
+  rotate(host, host.waiting);
+  let priority =
+    host.backfill && host.waiting.find((job) => job.reservationId === host.backfill!.reservationId);
+  if (!priority || heads.get(requester(priority)) !== priority) {
+    delete host.backfill;
+    priority = host.waiting.find((job) => requester(job) === host.requesters[0]);
+  }
+  if (
+    !priority ||
+    priority.clientVersion === CURRENT_HEAVY_CLIENT ||
+    priority.reservationId === claimingId
+  )
+    return { next: priority, yieldLegacy: false };
+
+  host.backfill ??= { reservationId: priority.reservationId, anchors: [...activeIds] };
+  // A checks/build head always has one slot reserved for its own polling.
+  // A benchmark cannot run before the original active jobs finish anyway:
+  // refill only while one of those fixed anchors lives, then drain completely.
+  // New arrivals never extend the anchor set, so the older turn cannot starve.
+  const free =
+    priority.class === "benchmark"
+      ? stillRunning(host.backfill.anchors)
+        ? host.capacity - host.active.length
+        : 0
+      : host.capacity - 1 - host.active.length;
+  const backfill = host.requesters
+    .map((id) => heads.get(id)!)
+    .filter((job) => requester(job) !== requester(priority!) && job.class !== "benchmark")
+    .slice(0, Math.max(0, free));
+  const front = [...backfill.map(requester), requester(priority)];
+  host.requesters = [...front, ...host.requesters.filter((id) => !front.includes(id))];
+  return { next: backfill[0] ?? priority, yieldLegacy: false };
+}

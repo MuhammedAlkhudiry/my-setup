@@ -1,7 +1,7 @@
 # Product setup
 
-`docs/product-setup.md` is the project's only setup document. Read it before product analysis, and rewrite a section when a lasting fact
-changes. Keep history only when it explains a recurring risk, product constraint, or future check.
+Use `docs/product-setup.md` as the only setup document. Read it before product analysis and update lasting facts when they change. Keep history
+only to explain a recurring risk, constraint, or future check.
 
 ## Content
 
@@ -10,6 +10,5 @@ changes. Keep history only when it explains a recurring risk, product constraint
 - Evidence and access: authoritative sources, safe read-only commands, access status, and exact setup steps for gaps.
 - Risks and checks: recurring risks and reproducible read-only checks, including useful baselines and cost limits.
 
-Check facts against the authoritative product and technical sources. Keep commands and API calls reproducible and production access read-only.
-Exclude secrets and private connection values; treat writes, destructive queries, schema changes, long exports, and ambiguous targets as
-blockers.
+Verify facts against authoritative sources. Keep commands reproducible and production access read-only. Exclude secrets and private connection
+values; treat writes, destructive queries, schema changes, long exports, and ambiguous targets as blockers.

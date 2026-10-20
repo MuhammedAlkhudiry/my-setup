@@ -1,3 +1,4 @@
+import { readMemoryPressure } from "./host-capacity";
 import { spawn } from "node:child_process";
 import { openSync, closeSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -30,6 +31,7 @@ import {
 import {
   runHeavyCommand as runScheduledCommand,
   LEGACY_HEAVY_LOCK,
+  heavyLoadAdmission,
   type HeavyScheduler,
   type HeavyOptions,
 } from "./heavy-run";
@@ -50,8 +52,8 @@ function legacyVersion(path: string): string | null {
 // An aggregate marker has no holder/reservationId: serial recovery ignores it,
 // and serial release only unlinks its own random target. Replacing the symlink
 // under that same flock therefore keeps the next serial job out after the
-// current one releases. Count that current serial job against capacity and
-// benchmark exclusion; never release the aggregate while concurrent work lives.
+// current one releases. Count that current serial job against capacity;
+// never release the aggregate while concurrent work lives.
 // v2 uses a distinct target so already-loaded concurrent-v1 cleanup cannot
 // unlink a borrowed guard while a serial job is still running.
 const concurrentPath = (directory: string) => join(directory, "heavy-concurrent.json");
@@ -178,7 +180,6 @@ interface ConcurrentState {
 function legacyAdmissionBlocked(state: ConcurrentState, directory: string, path: string): boolean {
   const legacy = state.legacy.host.active;
   return (
-    legacy?.class === "benchmark" ||
     (!legacy &&
       state.legacy.host.waiting.length > 0 &&
       !!state.host.legacyBackfill &&
@@ -255,7 +256,9 @@ export async function withConcurrentProcessState<T>(
 
 const scheduler: HeavyScheduler = {
   capacity: HEAVY_CAPACITY,
-  async acquire(job, { directory, legacyLockPath }, cancelled) {
+  express: true,
+  async acquire(job, { directory, legacyLockPath, readLoad, readPressure }, cancelled) {
+    const memoryPressure = (readPressure ?? readMemoryPressure)();
     return withConcurrentProcessState(
       (state) => {
         if (cancelled()) return false;
@@ -273,6 +276,8 @@ const scheduler: HeavyScheduler = {
             blocked,
             legacy ? [legacy] : [],
             state.legacy.host.waiting,
+            (ticket, active) =>
+              !heavyLoadAdmission(ticket, active, Date.now(), readLoad, () => memoryPressure).held,
           )
         )
           return false;
@@ -373,7 +378,10 @@ export const runHeavyCommand = (options: HeavyOptions) => {
 export async function heavyStatus(
   directory = queueDirectory(),
   legacyLockPath = LEGACY_HEAVY_LOCK,
+  readLoad?: () => number,
+  readPressure = readMemoryPressure,
 ) {
+  const memoryPressure = readPressure();
   if (directory === queueDirectory() && legacyLockPath === LEGACY_HEAVY_LOCK)
     startCompatibilityDispatcher(directory, legacyLockPath);
   return withConcurrentProcessState(
@@ -394,8 +402,19 @@ export async function heavyStatus(
         ...state.host.waiting.map((job) => ({
           ...job,
           protocol: job.clientVersion ?? ("concurrent-v1" as const),
+          loadAdmission: heavyLoadAdmission(
+            job,
+            [...state.host.active, ...(state.legacy.host.active ? [state.legacy.host.active] : [])],
+            Date.now(),
+            readLoad,
+            () => memoryPressure,
+          ),
         })),
       ],
+      express: {
+        active: state.host.active.filter((job) => job.reservationMode === "express").length,
+        rule: { runs: 10, medianUnderSeconds: 10, p90UnderSeconds: 30 },
+      },
       legacyBlocked: legacyAdmissionBlocked(state, directory, legacyLockPath),
     }),
     directory,

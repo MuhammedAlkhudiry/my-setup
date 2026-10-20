@@ -6,7 +6,8 @@ import { execa } from "execa";
 import { z } from "zod";
 
 import { MAC_WATCHER, MEMCAP_CONFIG, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
-import { STUCK_RUN_NOTE } from "./cpu-guard";
+import { type ProcessRow, STUCK_RUN_NOTE } from "./cpu-guard";
+import { timedCommand } from "./timed-command";
 
 export function macWatcherPaths(home: string) {
   const stateDir = join(home, ".local/state/mac-watcher");
@@ -93,10 +94,23 @@ const alertSchema = observedAlertSchema.extend({
 });
 export type Alert = z.infer<typeof alertSchema>;
 
+const systemDaemonSchema = z.object({
+  pid: z.number(),
+  command: z.string(),
+  started: z.string(),
+  rssMib: z.number(),
+  footprintMib: z.number().optional(),
+  cpuNow: z.number(),
+  ageMinutes: z.number(),
+});
+export type SystemDaemon = z.infer<typeof systemDaemonSchema>;
+
 const runSchema = z.object({
   at: z.string(),
   /** Keys of the alerts this run observed. */
   alerts: z.array(z.string()).default([]),
+  /** Kept below the threshold too, so growth after a restart is visible in history. */
+  systemDaemons: z.array(systemDaemonSchema).default([]),
 });
 export type WatcherRun = z.infer<typeof runSchema>;
 
@@ -146,12 +160,14 @@ export interface ProcessSummary {
 export interface AlertInput {
   pressureLevel: "normal" | "warning" | "critical" | "unknown";
   swapUsedGib: number;
+  swapTotalGib?: number;
   diskFreeGib: number;
   largestDiskUsers: Array<{ path: string; gib: number }>;
   loadAverage15: number;
   cores: number;
   orphans: ProcessSummary[];
   sustainedCpu: ProcessSummary[];
+  systemDaemons: SystemDaemon[];
   guardStops: string[];
   memcapHealthy: boolean;
   sharedPorts: SharedPort[];
@@ -238,22 +254,87 @@ function topCommands(rows: ProcessSummary[]): string {
     .join("; ");
 }
 
+function isSystemDaemon(command: string): boolean {
+  return /^\/(System|usr\/libexec|usr\/sbin)\//.test(command);
+}
+
+/** `top -stats pid,mem` reports physical footprint, including compressed memory, without sudo. */
+export function parseDaemonFootprints(output: string): Map<number, number> {
+  const footprints = new Map<number, number>();
+  for (const line of output.split("\n")) {
+    const match = line.trim().match(/^(\d+)\s+([\d.]+)([BKMGTP])?[+-]?\s*$/i);
+    if (!match) continue;
+    const unit = (match[3] ?? "B").toUpperCase();
+    const mib = Number(match[2]) * 1024 ** ("BKMGTP".indexOf(unit) - 2);
+    if (Number.isFinite(mib)) footprints.set(Number(match[1]), mib);
+  }
+  return footprints;
+}
+
+/** One bounded top sample for all system daemons; ps RSS stays available if top fails or omits a root process. */
+export async function collectSystemDaemons(rows: ProcessRow[]): Promise<SystemDaemon[]> {
+  const daemons = rows.filter((row) => isSystemDaemon(row.command));
+  if (daemons.length === 0) return [];
+  const result = await timedCommand(
+    "top",
+    [
+      "-l",
+      "1",
+      "-F",
+      "-R",
+      "-n",
+      String(daemons.length),
+      "-stats",
+      "pid,mem",
+      ...daemons.flatMap((row) => ["-pid", String(row.pid)]),
+    ],
+    { timeout: 5_000 },
+  );
+  const footprints = parseDaemonFootprints(result.exitCode === 0 ? result.stdout : "");
+
+  return daemons.map((row) => ({
+    pid: row.pid,
+    command: row.command,
+    started: row.started,
+    rssMib: row.rssMib,
+    footprintMib: footprints.get(row.pid),
+    cpuNow: row.cpuPercent,
+    ageMinutes: Math.round(row.ageSeconds / 60),
+  }));
+}
+
 /** Every alert this snapshot crosses a threshold for. Keys are stable so an issue stays one alert while it lasts. */
 export function thresholdAlerts(input: AlertInput): ObservedAlert[] {
   const { thresholds } = MAC_WATCHER;
   const alerts: ObservedAlert[] = [];
 
-  if (input.diskFreeGib < thresholds.minDiskFreeGib) {
+  for (const daemon of input.systemDaemons.filter((row) => isSystemDaemon(row.command))) {
+    const executable = daemon.command.split(" ")[0];
+    const name = executable.slice(executable.lastIndexOf("/") + 1);
+    const limit =
+      name === "fseventsd" ? thresholds.maxFseventsdMemoryGib : thresholds.maxSystemDaemonMemoryGib;
+    const memoryGib = (daemon.footprintMib ?? daemon.rssMib) / 1024;
+    if (memoryGib <= limit) continue;
+    alerts.push({
+      key: `system-daemon-memory-${daemon.pid}`,
+      severity: "warning",
+      title: `${name} memory ${memoryGib.toFixed(1)} GiB`,
+      evidence: `${daemon.command} (pid ${daemon.pid}): ${daemon.footprintMib === undefined ? "" : `${memoryGib.toFixed(1)} GiB footprint, `}${(daemon.rssMib / 1024).toFixed(1)} GiB RSS, ${daemon.cpuNow}% CPU, uptime ${daemon.ageMinutes} min; above ${limit} GiB`,
+      fix: "Restarting the Mac reclaims this memory. Heavy file churn from many parallel agents is the usual trigger.",
+    });
+  }
+
+  if (input.diskFreeGib < thresholds.criticalDiskFreeGib) {
     const largest = input.largestDiskUsers.map((entry) => `${entry.path} ${entry.gib}G`).join(", ");
     alerts.push({
       key: "low-disk",
-      severity: input.diskFreeGib < thresholds.criticalDiskFreeGib ? "critical" : "warning",
+      severity: "critical",
       title: `Disk free ${input.diskFreeGib.toFixed(0)} GiB`,
       evidence: largest ? `largest disk users: ${largest}` : "below the free-space threshold",
       fix: "Run mise run watcher -- prune --dry-run to see what the cleanup rules free and why they keep the rest, then remove or archive what they keep.",
     });
   }
-  if (input.pressureLevel === "warning" || input.pressureLevel === "critical") {
+  if (input.pressureLevel === "critical") {
     alerts.push({
       key: "memory-pressure",
       severity: input.pressureLevel,
@@ -262,22 +343,18 @@ export function thresholdAlerts(input: AlertInput): ObservedAlert[] {
       fix: "Shut down simulators, emulators, or browsers you are not using.",
     });
   }
-  if (input.swapUsedGib > thresholds.maxSwapUsedGib) {
+  if (
+    (input.pressureLevel === "warning" || input.pressureLevel === "critical") &&
+    input.swapTotalGib &&
+    input.swapTotalGib > 0 &&
+    input.swapUsedGib / input.swapTotalGib >= thresholds.maxSwapUsedRatio
+  ) {
     alerts.push({
       key: "high-swap",
       severity: "warning",
       title: `Swap ${input.swapUsedGib.toFixed(1)} GiB`,
-      evidence: `above ${thresholds.maxSwapUsedGib} GiB`,
-      fix: "Run fewer simulators, emulators, and heavy builds at once; a restart clears stale swap.",
-    });
-  }
-  if (input.loadAverage15 > input.cores * MAC_WATCHER.cpu.maxLoadPerCore) {
-    alerts.push({
-      key: "cpu-overload",
-      severity: "warning",
-      title: `Load ${input.loadAverage15.toFixed(1)} on ${input.cores} cores`,
-      evidence: "15-minute load average above core count",
-      fix: "Run fewer builds, QA runs, and agents in parallel.",
+      evidence: `${input.swapUsedGib.toFixed(1)} of ${input.swapTotalGib.toFixed(1)} GiB allocated swap used; memory pressure ${input.pressureLevel}`,
+      fix: "Close unused memory-heavy apps and investigate growing processes while pressure remains elevated.",
     });
   }
   if (input.orphans.length > 0) {

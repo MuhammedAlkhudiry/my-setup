@@ -1,8 +1,7 @@
 # Plans
 
-Save plans, interview results, progress trackers, research notes, reviews, QA runs, and reports as `~/plans/<project>/<slug>.md`, never in a
-repository. Use the project's lowercase name, not a worktree or clone folder name. When no writable location exists, return the complete
-document and state that it was not saved.
+Save plans, interviews, trackers, research, reviews, QA runs, and reports in `~/plans/<project>/<slug>.md`, never a repository. Use the lowercase
+project name, not a worktree or clone name. Without a writable location, return the complete document and say it was not saved.
 
 Preserve the supplied content. Start each file with `created`, `updated`, `project`, `description`, `status`, and `type` frontmatter, and refresh
 `updated` on every save.
@@ -10,10 +9,10 @@ Preserve the supplied content. Start each file with `created`, `updated`, `proje
 ## Types
 
 - `plan` for work to do. This is the default.
-- `interview` for a completed interview's decisions.
-- `tracker` for progress through work that spans sessions, such as a review, walkthrough, or upgrade.
+- `interview` for interview results, including partial interviews.
+- `tracker` for work spanning sessions.
 - `research` for findings that inform a later decision.
-- `report` for a point-in-time result, such as a review, audit, QA run, or measurement.
+- `report` for point-in-time reviews, audits, QA runs, or measurements.
 
 ## Status
 

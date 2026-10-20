@@ -1,48 +1,45 @@
 # Advertising platforms
 
-Use the user's signed-in Chrome session to identify the intended account. Keep browser authentication in Chrome; never inspect or export cookies,
-session storage, passwords, or tokens. Pause for login, OAuth, 2FA, CAPTCHA, or missing permissions. Get approval before changing ads, billing,
-tracking, or account access.
+Identify the intended account in the user's signed-in Chrome session. Never inspect or export cookies, session storage, passwords, or tokens.
+Pause for login, OAuth, 2FA, CAPTCHA, or missing permissions. Get approval before changing ads, billing, tracking, or account access.
 
 ## Google Ads
 
-- Open [Google Ads](https://ads.google.com/) and confirm the selected customer or manager account by name and ID.
-- If `$SERVICE_CREDENTIALS_HOME/secrets.zsh` contains `GOOGLE_ADS_*` credentials, prefer the configured API. Verify it by listing accessible
-  customers. Keep the customer, manager, Cloud project, OAuth user and app, and developer-token owner distinct; choose `login-customer-id` for the
-  task.
-- Repair API access through its developer token, enabled API, and OAuth client, then update `secrets.zsh`.
+- Confirm the customer/manager name and ID in [Google Ads](https://ads.google.com/).
+- Prefer the API when `GOOGLE_ADS_*` credentials exist in `$SERVICE_CREDENTIALS_HOME/secrets.zsh`; verify by listing accessible customers.
+  Keep customer, manager, Cloud project, OAuth user/app, and developer-token owner distinct; choose the task's `login-customer-id`.
+- Repair the developer token, enabled API, or OAuth client as needed; update `secrets.zsh`.
 
 ## Apple Ads
 
-- Open [Apple Ads Advanced](https://app-ads.apple.com/cm/app/) and confirm the organization, campaign group, currency, timezone, and user role.
-- When `$SERVICE_CREDENTIALS_HOME/apple-ads/oauth.json` and its private key exist, prefer the Campaign Management API. Use the current official API
-  guidance to verify access. Request a Read Only API role for reporting unless approved work needs write access.
-- Keep the Apple Account, Ads organization, campaign group, App Store Connect account, promoted app, API user, OAuth client, and AdServices
-  attribution integration distinct. Store client, team, key, and optional organization IDs with the private-key path. Create access tokens at runtime;
-  never persist them.
-- Treat campaign reporting and AdServices attribution as separate routes. Preserve each platform's attribution definitions. If access is missing,
-  repair the Ads role or App Store Connect link. Pause for account-admin actions, account verification, terms, or billing.
+- Confirm the account, currency, timezone, and role in [Apple Ads](https://app-ads.apple.com/cm/app/).
+- Prefer `asc ads` where it covers the task. Read `asc ads --help`; the default is Platform API v1, while `asc ads v5` is deprecated.
+  Verify credentials with `asc ads auth discover`; use `asc ads auth login` to register keys rather than implementing custom OAuth.
+- Platform API `--ad-account` IDs are distinct from legacy v5 `--org` IDs. Discover each; never substitute one for the other.
+- Ads credentials are separate from App Store Connect credentials. Keep the Apple Account, ad account, legacy organization/campaign group,
+  App Store Connect account, promoted app, API user, and OAuth client distinct. Request read-only access for reporting unless approved work needs
+  writes; never persist access tokens.
+- Keep AdServices attribution separate from campaign reporting and preserve platform attribution definitions. Repair Ads roles or the App Store
+  Connect link as needed; pause for admin actions, verification, terms, or billing.
 
 ## Meta Ads
 
-- Open [Meta Ads Manager](https://www.facebook.com/ads/manager) and confirm the ad account name and ID.
-- If `$SERVICE_CREDENTIALS_HOME/meta-ads/system-user.json` exists, prefer the Marketing API. Verify access by listing ad accounts with only the needed
-  fields. Keep the app, business portfolio, system user, account, scopes, and API version distinct.
-- Repair missing access through the owning business portfolio or account roles. Never request another person's login.
+- Confirm the account name and ID in [Meta Ads Manager](https://www.facebook.com/ads/manager).
+- Prefer the Marketing API when `$SERVICE_CREDENTIALS_HOME/meta-ads/system-user.json` exists; verify by listing ad accounts with only needed fields.
+  Keep app, business portfolio, system user, account, scopes, and API version distinct.
+- Repair business portfolio/account roles; never request another person's login.
 
 ## Snapchat Ads
 
-- Open [Snapchat Ads Manager](https://ads.snapchat.com/) and confirm the organization and ad account by name and ID.
-- If `$SERVICE_CREDENTIALS_HOME/snapchat-ads/oauth.json` exists, prefer the Marketing API. Refresh tokens through the official endpoint when needed
-  and verify access by listing the user's organizations. Keep the OAuth app, organization, and ad account distinct.
-- Repair missing access through organization or account roles, without sharing another person's credentials.
+- Confirm organization and ad account names/IDs in [Snapchat Ads Manager](https://ads.snapchat.com/).
+- Prefer the Marketing API when `$SERVICE_CREDENTIALS_HOME/snapchat-ads/oauth.json` exists. Refresh through the official endpoint; verify by listing
+  the user's organizations. Keep OAuth app, organization, and ad account distinct.
+- Repair organization/account roles; never share another person's credentials.
 
 ## TikTok Ads
 
-- Keep Marketing API credentials in `$SERVICE_CREDENTIALS_HOME/tiktok-ads/oauth.json` separate from Pixel Events API credentials in
+- Separate Marketing API credentials in `$SERVICE_CREDENTIALS_HOME/tiktok-ads/oauth.json` from Pixel Events API credentials in
   `tiktok-ads/events-api.json`.
-- Use the Marketing API only with an approved app and advertiser authorization. List authorized advertisers, then confirm the intended advertiser.
-  Keep the developer profile, app, Business Center, advertiser, and token distinct. Report API access as pending until the app is approved and its ID
-  and secret are available.
-- Use Direct Advertiser for an app managing its owner's account; use Technology Company for third-party advertisers. Repair missing account access
-  through Business Center without sharing another person's credentials.
+- Use the Marketing API only with app approval, its ID/secret, and advertiser authorization; report access as pending until then. List authorized
+  advertisers and confirm the target. Keep developer profile, app, Business Center, advertiser, and token distinct.
+- Choose Direct Advertiser for the owner's account, Technology Company for third parties. Repair Business Center access without sharing logins.

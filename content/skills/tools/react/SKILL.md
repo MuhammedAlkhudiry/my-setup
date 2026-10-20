@@ -1,30 +1,27 @@
 ---
 name: react
-description: Use before editing or reviewing React or React Native code, including any `.tsx` or `.jsx` file, hook, or query file, even a one-line change.
+description: Use before editing or reviewing React or React Native code.
 ---
 
-When the project already uses a consistent pattern, follow it instead.
+Follow consistent project patterns over these defaults.
 
-- Order component code: hooks grouped by purpose, calculated values, handlers, early returns, then JSX.
-- In client components, load server data through the project's query library, not direct fetches. Treat its cache as the source of truth; do not
-  copy it into local state.
-- Read global store state through a selector hook in the component that needs it, not through props. Select only the fields it uses; use
-  `useShallow` when the selector returns an object or array.
-- Pass a complete object as one prop instead of passing its fields separately.
-- When the project uses React Compiler, do not add `useMemo`, `useCallback`, or `memo` by habit.
-- When the project defines a `react:doctor` task, run it after React changes and fix what it reports before finishing. Suppress a finding
-  only with an inline `react-doctor-disable-next-line` comment that states why the fix would be wrong.
+- Order components: hooks grouped by purpose → calculated values → handlers → early returns → JSX.
+- Load client-side server data through the project's query library. Use its cache directly; do not copy it into local state.
+- Read global state in the consuming component through a selector, not props. Select only needed fields; use `useShallow` for object/array results.
+- Pass objects as single props instead of separate fields.
+- With React Compiler, avoid habitual `useMemo`, `useCallback`, and `memo`.
+- If defined, run `react:doctor` after React changes. Fix findings; suppress only with `react-doctor-disable-next-line` explaining why the fix
+  would be wrong.
 
 ## TanStack Query
 
-- Generate API types and fetch functions from the backend's OpenAPI spec and commit them; CI fails when they drift. Do not use generated
-  hooks or keys.
-- Keep each feature's queries and mutations in `<feature>.queries.ts` as `queryOptions` and `mutationOptions` factories with hierarchical
-  keys. Components and cache reads use the factories, never inline keys.
-- Declare what a mutation invalidates in `meta.invalidates`, and handle it in one global `MutationCache` handler.
-- In server-rendered pages, such as Inertia, take page data from page props.
+- Generate and commit API types and fetch functions from OpenAPI; enforce drift checks in CI. Do not use generated hooks or keys.
+- Keep `queryOptions`/`mutationOptions` factories with hierarchical keys in `<feature>.queries.ts`. Components and cache reads use these factories,
+  never inline keys.
+- Declare invalidations in `meta.invalidates`; handle them in one global `MutationCache` handler.
+- Take server-rendered page data, such as Inertia data, from page props.
 
 ## React Native
 
-- Target native platforms only, unless the project declares web as a target.
-- Before using newer JavaScript or `Intl` APIs, check that Hermes supports them.
+- Target native platforms unless the project declares web support.
+- Check Hermes support before using newer JavaScript or `Intl` APIs.

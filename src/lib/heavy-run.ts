@@ -12,7 +12,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpus, loadavg, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
@@ -23,6 +23,8 @@ import {
   releaseHostCapacity,
   type HeavyClass,
   type HostJob,
+  readMemoryPressure,
+  type MemoryPressure,
 } from "./host-capacity";
 import {
   acquireLegacyLock,
@@ -33,15 +35,39 @@ import {
 import { groupIsAlive, processSnapshot, type ProcessRow } from "./process-identity";
 import { queueDirectory, readQueueState, withQueueState } from "./queue-store";
 import type { QueueState } from "./device-queue";
+import { expressHeavyCommand, heavyProject, readHeavyHistory } from "./heavy-express";
 import { heavyRequester } from "./heavy-requester";
 
 export const LEGACY_HEAVY_LOCK = "/tmp/agents-heavy.lock";
+// Keep the escape interval below the CLI's default nine-minute queue timeout.
+export const HEAVY_LOAD_POLICY = { threshold: cpus().length * 6, maxWaitMs: 5 * 60_000 };
+
+/** Admission only: overdue jobs drain singly while responsiveness is at risk. */
+export function heavyLoadAdmission(
+  job: HostJob,
+  active: HostJob[],
+  now: number,
+  readLoad = () => loadavg()[0]!,
+  readPressure: () => MemoryPressure = readMemoryPressure,
+) {
+  const load = readLoad();
+  const memoryPressure = readPressure();
+  const overloaded = memoryPressure === "critical" || load > HEAVY_LOAD_POLICY.threshold;
+  const held =
+    overloaded && (now - job.queuedAt < HEAVY_LOAD_POLICY.maxWaitMs || active.length > 0);
+
+  return { load, threshold: HEAVY_LOAD_POLICY.threshold, memoryPressure, held };
+}
 const HISTORY_RUNS = 2000;
 const workerPath = fileURLToPath(new URL("../commands/heavy-run-worker.ts", import.meta.url));
 const cliPath = fileURLToPath(new URL("../commands/heavy-run-cli.ts", import.meta.url));
 
 /** A project explicitly promises these runners reserve their own heavy steps. */
-export function deferredHeavyCommand(argv: string[], cwd = process.cwd()): boolean {
+function declaredHeavyCommand(
+  key: "deferredCommands" | "uncappedCommands",
+  argv: string[],
+  cwd: string,
+): boolean {
   const path = join(cwd, "package.json");
   if (!existsSync(path)) return false;
   let config: unknown;
@@ -52,7 +78,7 @@ export function deferredHeavyCommand(argv: string[], cwd = process.cwd()): boole
   }
   const heavyRun = (config as { heavyRun?: unknown } | null)?.heavyRun;
   if (heavyRun === undefined) return false;
-  const commands = (heavyRun as { deferredCommands?: unknown } | null)?.deferredCommands;
+  const commands = (heavyRun as Record<string, unknown> | null)?.[key];
   if (
     typeof heavyRun === "object" &&
     heavyRun !== null &&
@@ -73,11 +99,21 @@ export function deferredHeavyCommand(argv: string[], cwd = process.cwd()): boole
     )
   )
     throw new Error(
-      "Invalid heavy-run configuration: heavyRun.deferredCommands must be an array of nonempty argv arrays containing nonempty strings",
+      `Invalid heavy-run configuration: heavyRun.${key} must be an array of nonempty argv arrays containing nonempty strings`,
     );
 
   return commands.some((command: string[]) => command.every((arg, i) => argv[i] === arg));
 }
+
+export function deferredHeavyCommand(argv: string[], cwd = process.cwd()): boolean {
+  return declaredHeavyCommand("deferredCommands", argv, cwd);
+}
+
+export function uncappedHeavyCommand(argv: string[], cwd = process.cwd()): boolean {
+  return declaredHeavyCommand("uncappedCommands", argv, cwd) || deferredHeavyCommand(argv, cwd);
+}
+
+export const HEAVY_RUNTIME_LIMIT_MS = 90_000;
 
 function legacyVersion(path: string): string | null {
   try {
@@ -152,8 +188,15 @@ export interface HeavyOptions {
   legacyLockPath?: string;
   onOutput?: (output: string) => void;
   onQueued?: () => void;
+  /** Injectable retry wait; tests advance admission without the production polling delay. */
+  waitForCapacityRetry?: typeof waitForCapacityRetry;
+  /** Injectable host metric; never persisted in the shared queue. */
+  readLoad?: () => number;
+  readPressure?: () => MemoryPressure;
   /** Only for explicitly opted-in runners that reserve each heavy step. */
   deferred?: boolean;
+  /** Timer dependency for deterministic deadline tests; the production deadline is fixed. */
+  scheduleRuntimeDeadline?: (expire: () => void, milliseconds: number) => () => void;
 }
 
 export interface HeavyReceipt {
@@ -169,9 +212,11 @@ export interface HeavyReceipt {
   processGroup: HostJob["processGroup"];
   childExitCode: number | null;
   childSignal: string | null;
-  exitCode: 0 | 1 | 75;
+  exitCode: 0 | 1 | 75 | 124;
+  runtimeLimitSeconds: 90 | null;
+  elapsedSeconds: number;
   resourceBudget: { resource: "host-capacity"; capacity: number };
-  reservationMode: "eager" | "deferred";
+  reservationMode: "eager" | "deferred" | "express";
   log: string | null;
   error?: string;
 }
@@ -183,6 +228,9 @@ export interface HeavyHistoryEntry {
   class: HeavyClass;
   cwd: string;
   command: string;
+  /** Exact matching and shared Git directory; absent in older entries. */
+  argv?: string[];
+  project?: string | null;
   queuedAt: string;
   acquiredAt: string | null;
   waitedSeconds: number;
@@ -232,6 +280,7 @@ export async function heavyStatus(
 /** Internal scheduler boundary; the legacy implementation remains readable by loaded clients. */
 export interface HeavyScheduler {
   capacity: number;
+  express?: boolean;
   acquire(job: HostJob, context: HeavyContext, cancelled: () => boolean): Promise<boolean>;
   start(job: HostJob, context: HeavyContext, pid: number): Promise<void>;
   release(job: HostJob, context: HeavyContext): Promise<void>;
@@ -241,6 +290,8 @@ export interface HeavyContext {
   directory: string;
   legacyLockPath: string;
   legacyTarget: string;
+  readLoad?: () => number;
+  readPressure?: () => MemoryPressure;
 }
 
 const legacyScheduler: HeavyScheduler = {
@@ -299,6 +350,10 @@ export async function runHeavyCommand(
   options: HeavyOptions,
   scheduler: HeavyScheduler = legacyScheduler,
 ): Promise<HeavyReceipt> {
+  const uncapped =
+    options.class === "build" ||
+    uncappedHeavyCommand(options.argv) ||
+    process.env.HEAVY_RUN_UNCAPPED === "1";
   const directory = options.directory ?? queueDirectory();
   const legacyLockPath = options.legacyLockPath ?? LEGACY_HEAVY_LOCK;
   const holder = (await processSnapshot()).find((row) => row.pid === process.pid);
@@ -307,11 +362,33 @@ export async function runHeavyCommand(
   chmodSync(logDirectory, 0o700);
   const log = join(logDirectory, "full.log");
   const legacyTarget = join(logDirectory, "legacy-lock");
-  const context = { directory, legacyLockPath, legacyTarget };
+  const context = {
+    directory,
+    legacyLockPath,
+    legacyTarget,
+    readLoad: options.readLoad,
+    readPressure: options.readPressure,
+  };
   const logFd = openSync(log, "w", 0o600);
   const queuedAt = Date.now();
+  let runtimeExpired = false;
+  let startedAt: number | undefined;
+  let stopRuntimeTimer: (() => void) | undefined;
   const deadline = queuedAt + options.waitSeconds * 1000;
+  const project = heavyProject(process.cwd());
+  const express =
+    !options.deferred &&
+    scheduler.express === true &&
+    expressHeavyCommand(
+      readHeavyHistory(heavyHistoryPath(directory)),
+      options.argv,
+      options.class,
+      project,
+      queuedAt,
+    );
+  const reservationMode = options.deferred ? "deferred" : express ? "express" : "eager";
   const job: HostJob = {
+    ...(express ? { reservationMode: "express" as const } : {}),
     reservationId: crypto.randomUUID(),
     sequence: 0,
     owner: options.owner,
@@ -374,7 +451,7 @@ export async function runHeavyCommand(
       }
 
       // Waiting is owned by this command, never by repeated agent tool calls.
-      await waitForCapacityRetry(
+      await (options.waitForCapacityRetry ?? waitForCapacityRetry)(
         Math.min(1000, Math.max(1, deadline - Date.now())),
         options.signal,
         () => {
@@ -442,18 +519,42 @@ export async function runHeavyCommand(
           : JSON.stringify({
               argv: options.argv,
               deferred: options.deferred === true,
+              uncapped,
               cliPath,
               owner: options.owner,
               waitSeconds: options.waitSeconds,
             }),
       );
+      startedAt = Date.now();
+      if (!uncapped) {
+        const schedule =
+          options.scheduleRuntimeDeadline ??
+          ((expire, milliseconds) => {
+            const timer = setTimeout(expire, milliseconds);
+            return () => clearTimeout(timer);
+          });
+        stopRuntimeTimer = schedule(() => {
+          runtimeExpired = true;
+          try {
+            process.kill(-worker!.pid!, "SIGKILL");
+          } catch (failure) {
+            if ((failure as NodeJS.ErrnoException).code !== "ESRCH") throw failure;
+          }
+        }, HEAVY_RUNTIME_LIMIT_MS);
+      }
       if (cancelled()) await terminate();
       await workerExited;
+      stopRuntimeTimer?.();
 
       childExitCode = workerResult?.exitCode ?? null;
       childSignal = workerResult?.signal ?? null;
       error = workerResult?.error ?? error;
       status = cancelled() ? "cancelled" : childExitCode === 0 ? "succeeded" : "failed";
+      if (runtimeExpired) {
+        status = "timed-out";
+        childSignal = "SIGKILL";
+        error = `${options.argv.join(" ")} ran over 90s (${((Date.now() - startedAt) / 1000).toFixed(1)}s elapsed) — make it faster`;
+      }
       if (!workerResult && !cancelled())
         error ??= "Heavy command process group exited without a child result";
     }
@@ -463,6 +564,7 @@ export async function runHeavyCommand(
     await terminate();
     if (workerExited) await workerExited;
   } finally {
+    stopRuntimeTimer?.();
     options.signal?.removeEventListener("abort", onAbort);
     closeSync(logFd);
     // Keep a crashed supervisor's surviving group reserved until identity checks prove it is gone.
@@ -476,6 +578,8 @@ export async function runHeavyCommand(
         owner: job.owner,
         class: job.class,
         cwd: process.cwd(),
+        project,
+        argv: job.argv,
         command: job.argv.join(" ").slice(0, 300),
         queuedAt: new Date(job.queuedAt).toISOString(),
         acquiredAt: job.acquiredAt === null ? null : new Date(job.acquiredAt).toISOString(),
@@ -489,7 +593,7 @@ export async function runHeavyCommand(
             : Math.round((now - job.acquiredAt) / 1000),
         status,
         childExitCode,
-        reservationMode: options.deferred ? "deferred" : "eager",
+        reservationMode,
       });
     } catch {
       /* Best effort. */
@@ -514,9 +618,11 @@ export async function runHeavyCommand(
     processGroup: job.processGroup,
     childExitCode,
     childSignal,
-    exitCode: expired ? 75 : success ? 0 : 1,
+    exitCode: runtimeExpired ? 124 : expired ? 75 : success ? 0 : 1,
+    runtimeLimitSeconds: uncapped ? null : 90,
+    elapsedSeconds: startedAt === undefined ? 0 : (Date.now() - startedAt) / 1000,
     resourceBudget: { resource: "host-capacity", capacity: scheduler.capacity },
-    reservationMode: options.deferred ? "deferred" : "eager",
+    reservationMode,
     log: success ? null : log,
     ...(error ? { error } : {}),
   };

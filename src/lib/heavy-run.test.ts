@@ -27,7 +27,10 @@ import {
 } from "./host-capacity";
 import {
   heavyHistoryPath,
+  heavyLoadAdmission,
+  HEAVY_LOAD_POLICY,
   deferredHeavyCommand,
+  uncappedHeavyCommand,
   withProcessState,
   type HeavyHistoryEntry,
   type HeavyReceipt,
@@ -37,7 +40,6 @@ import {
   withConcurrentProcessState,
   readConcurrentCapacity,
   startCompatibilityDispatcher,
-  dispatchCompatibilityQueue,
 } from "./heavy-run-concurrent";
 import {
   claimConcurrentCapacity,
@@ -47,9 +49,10 @@ import {
   HEAVY_CAPACITY,
 } from "./concurrent-capacity";
 import { recoverLegacyLock, releaseLegacyLock } from "./heavy-legacy-lock";
-import { releaseHostCapacity } from "./host-capacity";
+import { parseMemoryPressure, releaseHostCapacity } from "./host-capacity";
 import { withQueueState } from "./queue-store";
 import { prepareConcurrentTurns, CURRENT_HEAVY_CLIENT } from "./concurrent-turns";
+import { expressHeavyCommand, heavyProject, readHeavyHistory } from "./heavy-express";
 import { heavyRequester } from "./heavy-requester";
 import type { ProcessRow } from "./process-identity";
 
@@ -91,7 +94,7 @@ function until(events: EventEmitter, condition: () => boolean): Promise<void> {
   });
 }
 
-function fixture(concurrent = false) {
+function fixture(concurrent = false, load = 0) {
   const selectedModule = concurrent
     ? fileURLToPath(new URL("./heavy-run-concurrent.ts", import.meta.url))
     : modulePath;
@@ -99,6 +102,7 @@ function fixture(concurrent = false) {
   const directory = join(root, "queue");
   const legacyLockPath = join(root, "legacy-lock");
   mkdirSync(directory);
+  writeFileSync(join(root, "load"), String(load));
   const children: ChildProcess[] = [];
   const logs: string[] = [];
   const logDirectories = new Set<string>();
@@ -139,15 +143,19 @@ function fixture(concurrent = false) {
     source = command(owner, gated, exitCode),
     className: HeavyClass = "checks",
     implementation = selectedModule,
+    deadline = false,
+    cwd = process.cwd(),
   ) => {
     const script = `import { runHeavyCommand } from ${JSON.stringify(implementation)};
+      import { readFileSync } from "node:fs";
       const abort = new AbortController();
       process.on("SIGTERM", ()=>abort.abort());
-      const receipt = await runHeavyCommand(${JSON.stringify({ argv: [process.execPath, "-e", source], class: className, waitSeconds, owner, requester: owner, directory, legacyLockPath, deferred }).slice(0, -1)}, signal: abort.signal, onQueued: () => console.log(JSON.stringify({queued: true})) });
+      const receipt = await runHeavyCommand(${JSON.stringify({ argv: [process.execPath, "-e", source], class: className, waitSeconds, owner, requester: owner, directory, legacyLockPath, deferred }).slice(0, -1)}, waitForCapacityRetry: async (_timeout, _signal, onWaiting) => { onWaiting?.(); await Bun.sleep(10); }, readPressure: () => "normal", readLoad: () => Number(readFileSync(${JSON.stringify(join(root, "load"))}, "utf8")), signal: abort.signal, ${deadline ? 'scheduleRuntimeDeadline: (expire, milliseconds) => { if(milliseconds !== 90000) throw new Error("Wrong deadline"); process.stdin.once("data", expire); return () => { process.stdin.removeListener("data", expire); process.stdin.pause(); }; },' : ""} onQueued: () => console.log(JSON.stringify({queued: true})) });
       console.log(JSON.stringify(receipt)); process.exitCode = receipt.exitCode;`;
     const processHandle = spawn(process.execPath, ["--no-env-file", "-e", script], {
+      cwd,
       env: testEnvironment({ TMPDIR: root }),
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["pipe", "pipe", "pipe"],
     });
     children.push(processHandle);
     let output = "";
@@ -189,12 +197,43 @@ function fixture(concurrent = false) {
     start,
     command,
     socketPath,
+    // Admission tests need occupied slots, not ten copies of the same OS job.
+    // Keep a real group's identity so recovery still validates the live anchor.
+    async occupySlots(anchor: string, owners: string[]) {
+      await withConcurrentProcessState(
+        (state) => {
+          const job = state.host.active.find((job) => job.owner === anchor)!;
+          for (const owner of owners)
+            state.host.active.push({
+              ...structuredClone(job),
+              owner,
+              requester: owner,
+              reservationId: crypto.randomUUID(),
+              sequence: state.host.nextSequence++,
+            });
+        },
+        directory,
+        legacyLockPath,
+      );
+
+      return () =>
+        withConcurrentProcessState(
+          (state) => {
+            state.host.active = state.host.active.filter((job) => !owners.includes(job.owner));
+          },
+          directory,
+          legacyLockPath,
+        );
+    },
     async started(owner: string) {
       await until(events, () => sockets.has(owner));
       if (!concurrent && existsSync(legacyLockPath))
         logDirectories.add(join(readlinkSync(legacyLockPath), ".."));
     },
-    release: (owner: string) => sockets.get(owner)!.end(),
+    release: (owner: string) => {
+      sockets.get(owner)!.end();
+      sockets.delete(owner);
+    },
     queued: (count: number) => until(events, () => queued.size === count),
     queuedOwner: (owner: string) => until(events, () => queued.has(owner)),
     async clean() {
@@ -482,7 +521,7 @@ test("a deferred runner releases between heavy steps and preserves the nested re
           legacyLockPath: f.legacyLockPath,
         }) +
         ";",
-      'const run = async (source) => { const result = await runHeavyCommand({...options, argv:[process.execPath,"-e",source]}); if (result.exitCode !== 0) throw new Error(JSON.stringify(result)); };',
+      'const run = async (source) => { const result = await runHeavyCommand({...options, readPressure: () => "normal", readLoad: () => 0, argv:[process.execPath,"-e",source]}); if (result.exitCode !== 0) throw new Error(JSON.stringify(result)); };',
       "await run(" +
         JSON.stringify(
           'if (process.env.HEAVY_RUN_DEFERRED || !process.env.HEAVY_RUN_RESERVATION_ID) throw new Error("Missing eager contract");',
@@ -583,7 +622,7 @@ test("a reserved command never inherits the caller's .env", async () => {
       `printf %s "\${HEAVY_RUN_ENV_PROBE:-unset}" > ${JSON.stringify(probe)}`,
     ];
     const script = `import { runHeavyCommand } from ${JSON.stringify(modulePath)};
-      const receipt = await runHeavyCommand(${JSON.stringify({ argv, class: "checks", waitSeconds: 5, owner: "env", directory: f.directory, legacyLockPath: f.legacyLockPath })});
+      const receipt = await runHeavyCommand(${JSON.stringify({ argv, class: "checks", waitSeconds: 5, owner: "env", directory: f.directory, legacyLockPath: f.legacyLockPath }).slice(0, -1)}, readPressure: () => "normal", readLoad: () => 0});
       console.log(JSON.stringify(receipt)); process.exitCode = receipt.exitCode;`;
 
     // The launcher runs the CLI with --no-env-file from the caller's directory, so the fixture does the same.
@@ -650,6 +689,128 @@ function ticket(id: string, requester?: string): HostJob {
     processGroup: null,
   };
 }
+
+test("responsiveness admits busy hosts, holds critical pressure, and preserves the starvation escape", () => {
+  const job = { ...ticket("pressure"), class: "checks" as const };
+  const admit = (
+    now: number,
+    active: HostJob[],
+    pressure: "normal" | "warning" | "critical" | "unknown",
+  ) =>
+    heavyLoadAdmission(
+      job,
+      active,
+      now,
+      () => HEAVY_LOAD_POLICY.threshold,
+      () => pressure,
+    );
+
+  for (const pressure of ["normal", "warning", "unknown"] as const)
+    expect(admit(1, [], pressure).held).toBe(false);
+  expect(admit(1, [], "critical").held).toBe(true);
+  expect(admit(HEAVY_LOAD_POLICY.maxWaitMs, [], "critical").held).toBe(false);
+  expect(admit(HEAVY_LOAD_POLICY.maxWaitMs, [ticket("active")], "critical").held).toBe(true);
+  expect(parseMemoryPressure("4")).toBe("critical");
+  expect(parseMemoryPressure("", "System-wide memory pressure: critical")).toBe("critical");
+  expect(parseMemoryPressure("", "System-wide memory free percentage: 1%")).toBe("unknown");
+});
+
+test("load admission preserves FIFO, recovers at the threshold, and admits overdue work singly", () => {
+  const host = emptyConcurrentCapacity();
+  const first = { ...ticket("first", "session"), class: "checks" as const };
+  const second = { ...ticket("second", "session"), class: "build" as const };
+  let load = HEAVY_LOAD_POLICY.threshold + 0.01;
+  let now = 1;
+  const claim = (job: HostJob) =>
+    claimConcurrentCapacity(
+      host,
+      job,
+      now,
+      false,
+      [],
+      [],
+      (next, active) =>
+        !heavyLoadAdmission(
+          next,
+          active,
+          now,
+          () => load,
+          () => "normal",
+        ).held,
+    );
+
+  expect(claim(first)).toBe(false);
+  expect(claim(second)).toBe(false);
+  expect(host.waiting.map((job) => job.reservationId)).toEqual(["first", "second"]);
+  now = HEAVY_LOAD_POLICY.maxWaitMs;
+  expect(claim(second)).toBe(false);
+  expect(claim(first)).toBe(true);
+  expect(claim(second)).toBe(false);
+  expect(host.active.map((job) => job.reservationId)).toEqual(["first"]);
+  releaseConcurrentCapacity(host, "first");
+  expect(claim(second)).toBe(true);
+  const third = { ...ticket("third", "session"), class: "checks" as const, queuedAt: now };
+  expect(claim(third)).toBe(false);
+  load = HEAVY_LOAD_POLICY.threshold;
+  expect(claim(third)).toBe(true);
+});
+
+test("load admission includes express, legacy activity, and benchmarks", () => {
+  const host = emptyConcurrentCapacity();
+  const express = {
+    ...ticket("express", "session"),
+    class: "checks" as const,
+    reservationMode: "express" as const,
+  };
+  const now = HEAVY_LOAD_POLICY.maxWaitMs;
+  const admit = (job: HostJob, active: HostJob[]) =>
+    !heavyLoadAdmission(
+      job,
+      active,
+      now,
+      () => HEAVY_LOAD_POLICY.threshold + 100,
+      () => "normal",
+    ).held;
+  const legacy = { ...ticket("legacy"), class: "build" as const };
+
+  expect(claimConcurrentCapacity(host, express, now, false, [legacy], [], admit)).toBe(false);
+  expect(claimConcurrentCapacity(host, express, now, false, [], [], admit)).toBe(true);
+  const benchmark = ticket("benchmark", "other");
+  expect(claimConcurrentCapacity(host, benchmark, now, false, [], [], admit)).toBe(false);
+  releaseConcurrentCapacity(host, "express");
+  expect(claimConcurrentCapacity(host, benchmark, now, false, [], [], admit)).toBe(true);
+});
+
+test("queued jobs report load holds and start in order when the injected load falls", async () => {
+  const f = fixture(true, HEAVY_LOAD_POLICY.threshold + 1);
+  try {
+    const first = f.start("first");
+    await f.queuedOwner("first");
+    const second = f.start("second");
+    await f.queuedOwner("second");
+    const status = await concurrentStatus(
+      f.directory,
+      f.legacyLockPath,
+      () => HEAVY_LOAD_POLICY.threshold + 1,
+    );
+    expect(status.active).toEqual([]);
+    expect(status.waiting.map((job) => "loadAdmission" in job && job.loadAdmission.held)).toEqual([
+      true,
+      true,
+    ]);
+    const sequences = f.state().host.waiting.map((job: HostJob) => job.sequence);
+    writeFileSync(join(f.root, "load"), "0");
+    await Promise.all([f.started("first"), f.started("second")]);
+    expect(f.state().host.active.map((job: HostJob) => job.owner)).toEqual(["first", "second"]);
+    expect(f.state().host.active.map((job: HostJob) => job.sequence)).toEqual(sequences);
+    f.release("first");
+    f.release("second");
+    expect((await first.result).status).toBe("succeeded");
+    expect((await second.result).status).toBe("succeeded");
+  } finally {
+    await f.clean();
+  }
+});
 
 test("requesters rotate while each requester keeps FIFO, regardless of class or polling order", () => {
   const state = emptyQueueState();
@@ -789,6 +950,15 @@ test("CLI rejects bad input and status has one line or a versioned JSON receipt"
       acquiredAt: null,
     });
 
+    // A declared self-queuing runner can itself be launched by a deferred runner.
+    // Its leaf steps still reserve normally, since their argv are not declared.
+    const inherited = await run(["--json", "--", ...argv], { HEAVY_RUN_DEFERRED: "1" });
+    expect(inherited.code).toBe(0);
+    expect(JSON.parse(inherited.output)).toMatchObject({
+      reservationMode: "deferred",
+      acquiredAt: null,
+    });
+
     const nested = await run(["--json", "--", ...argv], { HEAVY_RUN_RESERVATION_ID: "held" });
     expect(nested.code).toBe(2);
     const nestedReceipt = JSON.parse(nested.output);
@@ -806,25 +976,26 @@ test("CLI rejects bad input and status has one line or a versioned JSON receipt"
   }
 });
 
-test("three checks/build jobs run concurrently, the fourth waits, and status lists every active", async () => {
+test("capacity checks/build jobs run concurrently, the next waits, and status lists every active", async () => {
   const f = fixture(true);
   try {
-    const runs = [
-      f.start("one"),
-      f.start("two"),
-      f.start("build", true, 30, 0, false, undefined, "build"),
-    ];
-    await Promise.all(["one", "two", "build"].map(f.started));
+    const checks = Array.from({ length: HEAVY_CAPACITY - 1 }, (_, index) => `check${index + 1}`);
+    const runs = [f.start(checks[0]), f.start("build", true, 30, 0, false, undefined, "build")];
+    await Promise.all([checks[0], "build"].map(f.started));
+    const clearSlots = await f.occupySlots("build", checks.slice(1));
     const status = await concurrentStatus(f.directory, f.legacyLockPath);
     expect(status.resourceBudget.capacity).toBe(HEAVY_CAPACITY);
-    expect(status.active.map((job) => job.owner).sort()).toEqual(["build", "one", "two"]);
-    const fourth = f.start("fourth");
+    expect(status.active.map((job) => job.owner).sort()).toEqual([...checks, "build"].sort());
+
+    const overflow = f.start("overflow");
     await f.queued(1);
-    expect(f.state().host.active).toHaveLength(3);
-    expect(existsSync(join(f.root, "fourth-started"))).toBe(false);
-    f.release("two");
-    await f.started("fourth");
-    for (const owner of ["one", "build", "fourth"]) f.release(owner);
+    expect(f.state().host.active).toHaveLength(HEAVY_CAPACITY);
+    expect(existsSync(join(f.root, "overflow-started"))).toBe(false);
+    f.release("check1");
+    await f.started("overflow");
+    const fourth = overflow;
+    await clearSlots();
+    for (const owner of ["build", "overflow"]) f.release(owner);
     expect(
       (await Promise.all([...runs.map((run) => run.result), fourth.result])).every(
         (receipt) => receipt.exitCode === 0,
@@ -837,46 +1008,42 @@ test("three checks/build jobs run concurrently, the fourth waits, and status lis
   }
 });
 
-test("a benchmark waits for every active job and prevents later checks from bypassing its turn", async () => {
+test("benchmarks and checks run concurrently without draining or blocking later work", async () => {
   const f = fixture(true);
   try {
-    const runs = [f.start("one"), f.start("two"), f.start("three")];
-    await Promise.all(["one", "two", "three"].map(f.started));
+    const check = f.start("check");
+    await f.started("check");
     const benchmark = f.start("benchmark", true, 30, 0, false, undefined, "benchmark");
-    await f.queued(1);
-    const later = f.start("later");
-    await f.queued(2);
-    f.release("one");
-    await runs[0].result;
-    f.release("two");
-    await runs[1].result;
-    expect(existsSync(join(f.root, "benchmark-started"))).toBe(false);
-    expect(existsSync(join(f.root, "later-started"))).toBe(false);
-    f.release("three");
     await f.started("benchmark");
-    expect(f.state().host.active.map((job: HostJob) => job.owner)).toEqual(["benchmark"]);
-    expect(existsSync(join(f.root, "later-started"))).toBe(false);
-    f.release("benchmark");
+    const later = f.start("later");
     await f.started("later");
-    f.release("later");
     expect(
-      (await Promise.all([...runs.map((run) => run.result), benchmark.result, later.result])).every(
-        (receipt) => receipt.exitCode === 0,
+      f
+        .state()
+        .host.active.map((job: HostJob) => job.owner)
+        .sort(),
+    ).toEqual(["benchmark", "check", "later"]);
+    for (const owner of ["check", "benchmark", "later"]) f.release(owner);
+    expect(
+      (await Promise.all([check.result, benchmark.result, later.result])).every(
+        (r) => r.exitCode === 0,
       ),
     ).toBe(true);
   } finally {
     await f.clean();
   }
 });
-
-test("concurrent requesters rotate by admission, keep FIFO and drain for the next benchmark", () => {
+test("concurrent requesters rotate by admission and keep FIFO", () => {
   const host = emptyConcurrentCapacity();
+  const otherHeads = Array.from({ length: HEAVY_CAPACITY - 2 }, (_, i) =>
+    ticket(`other${i + 1}`, `requester${i + 1}`),
+  );
   const jobs = [
     ticket("a1", "A"),
     ticket("a2", "A"),
     ticket("b1", "B"),
     ticket("b2", "B"),
-    ticket("c1", "C"),
+    ...otherHeads,
   ];
   for (const job of jobs) {
     job.class = "checks";
@@ -884,13 +1051,17 @@ test("concurrent requesters rotate by admission, keep FIFO and drain for the nex
   }
   expect(claimConcurrentCapacity(host, jobs[0], 1, false)).toBe(true);
   expect(claimConcurrentCapacity(host, jobs[2], 1, false)).toBe(true);
-  expect(claimConcurrentCapacity(host, jobs[4], 1, false)).toBe(true);
+  for (const job of otherHeads) expect(claimConcurrentCapacity(host, job, 1, false)).toBe(true);
   expect(claimConcurrentCapacity(host, jobs[1], 1, false)).toBe(false);
   releaseConcurrentCapacity(host, "b1");
   expect(claimConcurrentCapacity(host, jobs[3], 2, false)).toBe(false);
   expect(claimConcurrentCapacity(host, jobs[1], 2, false)).toBe(true);
-  expect(host.active.map((job) => job.reservationId)).toEqual(["a1", "c1", "a2"]);
-  expect(jobs.map((job) => job.sequence)).toEqual([0, 1, 2, 3, 4]);
+  expect(host.active.map((job) => job.reservationId)).toEqual([
+    "a1",
+    ...otherHeads.map((job) => job.reservationId),
+    "a2",
+  ]);
+  expect(jobs.map((job) => job.sequence)).toEqual(jobs.map((_, i) => i));
 });
 
 test("multiple stale leases are recovered independently without reaping surviving groups or new waiters", () => {
@@ -992,15 +1163,17 @@ test("a crashed concurrent holder cannot free another job's guard, and stale agg
   }
 });
 
-test("deferred heavy steps share three slots while their cheap outer runner consumes none", async () => {
+test("deferred heavy steps share capacity while their cheap outer runner consumes none", async () => {
   const f = fixture(true);
   try {
-    const runs = [f.start("one"), f.start("two")];
-    await Promise.all([f.started("one"), f.started("two")]);
+    const owners = Array.from({ length: HEAVY_CAPACITY - 1 }, (_, i) => `slot${i + 1}`);
+    const runs = [f.start(owners[0])];
+    await f.started(owners[0]);
+    const clearSlots = await f.occupySlots(owners[0], owners.slice(1));
     const concurrentModule = fileURLToPath(new URL("./heavy-run-concurrent.ts", import.meta.url));
     const source = `import {runHeavyCommand} from ${JSON.stringify(concurrentModule)};
       if(process.env.HEAVY_RUN_DEFERRED!=="1" || !process.env.HEAVY_RUN_CLI || process.env.HEAVY_RUN_RESERVATION_ID) throw new Error("Deferred contract lost");
-      const result=await runHeavyCommand(${JSON.stringify({ argv: [process.execPath, "--no-env-file", "-e", f.command("step")], owner: "step", class: "checks", waitSeconds: 30, directory: f.directory, legacyLockPath: f.legacyLockPath })});
+      const result=await runHeavyCommand({...${JSON.stringify({ argv: [process.execPath, "--no-env-file", "-e", f.command("step")], owner: "step", class: "checks", waitSeconds: 30, directory: f.directory, legacyLockPath: f.legacyLockPath })}, readPressure: () => "normal", readLoad: () => 0});
       process.exitCode=result.exitCode;`;
     const outer = f.start("outer", true, 30, 0, true, source);
     await f.started("step");
@@ -1009,13 +1182,14 @@ test("deferred heavy steps share three slots while their cheap outer runner cons
         .state()
         .host.active.map((job: HostJob) => job.owner)
         .sort(),
-    ).toEqual(["one", "step", "two"]);
+    ).toEqual([...owners, "step"].sort());
     const fourth = f.start("fourth");
     await f.queued(1);
     f.release("step");
     expect((await outer.result).reservationMode).toBe("deferred");
     await f.started("fourth");
-    for (const name of ["one", "two", "fourth"]) f.release(name);
+    await clearSlots();
+    for (const name of [owners[0], "fourth"]) f.release(name);
     expect(
       (await Promise.all([...runs.map((run) => run.result), fourth.result])).every(
         (receipt) => receipt.exitCode === 0,
@@ -1084,65 +1258,22 @@ test("a guard published before a crashed acquire commits is recovered by a new s
   }
 });
 
-test("one legacy checks job shares exactly two new slots and its queued benchmark stays exclusive", async () => {
+test("a legacy benchmark shares remaining capacity with concurrent checks", async () => {
   const f = fixture(true);
   try {
-    const legacy = f.start("legacy", true, 30, 0, false, undefined, "checks", modulePath);
+    const legacy = f.start("legacy", true, 30, 0, false, undefined, "benchmark", modulePath);
     await f.started("legacy");
-    const originalTarget = readlinkSync(f.legacyLockPath);
-    const one = f.start("one");
-    const two = f.start("two", true, 30, 0, false, undefined, "build");
-    await Promise.all([f.started("one"), f.started("two")]);
-    const shared = await concurrentStatus(f.directory, f.legacyLockPath);
-    expect(shared.legacyBlocked).toBe(false);
-    expect(shared.active.map((job) => job.protocol).sort()).toEqual([
-      "concurrent-v3",
-      "concurrent-v3",
-      "legacy",
-    ]);
-    expect(readlinkSync(f.legacyLockPath)).not.toBe(originalTarget);
-    const benchmark = f.start(
-      "legacy-benchmark",
+    const check = f.start("check");
+    await f.started("check");
+    expect((await concurrentStatus(f.directory, f.legacyLockPath)).active).toHaveLength(2);
+    for (const owner of ["legacy", "check"]) f.release(owner);
+    expect((await Promise.all([legacy.result, check.result])).every((r) => r.exitCode === 0)).toBe(
       true,
-      30,
-      0,
-      false,
-      undefined,
-      "benchmark",
-      modulePath,
     );
-    await f.queued(1);
-    const fourth = f.start("fourth");
-    await f.queued(2);
-    expect((await concurrentStatus(f.directory, f.legacyLockPath)).active).toHaveLength(3);
-    f.release("legacy");
-    await legacy.result;
-    await f.started("fourth");
-    expect((await concurrentStatus(f.directory, f.legacyLockPath)).active).toHaveLength(3);
-    expect(existsSync(join(f.root, "legacy-benchmark-started"))).toBe(false);
-    f.release("one");
-    await one.result;
-    f.release("two");
-    await two.result;
-    const fifth = f.start("fifth");
-    await f.queued(3);
-    expect(existsSync(join(f.root, "fifth-started"))).toBe(false);
-    f.release("fourth");
-    await fourth.result;
-    await f.started("legacy-benchmark");
-    expect(
-      (await concurrentStatus(f.directory, f.legacyLockPath)).active.map((job) => job.owner),
-    ).toEqual(["legacy-benchmark"]);
-    f.release("legacy-benchmark");
-    expect((await benchmark.result).exitCode).toBe(0);
-    await f.started("fifth");
-    f.release("fifth");
-    expect((await fifth.result).exitCode).toBe(0);
   } finally {
     await f.clean();
   }
 });
-
 test("the last new release restores a still-running legacy holder's original lock", async () => {
   const f = fixture(true);
   try {
@@ -1170,47 +1301,6 @@ test("the last new release restores a still-running legacy holder's original loc
   }
 });
 
-test("legacy and new benchmarks each exclude the other protocol's jobs", async () => {
-  const f = fixture(true);
-  try {
-    const legacy = f.start("old-benchmark", true, 30, 0, false, undefined, "benchmark", modulePath);
-    await f.started("old-benchmark");
-    const originalTarget = readlinkSync(f.legacyLockPath);
-    expect((await concurrentStatus(f.directory, f.legacyLockPath)).legacyBlocked).toBe(true);
-    const check = f.start("check");
-    await f.queued(1);
-    expect(readlinkSync(f.legacyLockPath)).toBe(originalTarget);
-    expect(existsSync(join(f.root, "check-started"))).toBe(false);
-    f.release("old-benchmark");
-    await legacy.result;
-    await f.started("check");
-    const benchmark = f.start("new-benchmark", true, 30, 0, false, undefined, "benchmark");
-    await f.queued(2);
-    f.release("check");
-    await check.result;
-    await f.started("new-benchmark");
-    const oldCheck = f.start("old-check", true, 30, 0, false, undefined, "checks", modulePath);
-    await f.queued(3);
-    const newCheck = f.start("new-check");
-    await f.queued(4);
-    expect(
-      (await concurrentStatus(f.directory, f.legacyLockPath)).active.map((job) => job.owner),
-    ).toEqual(["new-benchmark"]);
-    expect(existsSync(join(f.root, "old-check-started"))).toBe(false);
-    expect(existsSync(join(f.root, "new-check-started"))).toBe(false);
-    f.release("new-benchmark");
-    await benchmark.result;
-    await Promise.all([f.started("old-check"), f.started("new-check")]);
-    f.release("old-check");
-    f.release("new-check");
-    expect(
-      (await Promise.all([oldCheck.result, newCheck.result])).every((r) => r.exitCode === 0),
-    ).toBe(true);
-  } finally {
-    await f.clean();
-  }
-});
-
 test("unknown mkdir ownership is never adopted by a concurrent client", async () => {
   const f = fixture(true);
   try {
@@ -1229,7 +1319,7 @@ test("loaded concurrent-v1 waiters keep their tickets without blocking shared-ca
   v1.class = "checks";
   claimConcurrentCapacity(host, v1, 0, true);
   const v2 = Object.assign(ticket("v2", "new-requester"), {
-    clientVersion: "concurrent-v3" as const,
+    clientVersion: CURRENT_HEAVY_CLIENT,
   });
   v2.class = "checks";
   const legacy = ticket("legacy", "legacy");
@@ -1278,13 +1368,13 @@ test("shared capacity never overtakes a requester's blocked concurrent-v1 head t
   const v1 = ticket("v1", "same");
   v1.class = "checks";
   claimConcurrentCapacity(host, v1, 0, true);
-  const later = Object.assign(ticket("later", "same"), { clientVersion: "concurrent-v3" as const });
+  const later = Object.assign(ticket("later", "same"), { clientVersion: CURRENT_HEAVY_CLIENT });
   later.class = "checks";
   const legacy = ticket("legacy", "legacy");
   legacy.class = "checks";
   expect(claimConcurrentCapacity(host, later, 1, false, [legacy])).toBe(false);
   const other = Object.assign(ticket("other", "other"), {
-    clientVersion: "concurrent-v3" as const,
+    clientVersion: CURRENT_HEAVY_CLIENT,
   });
   other.class = "checks";
   expect(claimConcurrentCapacity(host, other, 2, false, [legacy])).toBe(true);
@@ -1295,22 +1385,42 @@ test("shared capacity never overtakes a requester's blocked concurrent-v1 head t
   expect(claimConcurrentCapacity(host, later, 4, false)).toBe(true);
 });
 
-// Frozen pre-backfill clients intentionally retain their old selector and guard
-// behavior. Only import locations change; they cannot accidentally use the fix.
-function frozenConcurrentClient(root: string, version: 1 | 2 = 2): string {
+// v1/v2 retain their frozen selector and guard; v3 retains its frozen turn
+// selector with the unchanged admission wrapper. None can use the fixed selector.
+function frozenConcurrentClient(root: string, version: 1 | 2 | 3 = 2): string {
   const lib = fileURLToPath(new URL("./", import.meta.url));
   const capacityPath = join(root, "old-capacity.ts");
+  const turnsPath = join(root, "old-turns.ts");
   const resolve = (source: string) =>
     source.replace(
       /from "\.\/([^"]+)"/g,
       (_match, name) =>
-        `from ${JSON.stringify(name === "concurrent-capacity" ? capacityPath : join(lib, name))}`,
+        `from ${JSON.stringify(name === "concurrent-capacity" ? capacityPath : name === "concurrent-turns" ? turnsPath : join(lib, name))}`,
     );
   writeFileSync(
     capacityPath,
-    resolve(readFileSync(join(lib, "fixtures/concurrent-capacity-v2.ts.txt"), "utf8")),
+    resolve(
+      readFileSync(
+        join(
+          lib,
+          version === 3 ? "concurrent-capacity.ts" : "fixtures/concurrent-capacity-v2.ts.txt",
+        ),
+        "utf8",
+      ),
+    ).replace(/HEAVY_CAPACITY = \d+/, "HEAVY_CAPACITY = 3"),
   );
-  let source = readFileSync(join(lib, "fixtures/heavy-run-concurrent-v2.ts.txt"), "utf8");
+  if (version === 3)
+    writeFileSync(
+      turnsPath,
+      resolve(readFileSync(join(lib, "fixtures/concurrent-turns-v3.ts.txt"), "utf8")),
+    );
+  let source = readFileSync(
+    join(
+      lib,
+      version === 3 ? "heavy-run-concurrent.ts" : "fixtures/heavy-run-concurrent-v2.ts.txt",
+    ),
+    "utf8",
+  );
   if (version === 1) {
     // On the concurrent-only lane, v1 has the same selector, no client marker,
     // and recognizes only the v1 target. Serial-lane behavior is tested above.
@@ -1338,6 +1448,8 @@ test("an older checks head keeps a free slot while other requester heads backfil
   const host = emptyConcurrentCapacity();
   const active = currentTicket("active");
   expect(claimConcurrentCapacity(host, active, 0, false)).toBe(true);
+  for (const id of Array.from({ length: HEAVY_CAPACITY - 3 }, (_, i) => `extra${i + 1}`))
+    expect(claimConcurrentCapacity(host, currentTicket(id), 0, false)).toBe(true);
   const old = ticket("old", "old");
   old.class = "checks";
   const a = currentTicket("a"),
@@ -1347,110 +1459,10 @@ test("an older checks head keeps a free slot while other requester heads backfil
   expect(host.requesters[0]).toBe("a");
   expect(claimConcurrentCapacity(host, a, 2, false)).toBe(true);
   expect(claimConcurrentCapacity(host, b, 2, false)).toBe(false);
-  expect(host.active).toHaveLength(2);
+  expect(host.active).toHaveLength(HEAVY_CAPACITY - 1);
   expect(claimConcurrentCapacity(host, old, 2, false)).toBe(true);
-  expect(host.active).toHaveLength(3);
+  expect(host.active).toHaveLength(HEAVY_CAPACITY);
   expect(host.waiting.map((job) => job.reservationId)).toEqual(["b"]);
-});
-
-test("an older benchmark permits repeated backfill only until its original blockers finish", () => {
-  const host = emptyConcurrentCapacity();
-  const anchor = currentTicket("anchor");
-  expect(claimConcurrentCapacity(host, anchor, 0, false)).toBe(true);
-  const benchmark = ticket("old-benchmark", "old");
-  claimConcurrentCapacity(host, benchmark, 1, true);
-  const a = currentTicket("a"),
-    b = currentTicket("b"),
-    c = currentTicket("c"),
-    d = currentTicket("d");
-  for (const job of [a, b, c, d]) claimConcurrentCapacity(host, job, 1, true);
-  expect(claimConcurrentCapacity(host, a, 2, false)).toBe(true);
-  expect(claimConcurrentCapacity(host, b, 2, false)).toBe(true);
-  releaseConcurrentCapacity(host, "a");
-  expect(claimConcurrentCapacity(host, c, 3, false)).toBe(true);
-  expect(host.backfill?.anchors).toEqual(["anchor"]);
-  releaseConcurrentCapacity(host, "anchor");
-  expect(claimConcurrentCapacity(host, d, 4, false)).toBe(false);
-  releaseConcurrentCapacity(host, "b");
-  releaseConcurrentCapacity(host, "c");
-  expect(claimConcurrentCapacity(host, benchmark, 5, false)).toBe(true);
-  expect(claimConcurrentCapacity(host, d, 6, false)).toBe(false);
-  releaseConcurrentCapacity(host, benchmark.reservationId);
-  expect(claimConcurrentCapacity(host, d, 7, false)).toBe(true);
-});
-
-test("backfill preserves requester FIFO and rotation, and reaping an anchor ends refill", () => {
-  const host = emptyConcurrentCapacity();
-  const anchor = currentTicket("anchor");
-  anchor.holder.pid = 101;
-  claimConcurrentCapacity(host, anchor, 0, false);
-  claimConcurrentCapacity(host, ticket("benchmark", "old"), 1, true);
-  const a1 = currentTicket("a1", "A"),
-    a2 = currentTicket("a2", "A"),
-    b = currentTicket("b", "B");
-  for (const job of [a1, a2, b]) claimConcurrentCapacity(host, job, 1, true);
-  expect(claimConcurrentCapacity(host, a2, 2, false)).toBe(false);
-  expect(claimConcurrentCapacity(host, a1, 2, false)).toBe(true);
-  releaseConcurrentCapacity(host, "a1");
-  expect(claimConcurrentCapacity(host, a2, 3, false)).toBe(false);
-  expect(claimConcurrentCapacity(host, b, 3, false)).toBe(true);
-  reapConcurrentCapacity(host, [{ ...b.holder, pgid: b.holder.pid, state: "S" }], []);
-  expect(claimConcurrentCapacity(host, a2, 4, false)).toBe(false);
-  expect(host.backfill?.anchors).toEqual(["anchor"]);
-});
-
-test("a singleton dispatcher fills and refills slots for already-loaded strict v2 clients, then yields to their benchmark", async () => {
-  const f = fixture(true);
-  let dispatcher: ChildProcess | undefined;
-  try {
-    const old = frozenConcurrentClient(f.root);
-    const anchor = f.start("anchor", true, 30, 0, false, undefined, "checks", old);
-    await f.started("anchor");
-    const benchmark = f.start("old-benchmark", true, 30, 0, false, undefined, "benchmark", old);
-    await f.queued(1);
-    const a = f.start("a", true, 30, 0, false, undefined, "checks", old),
-      b = f.start("b", true, 30, 0, false, undefined, "checks", old);
-    await f.queued(3);
-    expect(existsSync(join(f.root, "a-started"))).toBe(false);
-    dispatcher = startCompatibilityDispatcher(f.directory, f.legacyLockPath);
-    await Promise.all([f.started("a"), f.started("b")]);
-    const duplicate = startCompatibilityDispatcher(f.directory, f.legacyLockPath);
-    await new Promise<void>((resolve) => duplicate.once("close", () => resolve()));
-    expect(f.state().host.active).toHaveLength(3);
-    f.release("a");
-    await a.result;
-    const c = f.start("c", true, 30, 0, false, undefined, "checks", old);
-    await f.started("c");
-    expect(f.state().host.active).toHaveLength(3);
-    f.release("anchor");
-    await anchor.result;
-    await dispatchCompatibilityQueue(f.directory, f.legacyLockPath);
-    const d = f.start("d", true, 30, 0, false, undefined, "checks", old);
-    await f.queuedOwner("d");
-    expect(existsSync(join(f.root, "d-started"))).toBe(false);
-    f.release("b");
-    await b.result;
-    f.release("c");
-    await c.result;
-    await f.started("old-benchmark");
-    expect(f.state().host.active.map((job: HostJob) => job.owner)).toEqual(["old-benchmark"]);
-    expect(existsSync(join(f.root, "d-started"))).toBe(false);
-    f.release("old-benchmark");
-    await benchmark.result;
-    await f.started("d");
-    f.release("d");
-    expect((await d.result).exitCode).toBe(0);
-    if (dispatcher.exitCode === null)
-      await new Promise<void>((resolve) => dispatcher!.once("close", () => resolve()));
-    expect(dispatcher.exitCode).toBe(0);
-  } finally {
-    if (dispatcher && dispatcher.exitCode === null) {
-      const closed = new Promise<void>((resolve) => dispatcher!.once("close", () => resolve()));
-      dispatcher.kill();
-      await closed;
-    }
-    await f.clean();
-  }
 });
 
 test("v2 actives do not make a v1 checks head exclusive or block compatible waiters", async () => {
@@ -1491,3 +1503,269 @@ test("v2 actives do not make a v1 checks head exclusive or block compatible wait
     await f.clean();
   }
 });
+
+test("express history uses the last ten exact argv runs in the canonical project", () => {
+  const run = (
+    ranSeconds: number,
+    overrides: Partial<HeavyHistoryEntry> = {},
+  ): HeavyHistoryEntry => ({
+    finishedAt: "2026-10-16T08:00:00Z",
+    owner: "test",
+    class: "checks",
+    cwd: "/tree",
+    project: "/repo/.git",
+    command: "mise run tsc",
+    argv: ["mise", "run", "tsc"],
+    queuedAt: "2026-10-16T07:59:58Z",
+    acquiredAt: "2026-10-16T07:59:58Z",
+    waitedSeconds: 0,
+    ranSeconds,
+    status: "succeeded",
+    childExitCode: 0,
+    ...overrides,
+  });
+  const argv = ["mise", "run", "tsc"];
+  const quick = Array.from({ length: 10 }, () => run(1));
+  const qualifies = (history: HeavyHistoryEntry[], className: HeavyClass = "checks") =>
+    expressHeavyCommand(history, argv, className, "/repo/.git");
+  expect(qualifies(quick)).toBe(true);
+  expect(qualifies(quick.slice(1))).toBe(false);
+  expect(qualifies(quick, "build")).toBe(false);
+  expect(qualifies(quick, "benchmark")).toBe(false);
+  expect(qualifies(quick.map((entry) => ({ ...entry, project: "/other/.git" })))).toBe(false);
+  expect(qualifies(quick.map((entry) => ({ ...entry, argv: ["mise run", "tsc"] })))).toBe(false);
+  expect(qualifies(quick.map((entry) => ({ ...entry, reservationMode: "deferred" })))).toBe(false);
+  expect(qualifies(quick.map((entry) => ({ ...entry, acquiredAt: null })))).toBe(false);
+  expect(qualifies(Array.from({ length: 10 }, () => run(10)))).toBe(false);
+  expect(qualifies([...quick.slice(2), run(30), run(30)])).toBe(false);
+  const laterSlow = [
+    run(60, { finishedAt: "2026-10-16T09:00:00Z", reservationMode: "express" }),
+    run(60, { finishedAt: "2026-10-16T09:00:01Z", reservationMode: "express" }),
+  ];
+  expect(qualifies([...quick, ...laterSlow])).toBe(false);
+  expect(
+    qualifies([
+      ...laterSlow,
+      ...quick.map((entry) => ({
+        ...entry,
+        finishedAt: "2026-10-16T10:00:00Z",
+        reservationMode: "express" as const,
+      })),
+    ]),
+  ).toBe(true);
+  expect(qualifies(quick.map((entry) => ({ ...entry, argv: undefined })))).toBe(true);
+  expect(
+    qualifies(quick.map((entry) => ({ ...entry, argv: undefined, command: "x".repeat(300) }))),
+  ).toBe(false);
+});
+
+test("project identity follows shared Git storage across worktrees and subdirectories", () => {
+  const root = mkdtempSync(join(tmpdir(), "heavy-project-test-"));
+  try {
+    const main = join(root, "main");
+    const tree = join(root, "tree");
+    mkdirSync(join(main, ".git", "worktrees", "tree"), { recursive: true });
+    mkdirSync(join(tree, "src"), { recursive: true });
+    writeFileSync(join(tree, ".git"), `gitdir: ${main}/.git/worktrees/tree\n`);
+    writeFileSync(join(main, ".git", "worktrees", "tree", "commondir"), "../..\n");
+    expect(heavyProject(join(tree, "src"))).toBe(heavyProject(main));
+    expect(heavyProject(join(root, "absent"))).toBe(null);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("express runs bypass occupied capacity and share the host with benchmarks", async () => {
+  const f = fixture(true);
+  try {
+    const source = f.command("express");
+    writeFileSync(
+      heavyHistoryPath(f.directory),
+      Array.from({ length: 10 }, () =>
+        JSON.stringify({
+          finishedAt: "2026-10-16T08:00:00Z",
+          owner: "history",
+          class: "checks",
+          cwd: process.cwd(),
+          project: heavyProject(process.cwd()),
+          argv: [process.execPath, "-e", source],
+          command: "display only",
+          queuedAt: "2026-10-16T07:59:58Z",
+          acquiredAt: "2026-10-16T07:59:58Z",
+          waitedSeconds: 0,
+          ranSeconds: 1,
+          status: "succeeded",
+          childExitCode: 0,
+        }),
+      ).join("\n") + "\n",
+    );
+    const owners = Array.from({ length: HEAVY_CAPACITY }, (_, i) => `slot${i + 1}`);
+    const occupied = [f.start(owners[0])];
+    await f.started(owners[0]);
+    const clearSlots = await f.occupySlots(owners[0], owners.slice(1));
+    const express = f.start("express", true, 30, 0, false, source);
+    await f.started("express");
+    const status = await concurrentStatus(f.directory, f.legacyLockPath);
+    expect(status.active).toHaveLength(HEAVY_CAPACITY + 1);
+    expect(status.express.active).toBe(1);
+    expect(status.active.find((job) => job.owner === "express")?.reservationMode).toBe("express");
+    const benchmark = f.start("benchmark", true, 30, 0, false, undefined, "benchmark");
+    await f.queuedOwner("benchmark");
+    await clearSlots();
+    f.release(owners[0]);
+    await Promise.all(occupied.map((run) => run.result));
+    await f.started("benchmark");
+    expect(
+      f
+        .state()
+        .host.active.map((job: HostJob) => job.owner)
+        .sort(),
+    ).toEqual(["benchmark", "express"]);
+    f.release("express");
+    expect((await express.result).reservationMode).toBe("express");
+    await f.started("benchmark");
+    const blocked = f.start("express", true, 30, 0, false, source);
+    await f.started("express");
+    expect(
+      f
+        .state()
+        .host.active.map((job: HostJob) => job.owner)
+        .sort(),
+    ).toEqual(["benchmark", "express"]);
+    f.release("benchmark");
+    await benchmark.result;
+    await f.started("express");
+    f.release("express");
+    expect((await blocked.result).reservationMode).toBe("express");
+    const history = readHeavyHistory(heavyHistoryPath(f.directory));
+    expect(history.filter((run) => run.reservationMode === "express")).toHaveLength(2);
+  } finally {
+    await f.clean();
+  }
+});
+
+test("express leases consume no slots and benchmarks do not block express admission", () => {
+  const host = emptyConcurrentCapacity();
+  const check = (
+    id: string,
+    express = false,
+  ): HostJob & { clientVersion: typeof CURRENT_HEAVY_CLIENT } => ({
+    ...ticket(id, id),
+    class: "checks",
+    clientVersion: CURRENT_HEAVY_CLIENT,
+    ...(express ? { reservationMode: "express" } : {}),
+  });
+  for (const id of ["express1", "express2", "express3"]) {
+    expect(claimConcurrentCapacity(host, check(id, true), 0, false)).toBe(true);
+  }
+  for (const id of Array.from({ length: HEAVY_CAPACITY }, (_, i) => `slot${i + 1}`)) {
+    expect(claimConcurrentCapacity(host, check(id), 1, false)).toBe(true);
+  }
+  expect(claimConcurrentCapacity(host, check("overflow"), 2, false)).toBe(false);
+  const bench = { ...ticket("benchmark", "benchmark"), clientVersion: CURRENT_HEAVY_CLIENT };
+  expect(claimConcurrentCapacity(host, bench, 2, false)).toBe(false);
+  expect(claimConcurrentCapacity(host, check("later-express", true), 3, false)).toBe(true);
+  for (const job of host.active) releaseConcurrentCapacity(host, job.reservationId);
+  releaseConcurrentCapacity(host, "overflow");
+  expect(claimConcurrentCapacity(host, bench, 4, false)).toBe(true);
+  expect(claimConcurrentCapacity(host, check("later-express", true), 5, false)).toBe(true);
+  releaseConcurrentCapacity(host, "benchmark");
+  expect(claimConcurrentCapacity(host, check("later-express", true), 6, false)).toBe(true);
+  expect(
+    claimConcurrentCapacity(emptyConcurrentCapacity(), check("legacy-blocked", true), 0, true, [
+      ticket("legacy-benchmark"),
+    ]),
+  ).toBe(false);
+});
+
+test("runtime cap kills the process group with a distinct actionable receipt", async () => {
+  const f = fixture();
+  try {
+    const run = f.start(
+      "capped",
+      true,
+      30,
+      0,
+      false,
+      f.command("capped"),
+      "checks",
+      modulePath,
+      true,
+    );
+    await f.started("capped");
+    run.processHandle.stdin!.end("expire");
+    const receipt = await run.result;
+    expect(receipt).toMatchObject({
+      status: "timed-out",
+      exitCode: 124,
+      runtimeLimitSeconds: 90,
+      childSignal: "SIGKILL",
+    });
+    expect(receipt.error).toContain(receipt.argv.join(" "));
+    expect(receipt.error).toContain("ran over 90s");
+    expect(receipt.error).toContain("elapsed) — make it faster");
+    const { processSnapshot } = await import("./process-identity");
+    expect(
+      (await processSnapshot()).filter(
+        (row) => row.pgid === receipt.processGroup!.pid && !row.state.startsWith("Z"),
+      ),
+    ).toEqual([]);
+  } finally {
+    await f.clean();
+  }
+});
+
+test("build jobs have no runtime deadline", async () => {
+  const f = fixture(true);
+  try {
+    expect(
+      await f.start("build-exempt", false, 30, 0, false, f.command("build-exempt", false), "build")
+        .result,
+    ).toMatchObject({ exitCode: 0, runtimeLimitSeconds: null });
+  } finally {
+    await f.clean();
+  }
+});
+
+for (const key of ["deferredCommands", "uncappedCommands"] as const) {
+  test(`${key} runners propagate uncapped execution to nested reserved steps`, async () => {
+    const f = fixture(true);
+    const currentModule = fileURLToPath(new URL("./heavy-run-concurrent.ts", import.meta.url));
+    const packagePath = join(f.root, "package.json");
+    try {
+      writeFileSync(
+        packagePath,
+        JSON.stringify({ heavyRun: { [key]: [["mise", "run", "signoff"]] } }),
+      );
+      expect(uncappedHeavyCommand(["mise", "run", "signoff", "--fresh"], f.root)).toBe(true);
+      expect(uncappedHeavyCommand(["mise", "run", "check"], f.root)).toBe(false);
+      writeFileSync(packagePath, JSON.stringify({ heavyRun: { [key]: [[]] } }));
+      expect(() => uncappedHeavyCommand(["true"], f.root)).toThrow(`heavyRun.${key}`);
+      const source = `
+      const {runHeavyCommand} = await import(${JSON.stringify(currentModule)});
+      const result = await runHeavyCommand({...${JSON.stringify({ class: "benchmark", waitSeconds: 5, owner: "step", directory: f.directory, legacyLockPath: f.legacyLockPath })}, argv:[process.execPath,"-e","if(process.env.HEAVY_RUN_UNCAPPED !== '1') process.exit(9)"], readPressure:()=>"normal", readLoad:()=>0, scheduleRuntimeDeadline:()=>{throw new Error("Nested step must not have a deadline")}});
+      if(result.runtimeLimitSeconds !== null || result.exitCode !== 0) throw new Error(JSON.stringify(result));
+    `;
+      writeFileSync(
+        packagePath,
+        JSON.stringify({ heavyRun: { [key]: [[process.execPath, "-e", source]] } }),
+      );
+      expect(
+        await f.start(
+          "declared",
+          false,
+          30,
+          0,
+          true,
+          source,
+          "checks",
+          currentModule,
+          false,
+          f.root,
+        ).result,
+      ).toMatchObject({ exitCode: 0, runtimeLimitSeconds: null });
+    } finally {
+      await f.clean();
+    }
+  });
+}

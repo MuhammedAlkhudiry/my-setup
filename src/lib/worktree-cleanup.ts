@@ -17,6 +17,7 @@ import { execa } from "execa";
 import { z } from "zod";
 
 import { ACTIVE_PROJECTS, type ActiveProject } from "../../config/active-projects";
+import { timedCommand } from "./timed-command";
 
 export const WORKTREE_SIZE_WARNING_BYTES = 20 * 1024 ** 3;
 export const WORKTREE_CLEANUP_GRACE_MS = 4 * 60 * 60 * 1000;
@@ -226,6 +227,7 @@ export async function cleanupFilesChangedRecently(
   path: string,
   now: number,
   reference?: string,
+  idleMs = WORKTREE_CLEANUP_GRACE_MS,
 ): Promise<boolean> {
   const directory = reference ? null : await mkdtemp(join(tmpdir(), "worktree-grace-"));
   const cutoff = reference ?? join(directory!, "cutoff");
@@ -233,7 +235,7 @@ export async function cleanupFilesChangedRecently(
   try {
     if (!reference) {
       await writeFile(cutoff, "");
-      const time = new Date(now - WORKTREE_CLEANUP_GRACE_MS);
+      const time = new Date(now - idleMs);
       await utimes(cutoff, time, time);
     }
     return Boolean(
@@ -245,10 +247,9 @@ export async function cleanupFilesChangedRecently(
 }
 
 async function run(command: string, args: string[], cwd?: string, input?: string) {
-  const result = await execa(command, args, {
+  const result = await timedCommand(command, args, {
     cwd,
     input,
-    reject: false,
     timeout: 120_000,
     maxBuffer: 64 * 1024 ** 2,
     env: { GIT_OPTIONAL_LOCKS: "0", GIT_NO_REPLACE_OBJECTS: "1", GIT_TERMINAL_PROMPT: "0" },
@@ -571,8 +572,7 @@ const defaultServices: CleanupServices = {
   readThreads: readCleanupThreads,
   async readOpenFiles() {
     // All visible processes, including cwd and memory-mapped files. A diagnostic means visibility is incomplete.
-    const result = await execa("lsof", ["-nP", "-Fpn0"], {
-      reject: false,
+    const result = await timedCommand("lsof", ["-nP", "-Fpn0"], {
       timeout: 30_000,
       maxBuffer: 64 * 1024 ** 2,
     });

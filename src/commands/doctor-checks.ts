@@ -21,6 +21,7 @@ import { execaSync } from "execa";
 import { ACTIVE_PROJECTS, SHARED_VERIFICATION } from "../../config/active-projects";
 import { CLAUDE_POOL } from "../../config/claude-pool";
 import { MODELS } from "../../config/models";
+import { createOpencodeCliConfig, mergeOpencodeConfig } from "../../config/opencode";
 import { MAC_WATCHER, MEMCAP_LAUNCH_AGENT_LABEL } from "../../config/mac-watcher";
 import { claudePoolPaths, findLegacyClaudeFiles } from "../lib/claude-pool";
 import {
@@ -123,15 +124,44 @@ if (staleRules.length > 0) {
 
 const rtkPlugin = join(HOME, ".config/opencode/plugins/rtk.ts");
 let rtkPluginValid = false;
+if (PROFILE.opencode) {
+  const version = execaSync("opencode", ["--version"], { reject: false, timeout: 10_000 });
+  if (version.exitCode !== 0 || !/\bv2\./.test(version.stdout)) {
+    findings.push({
+      level: "required",
+      label: "OpenCode version",
+      detail: "OpenCode 2 is required; run opencode upgrade --major",
+    });
+  }
+  try {
+    const config = JSON.parse(readFileSync(join(HOME, ".config/opencode/opencode.json"), "utf-8"));
+    const cli = JSON.parse(readFileSync(join(HOME, ".config/opencode/cli.json"), "utf-8"));
+    const expectedCli = createOpencodeCliConfig();
+    if (
+      JSON.stringify(config) !== JSON.stringify(mergeOpencodeConfig(config, PROFILE, HOME)) ||
+      cli.$schema !== expectedCli.$schema ||
+      Object.entries(expectedCli.keybinds).some(([key, value]) => cli.keybinds?.[key] !== value)
+    ) {
+      throw new Error("managed settings differ");
+    }
+  } catch {
+    findings.push({
+      level: "required",
+      label: "OpenCode config",
+      detail: "managed server or CLI settings are missing or stale; run mise run install",
+    });
+  }
+}
 if (PROFILE.opencode && existsSync(rtkPlugin)) {
   try {
-    const { RtkOpenCodePlugin } = await import(rtkPlugin);
-    const hooks =
-      typeof RtkOpenCodePlugin === "function"
-        ? await RtkOpenCodePlugin({ $: Bun.$ })
-        : await RtkOpenCodePlugin?.server?.();
-
-    rtkPluginValid = typeof hooks?.["tool.execute.before"] === "function";
+    const { default: plugin } = await import(rtkPlugin);
+    await plugin.setup({
+      tool: {
+        hook: async (name: string, callback: unknown) => {
+          rtkPluginValid = name === "execute.before" && typeof callback === "function";
+        },
+      },
+    });
   } catch {
     // A plugin that cannot load or register its hook is unusable.
   }

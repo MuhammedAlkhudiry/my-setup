@@ -1,7 +1,7 @@
-import { execa } from "execa";
 import { z } from "zod";
 
 import { MAC_WATCHER } from "../../config/mac-watcher";
+import { timedCommand } from "./timed-command";
 
 export interface ProcessRow {
   pid: number;
@@ -54,7 +54,7 @@ export function parsePsOutput(output: string): ProcessRow[] {
 }
 
 export async function listProcesses(): Promise<ProcessRow[]> {
-  const result = await execa("ps", ["-axo", PS_FORMAT], { reject: false, timeout: 20_000 });
+  const result = await timedCommand("ps", ["-axo", PS_FORMAT], { timeout: 20_000 });
   return parsePsOutput(result.stdout);
 }
 

@@ -1,13 +1,4 @@
-import {
-  copyFile,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  realpath,
-  stat,
-  writeFile,
-} from "node:fs/promises";
+import { copyFile, mkdtemp, realpath, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
@@ -17,40 +8,6 @@ import { chromium, type Page } from "playwright-core";
 import { assertPortable, collectFiles, slugify } from "./share-html";
 
 const ASSETS = resolve(import.meta.dir, "../../content/skills/workflow/html-artifacts/assets");
-const KIT_DIR = "mockup-kit";
-const KINDS = ["options", "plan-review", "blank"] as const;
-type Kind = (typeof KINDS)[number];
-
-const BLANK = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TITLE</title>
-<!-- THEME: paste assets/theme.html here -->
-<!-- KIT -->
-</head>
-<body>
-<main class="page"></main>
-</body>
-</html>
-`;
-
-const EXAMPLE_FRAGMENT = `<!-- One option's mockup. With a project kit, draw real screens with its frame classes; see mockup-kit/README.md in the project. -->
-<div class="card card-body">Option mockup</div>
-`;
-
-interface KitManifest {
-  css: string[];
-  fonts?: { dir: string; files: string[] };
-  images?: { dir: string; width: number };
-}
-
-interface Kit {
-  root: string;
-  manifest: KitManifest;
-}
-
 async function exists(path: string): Promise<boolean> {
   return stat(path).then(
     () => true,
@@ -63,13 +20,6 @@ async function projectRoot(from: string): Promise<string | null> {
   return result.exitCode === 0 ? result.stdout.trim() : null;
 }
 
-async function findKit(root: string | null): Promise<Kit | null> {
-  if (!root) return null;
-  const path = join(root, KIT_DIR, "kit.json");
-  if (!(await exists(path))) return null;
-  return { root, manifest: JSON.parse(await readFile(path, "utf8")) as KitManifest };
-}
-
 // Folder names follow `<project>-<topic>.XXXX`; a repo named `harium-project` is the `harium` project. A worktree's own folder name
 // says nothing about the project, so read the name from the shared git directory.
 async function projectName(root: string | null): Promise<string> {
@@ -80,111 +30,12 @@ async function projectName(root: string | null): Promise<string> {
   return slugify(basename(dirname(result.stdout.trim())).replace(/-project$/, ""));
 }
 
-async function addImages(folder: string, kit: Kit, names: string[]): Promise<void> {
-  const images = kit.manifest.images;
-  if (!images) throw new Error(`${KIT_DIR}/kit.json has no images entry`);
-
-  const sourceDir = join(kit.root, images.dir);
-  const stem = (file: string) => file.replace(/\.[^.]+$/, "");
-  const available = (await readdir(sourceDir)).filter((file) => /\.(webp|png|jpe?g)$/i.test(file));
-  await mkdir(join(folder, "kit", "images"), { recursive: true });
-
-  for (const name of names) {
-    const source = available.find((file) => stem(file) === name);
-    if (!source) {
-      throw new Error(`No image named "${name}". Available: ${available.map(stem).join(", ")}`);
-    }
-    await execa("cwebp", [
-      "-quiet",
-      "-resize",
-      String(images.width),
-      "0",
-      "-q",
-      "82",
-      join(sourceDir, source),
-      "-o",
-      join(folder, "kit", "images", `${name}.webp`),
-    ]);
-  }
-}
-
-async function copyKit(folder: string, kit: Kit): Promise<void> {
-  const target = join(folder, "kit");
-  await mkdir(join(target, "fonts"), { recursive: true });
-
-  for (const css of kit.manifest.css)
-    await copyFile(join(kit.root, KIT_DIR, css), join(target, basename(css)));
-
-  const { dir, files = [] } = kit.manifest.fonts ?? { dir: "" };
-  for (const file of files) await copyFile(join(kit.root, dir, file), join(target, "fonts", file));
-}
-
-function renderTemplate(template: string, theme: string, kitCss: string[]): string {
-  const kitLinks = kitCss
-    .map((css) => `<link rel="stylesheet" href="kit/${basename(css)}">`)
-    .join("\n");
-  return template
-    .replace("<!-- THEME: paste assets/theme.html here -->", theme.trim())
-    .replace("<!-- KIT -->", kitLinks);
-}
-
-export async function createArtifact(
-  kind: string,
-  topic: string,
-  options: { images?: string; project?: string },
-): Promise<void> {
-  if (!KINDS.includes(kind as Kind))
-    throw new Error(`Unknown kind "${kind}". Use one of: ${KINDS.join(", ")}`);
-
-  const root = await projectRoot(resolve(options.project ?? process.cwd()));
-  const kit = await findKit(root);
+export async function createArtifact(topic: string): Promise<void> {
+  const root = await projectRoot(process.cwd());
   const folder = await mkdtemp(join(tmpdir(), `${await projectName(root)}-${slugify(topic)}.`));
+  await copyFile(join(ASSETS, "feedback.js"), join(folder, "feedback.js"));
 
-  const theme = await readFile(join(ASSETS, "theme.html"), "utf8");
-  const template = kind === "blank" ? BLANK : await readFile(join(ASSETS, `${kind}.html`), "utf8");
-  await writeFile(
-    join(folder, "index.html"),
-    renderTemplate(template, theme, kit?.manifest.css ?? []),
-  );
-  if (kind !== "blank") await copyFile(join(ASSETS, "feedback.js"), join(folder, "feedback.js"));
-
-  if (kind === "options") {
-    await mkdir(join(folder, "options"));
-    await writeFile(join(folder, "options", "O1.html"), EXAMPLE_FRAGMENT);
-    await writeFile(join(folder, "options", "O2.html"), EXAMPLE_FRAGMENT);
-  }
-
-  if (kit) await copyKit(folder, kit);
-  const images = (options.images ?? "")
-    .split(",")
-    .map((name) => name.trim())
-    .filter(Boolean);
-  if (images.length) {
-    if (!kit) throw new Error(`--images needs a ${KIT_DIR}/kit.json in the project`);
-    await addImages(folder, kit, images);
-  }
-
-  if (process.argv.includes("--json")) {
-    console.log(JSON.stringify({ folder, kit: kit ? join(kit.root, KIT_DIR, "README.md") : null }));
-    return;
-  }
-  console.log(folder);
-  console.log(kit ? `Kit: ${join(kit.root, KIT_DIR, "README.md")}` : "Kit: none in this project");
-}
-
-export async function addImagesToArtifact(
-  folder: string,
-  names: string[],
-  options: { project?: string },
-): Promise<void> {
-  const kit = await findKit(await projectRoot(resolve(options.project ?? process.cwd())));
-  if (!kit)
-    throw new Error(
-      `No ${KIT_DIR}/kit.json in this project; run from the project or pass --project`,
-    );
-  await addImages(resolve(folder), kit, names);
-  if (process.argv.includes("--json"))
-    console.log(JSON.stringify({ folder: resolve(folder), images: names }));
+  console.log(process.argv.includes("--json") ? JSON.stringify({ folder }) : folder);
 }
 
 // --- check ---
@@ -194,7 +45,6 @@ interface Shot {
   width: number;
   height: number;
   scheme: "light" | "dark";
-  hash?: string;
 }
 
 async function layoutIssues(page: Page, shot: Shot): Promise<string[]> {
@@ -247,22 +97,11 @@ export async function checkArtifact(folderArg: string): Promise<void> {
   });
 
   const out = await mkdtemp(join(tmpdir(), `${basename(folder)}-check.`));
-  const html = await readFile(join(folder, "index.html"), "utf8");
-  const optionIds = [
-    ...(html.match(/<script id="options"[^>]*>([\s\S]*?)<\/script>/)?.[1] ?? "").matchAll(
-      /"id":\s*"([^"]+)"/g,
-    ),
-  ].map((m) => m[1]);
-
   const shots: Shot[] = [
     { name: "desktop", width: 1440, height: 900, scheme: "light" },
     { name: "mobile", width: 390, height: 844, scheme: "light" },
     { name: "mobile-dark", width: 390, height: 844, scheme: "dark" },
   ];
-  // Options pages show one option at a time, so each option after the first needs its own desktop shot.
-  for (const id of optionIds.slice(1)) {
-    shots.push({ name: `desktop-${id}`, width: 1440, height: 900, scheme: "light", hash: id });
-  }
 
   const browser = await chromium.launch({ channel: "chrome" });
   const problems: string[] = [];
@@ -291,7 +130,7 @@ export async function checkArtifact(folderArg: string): Promise<void> {
           errors.push(`${response.status()} ${path}`);
       });
 
-      await page.goto(`http://127.0.0.1:${server.port}/${shot.hash ? `#${shot.hash}` : ""}`, {
+      await page.goto(`http://127.0.0.1:${server.port}/`, {
         waitUntil: "networkidle",
       });
       await page.evaluate(() => document.fonts.ready);

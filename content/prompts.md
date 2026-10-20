@@ -1,25 +1,23 @@
 # Prompts
 
-Occasional, high-leverage prompts that work on any product or codebase. Replace `[brackets]` before sending.
-
 ## Perspective shifts
 
 **Invisible work**
 
 ```text
-What does the user still do by hand, remember, or do outside the app that the product could do for them?
+What must users do by hand, remember, or leave the app for that the product could handle?
 ```
 
 **Angry exit**
 
 ```text
-Write the cancellation email our most frustrated power user would send. Ground every complaint in a real flow in the code.
+Write our most frustrated power user's cancellation email. Ground every complaint in a real flow in the code.
 ```
 
 **Price shift**
 
 ```text
-If the price went up 10x, what would the product need to justify it? If it were free, what would we remove?
+What would justify a 10x price increase? What would we remove if it were free?
 ```
 
 **Names that lie**
@@ -31,19 +29,19 @@ Find names, comments, and types that no longer match what the code does.
 **First break at 100x**
 
 ```text
-At 100x users, data, or team size, what breaks first? Order the failures by which one hits first.
+At 100x users, data, or team size, what breaks? Rank failures by which hits first.
 ```
 
 **Misplaced complexity**
 
 ```text
-Where do we spend complexity on things users don't value, and where is it missing on things they do?
+Where do we spend complexity on things users don't value, or underserve things they do?
 ```
 
 **Contrarian take**
 
 ```text
-What is your strongest opinion about this product or codebase that I would probably disagree with? Argue for it.
+Argue for your strongest opinion about this product or codebase that I would probably disagree with.
 ```
 
 **Missing question**
@@ -54,61 +52,52 @@ What important question about this product have I never asked? Answer it.
 
 ## Insights
 
-Unusual angles backed by a sweep of the codebase or production data, with evidence for every finding and a ranked result.
-
 **Manual work sweep**
 
 ```text
-Walk every user-facing flow and list each place the user must do something by hand, re-enter data, remember something, or leave the app.
-Cite the file for each. Estimate how often it happens from production data and rank by total user effort.
+Walk every user flow for manual work, re-entry, things to remember, and trips outside the app.
+Cite files, estimate frequency from production data, and rank by total user effort.
 ```
 
 **Struggle map**
 
 ```text
-Use production data to find where active users struggle: repeated retries, abandoned flows, errors, screens opened and quickly left.
-Trace each to the code and rank by how many active users hit it.
+Find active users' retries, abandoned flows, errors, and quickly exited screens in production data.
+Trace each to code and rank by affected active users.
 ```
 
 **Feature value triage**
 
 ```text
-List every feature and pull its production usage: users, frequency, and retention of users who use it compared with users who don't.
-Classify each as core, niche, or dead. Say what to invest in, simplify, or delete.
+For every feature, pull production user counts, frequency, and retention compared with non-users.
+Classify as core, niche, or dead; recommend investment, simplification, or deletion.
 ```
 
 **Promise audit**
 
 ```text
-Collect every promise in UI copy, emails, docs, and marketing pages. Check each against the code and production behavior.
-Rank broken or partly kept promises by how many users see them.
+Check every promise in UI copy, emails, docs, and marketing against code and production behavior.
+Rank broken or partly kept promises by users exposed.
 ```
 
 **Complexity versus value**
 
 ```text
-For each domain, measure code size and git churn, then production usage.
-Flag domains where effort and value are badly out of line in either direction, with numbers.
-```
-
-**Deliberate breakage**
-
-```text
-Break key logic one change at a time and run the suite after each. List every break the tests miss, grouped by module.
+Compare each domain's code size and git churn with production usage. Flag mismatches in either direction, with numbers.
 ```
 
 **Total wait time**
 
 ```text
-Pull production latency for every endpoint and screen and multiply by call volume.
-Rank by total user wait time, then trace the top 10 to the code with a fix for each.
+Multiply each endpoint's and screen's production latency by call volume.
+Rank by total user wait time; trace the top 10 to code with a fix for each.
 ```
 
 **Wasted work**
 
 ```text
-Find data fetched but not shown, values computed but unused, jobs whose output nobody reads, and repeated identical queries per request.
-Measure each in production and rank by cost.
+Find unseen fetched data, unused computations, unread job output, and identical queries repeated per request.
+Measure production cost and rank findings.
 ```
 
 ## Product and UX
@@ -116,24 +105,23 @@ Measure each in production and rank by cost.
 **Domain improvements**
 
 ```text
-Map this app into its features or domains. Use one parallel subagent per domain to propose 3–5 medium or large UX or product improvements.
-No small tweaks. Return them grouped by domain, one line per improvement.
+Map features or domains. Use one parallel subagent per domain to propose 3–5 medium or large UX or product improvements.
+Group by domain, one line per improvement; no small tweaks.
 ```
 
 **Divergent ideas**
 
 ```text
-Spawn 6 subagents that cannot see each other's work. Each brainstorms improvements from one lens: user friction, remove or automate,
-broken assumptions, compounding leverage, ideas from other industries, 10x constraints. Drop any idea a generic listicle could contain.
-Merge, dedupe, and rank the top 10 by impact over effort.
+Use 6 subagents blind to each other's work, one per lens: user friction, removal or automation, broken assumptions, compounding benefits,
+other industries, 10x constraints. Drop generic ideas. Merge, deduplicate, and rank the top 10 by impact over effort.
 ```
 
 **Journey map**
 
 ```text
-Map the 5 most important user journeys from the routes, models, and tests, and draw each as a step-by-step flow in one HTML page.
-Mark the friction on each flow: extra steps, dead ends, confusing moments, weak feedback, and no way to recover.
-Then propose medium or large changes that remove the worst friction, one line each.
+Draw the 5 key user journeys from routes, models, and tests as step-by-step flows in one HTML page.
+Mark extra steps, dead ends, confusion, weak feedback, and missing recovery.
+Propose medium or large changes for the worst friction, one line each.
 ```
 
 ## Growth and revenue
@@ -141,23 +129,22 @@ Then propose medium or large changes that remove the worst friction, one line ea
 **Time to value**
 
 ```text
-Find this product's "aha" moment in the code and map the shortest path from signup to it.
-List every step before first value and say which ones we can cut, defer, or automate.
+Find the product's "aha" moment in code and the shortest path from signup to it.
+List every step before first value; recommend which to cut, defer, or automate.
 ```
 
 **Offer audit**
 
 ```text
-Read this product as a skeptical buyer: pain, objections, proof, pricing, and competitors.
-Return the 5 changes most likely to raise conversion.
+As a skeptical buyer, assess pain, objections, proof, pricing, and competitors. Recommend the 5 changes most likely to raise conversion.
 ```
 
 **Buyer patterns**
 
 ```text
-Using read-only production data, compare customers who paid with similar signups who never did.
-Look at acquisition source, first actions, time to first value, features used, and days to purchase. Back every pattern with counts.
-Then propose medium or large changes that move more users onto the buyer path, one line each.
+Compare paying customers with similar non-paying signups using read-only production data: acquisition source, first actions,
+time to first value, features used, and days to purchase. Back every pattern with counts.
+Propose medium or large changes that move users onto the buyer path, one line each.
 ```
 
 ## Architecture and code quality
@@ -165,8 +152,7 @@ Then propose medium or large changes that move more users onto the buyer path, o
 **Weakest parts**
 
 ```text
-Name the 3 weakest parts of this system: the most fragile, confusing, or likely to block the next year of features.
-Explain why and what you would do about each.
+Name the 3 parts most fragile, confusing, or likely to block next year's features. Explain why and how to improve each.
 ```
 
 ## Performance and cost
@@ -174,8 +160,7 @@ Explain why and what you would do about each.
 **Running cost**
 
 ```text
-Audit what this product costs to run: infrastructure, third-party and usage-priced APIs including AI, and CI minutes.
-Return the top 5 savings with estimated monthly impact.
+Audit infrastructure, third-party and usage-priced APIs including AI, and CI minutes. Rank the top 5 savings by estimated monthly impact.
 ```
 
 ## Tests and verification
@@ -183,9 +168,8 @@ Return the top 5 savings with estimated monthly impact.
 **Mutation check**
 
 ```text
-launch swarm of cheap model agents that mutate key conditionals and operators in the critical modules and run the tests.
-Report every mutant that survives as a test gap.
-subagent per module.
+Use one cheap-model subagent per critical module. Mutate key logic, conditionals, and operators one change at a time, running the suite after each.
+Report every surviving mutation as a test gap, grouped by module.
 ```
 
 ## Reliability, accessibility, and copy
@@ -193,6 +177,6 @@ subagent per module.
 **Observability blind spots**
 
 ```text
-For auth, payments, destructive actions, and background jobs: would we know within minutes if each broke?
-List blind spots, errors logged twice, and secrets or personal data in logs.
+Would we detect broken auth, payments, destructive actions, or background jobs within minutes?
+List blind spots, duplicate error logs, and logged secrets or personal data.
 ```

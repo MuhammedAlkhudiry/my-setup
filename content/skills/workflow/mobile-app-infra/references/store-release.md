@@ -1,78 +1,50 @@
 # Store Release
 
-Use project instructions, release scripts, Expo config, `eas.json`, verification requirements, current CLI help, provider documentation, API schemas,
-and live account state as the release contract.
+Read [store CLI credentials and boundaries](store-clis.md). Resolve the branch and local changes, project version strategy, native build numbers,
+build/submit profiles, app identifiers, store targets, signed artifact, and metadata from project instructions, Expo config, `eas.json`, and live
+account state. Run project verification and use its established versioning, build, and submission path.
 
-## Workflow
+Continue an authorized release until every app is waiting for review or the store's equivalent, without another confirmation. Stop for required
+rebuilds, signing/provisioning failures, version conflicts, policy rejection, or unresolved compliance, pricing, privacy, or availability decisions.
+Hand off the exact manual step when an authorized API cannot perform it.
 
-1. Resolve the target branch, local changes, version strategy, native build numbers, build and submit profiles, app identifiers, store targets, signed
-   artifact identity, verification, and release metadata.
-2. Use $service-access for EAS, Google Play, App Store Connect, Google Cloud, or Sign in with Apple access.
-3. Run project-owned verification. Change versions only through the discovered version strategy and use the established build and submission path.
-4. Capture artifact IDs, signing identity, native versions, submission IDs, links, timestamps, and the exact live state from EAS and each store.
-5. Promote or attach an artifact already present in a store instead of rebuilding or uploading it only to obtain status.
-6. Continue through every available release step until each app is waiting for review or reaches the store's equivalent state. Do not stop at an
-   intermediate status or ask for another confirmation.
-
-Keep `built`, `submitted`, `waiting for review`, `in review`, `rolling out`, and `live` distinct. Stop only for rebuild requirements, signing or
-provisioning failures, version conflicts, policy rejection, or unresolved product decisions about compliance, pricing, privacy, or
-availability. When an authorized API cannot perform a required action, hand off that exact manual step.
-
-Every store release goes to all users at once: no App Store phased release and no Google Play staged rollout.
-
-Routine store releases are API/CLI-only: use EAS for builds and submissions and the [store CLIs](store-clis.md) for status, rollout, listings, and
-other supported release operations. Never automate App Store Connect or Google Play Console through a browser, except a declaration form the API
-cannot edit, such as Play's App content, when the owner asks for that change. Treat other API-unsupported account, policy, legal, payment, and
-review tasks as explicit manual blockers requiring fresh user intent.
+Reuse artifacts already in the store. Report artifact and submission IDs, signing identity, native versions, links, timestamps, and live state.
+Keep `built`, `submitted`, `waiting for review`, `in review`, `rolling out`, and `live` distinct.
 
 ## Local Builds
 
-Build store artifacts on the Mac and upload them with EAS Submit; paid EAS cloud builds are the exception. From the app folder, run
-`store-build <ios|android> <submit-profile>`, usually through the project's own script; `store-build --help` lists the options.
+Build on the Mac and upload with EAS Submit; paid EAS cloud builds are the exception. From the app folder, use
+`store-build <ios|android> <submit-profile>`, usually through the project's script.
 
-- The submit profile is always explicit, because a profile can release straight to production. Prove a new build path with a profile that
-  targets TestFlight or an internal track.
-- EAS keeps secret variables from local builds, so `store-build` stops until each is set locally; a file secret takes an absolute path, and
-  `--allow-missing` skips a secret the platform does not use.
-- A local build uses the Mac's Xcode, JDK, and Android SDK, not the `eas.json` image. `store-build` refuses local iOS while a project pins an
-  older Xcode major, and `--cloud` builds that platform on EAS.
-- Before any iOS build, local or `--cloud`, `store-build` stops when a target's EAS provisioning profile lacks an App Group its entitlements
-  configure, or the target has no profile; repair it with the `eas credentials` steps it prints, never by skipping the check.
+- Always name the submit profile: it can release straight to production. Prove new build paths with TestFlight or an internal track.
+- Supply EAS secret variables locally; file secrets need absolute paths. Use `--allow-missing` only for secrets the platform does not use.
+- Local builds use the Mac's Xcode, JDK, and Android SDK. If an older pinned Xcode major blocks local iOS, use `--cloud`.
+- Repair App Group provisioning failures using the printed credential steps; never bypass the check, which also runs for cloud builds.
 - `--dry-run` installs and verifies the exact local build plugin required by the installed EAS CLI in a versioned user cache outside the project;
   it runs no build or submission. Set `EAS_LOCAL_BUILD_PLUGIN_PATH` to use an existing binary, which is verified too.
-- A failed upload keeps the archive and prints the retry command; never rebuild only to resubmit.
+- Retry failed uploads with the preserved archive and printed command; do not rebuild to resubmit.
 
-Ship every change in a store build. Publish an over-the-air update only when the owner asks for one, and keep the update tooling working so
-it is ready when they do.
+Ship changes in store builds. Publish over-the-air updates only when the owner asks; keep that tooling working.
 
 ## TestFlight Only
 
-When the user asks for TestFlight instead of a store release, the target state is a processed build available to testers, not waiting for review.
-
-- Build and upload through the established EAS path. Confirm the build's processing state is `VALID` with `asc builds info` or
-  `asc builds wait`.
-- Do not create or update an App Store version, and do not submit for App Review.
-- Make the build available to the tester group the user names with $asc-testflight-orchestration. Internal groups need no review. An external group
-  needs Beta App Review, which is a submission; get the user's approval first.
-- Report the build number, processing state, and the groups that can install it.
+Use EAS and $asc-testflight-orchestration to deliver a processed `VALID` build to the named tester groups. Do not create/update an App Store version
+or submit for App Review. Get approval before submitting for external Beta App Review; internal groups need no review. Report build number,
+processing state, and groups that can install it.
 
 ## App Store Version Preparation
 
-Use `asc` through the [store CLIs](store-clis.md) and $asc-release-flow. Run each mutating command with `--dry-run` first, then `--confirm`.
+Use $asc-release-flow to stage the processed build, carrying forward the previous version's localized metadata. Use $asc-metadata-sync for new
+release notes in each locale. Copy missing review contacts from the previous version; use $asc-submission-health for readiness and rejected
+submissions, reusing the unresolved submission after attaching the fixed build.
 
-1. Resolve the processed build's ID with `asc builds list`, and the latest earlier App Store version.
-2. Stage the version with `asc release stage --app <id> --version <version> --build-id <build-id> --copy-metadata-from <previous-version>`. It creates
-   the version when missing, copies localized metadata, attaches the build, and runs readiness checks.
-3. Set the new release notes for each locale with `asc localizations update --version <version-id> --locale <locale> --whats-new <text>`.
-4. Run `asc review doctor --app <id>`. When App Review contact details are missing, copy them from the previous version with
-   `asc review details-for-version` and `asc review details-create`.
-5. Confirm the version has no phased release: `asc versions phased-release view --version-id <version-id>` must return no record. Delete one
-   that exists with `asc versions phased-release delete --id <phased-release-id>`.
-6. Submit with `asc review submit --app <id> --version <version> --build-id <build-id>`. When App Review rejected the version, attach the fixed build
-   and resubmit the existing unresolved submission with `asc review submissions-submit --id <submission-id>`; follow $asc-submission-health.
+Apply the [mutation flags policy](store-clis.md#safety) only where flags exist: `asc localizations update` has no `--dry-run`, and
+`asc review details-create` has neither `--dry-run` nor `--confirm`.
 
-## Google Play Rollout
+## Rollout
 
-EAS submits Android builds to the configured track. Promote to production with `gpc releases promote --from <track> --to production
---status completed`, so the release reaches every user; never pass a `--rollout` percentage. When a release is already `inProgress`, finish it
-with `gpc releases rollout complete`.
+Release to all users at once. Remove any App Store phased-release record before submission; use the [direct status check](store-status-apis.md)
+to verify its absence.
+
+EAS submits Android to the configured track. Promote with `gpc releases promote --from <track> --to production --status completed`; never pass
+`--rollout`. Finish an existing `inProgress` release with `gpc releases rollout complete`.

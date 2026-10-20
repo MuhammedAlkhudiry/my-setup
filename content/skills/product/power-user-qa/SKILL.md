@@ -1,23 +1,20 @@
 ---
 name: power-user-qa
-description: Use only when the user asks for power-user QA or a thorough exercise of a running product to find bugs and UX issues.
+description: Use only for requested power-user QA or thorough testing of a running product.
 ---
 
-Do not invoke this skill for routine implementation checks or design review; use $verification or $ux-ui for those.
+Use $verification for routine implementation checks and $ux-ui for design review.
 
 ## Workflow
 
-1. Use the requested scope. Learn what it promises and what users can reach, then choose distinct, realistic personas under real pressure. Get
-   approval before costly or irreversible actions.
-2. Use the running product through its real interface in an isolated environment with realistic data, accounts, and read access to its data and logs.
-   Use $browser-simulator-routing for tools and the project's own development commands for the environment.
-3. Use every feature in scope heavily through complete journeys, then try to break it as a real user could: repetition, interruption, abandoned flows,
-   limits, bad input, account switching, poor network, locale, and accessibility. Test what a meaningful share of users actually do; never spend
-   effort on rare setups, such as the largest text size or extreme combined settings. For a large scope, split areas across subagents that share no
-   devices or accounts. For UI journeys, use the screen and text coverage reference in $verification.
-4. After each meaningful action, check stored data, side effects, and logs against the intended result, even when the interface looks correct. Look
-   for failed requests that the interface hides.
-5. Record UX issues and bugs: broken behavior, controls that do nothing, confusing copy, dead ends, missing feedback, missing expected features, and
-   hidden wrong results. Reproduce each issue twice.
-6. For each issue, report severity by user impact, where it happens, steps, expected and actual result in plain user language, evidence, and a
-   recommended fix. Also list what held up and what could not be tested and why.
+1. Learn the requested scope's promises and reachable features; choose distinct, realistic personas under pressure. Get approval for costly or
+   irreversible actions.
+2. Use the real interface in an isolated environment with realistic data/accounts and read access to data/logs. Follow $browser-simulator-routing
+   and the project's development commands.
+3. Exercise every feature in scope through complete journeys, including repetition, interruption, abandonment, limits, bad input, account switching,
+   poor network, locale, and accessibility. Focus on common usage; skip rare setups such as maximum text or extreme combined settings.
+   For broad scopes, split areas across subagents with separate devices/accounts. For UI journeys, use $verification's screen/text coverage reference.
+4. After meaningful actions, check stored data, side effects, logs, and hidden failed requests against expected results.
+5. Reproduce issues twice, including broken/inert controls, confusing copy, dead ends, missing feedback/features, and hidden wrong results.
+6. Report each issue's user-impact severity, location, steps, expected/actual result in user language, evidence, and recommended fix.
+   List what held up and untested areas with reasons.

@@ -1,55 +1,41 @@
-- **SCOPE** — This repository defines shared AI guidelines, skills, and agent configuration for Claude Code, Codex, and OpenCode.
-- **PERSONAL-ONLY** — Treat this repo as personal infrastructure for its owner only; do not design for sharing, multi-user setup, or user-configurable
-  distribution.
-- **SOURCE-OF-TRUTH** — Make changes in source files (`content/`, `config/`, `src/`, `shell/`), never in installed copies under the home directory.
+- **SCOPE** — Shared rules, skills, and configuration for Claude Code, Codex, and OpenCode.
+- **PERSONAL-ONLY** — Personal infrastructure for the owner; do not design for sharing, multiple users, or configurable distribution.
+- **SOURCE-OF-TRUTH** — Edit `content/`, `config/`, `src/`, and `shell/`, never installed copies under the home directory.
 
 ## Important Files
 
-- `content/skills/<category>/<name>/SKILL.md` — Source files for local skills; each skill belongs under a category folder.
-- `config/skills.ts` — Remote skill declarations fetched and installed by this repo.
-- `config/codex.ts`, `config/opencode.ts`, `config/claude.ts`, and `config/mcp.ts` — Source of truth for the managed Codex, OpenCode, Claude Code, and
-  MCP configuration keys.
-- `config/t3.ts` and `config/t3-theme.json` — T3 Code settings and theme that install applies on every device; providers stay per device.
-- `config/devices.ts` — Device profiles (`personal`, `work`): which agents, skills, features, secrets, and permission allowlists each machine gets.
-  Each machine picks its profile in the untracked `~/.config/my-setup/device.json`.
-- `config/permissions.ts` — Renders a profile's command and path allowlist into OpenCode, Claude Code, and Codex permission surfaces.
-- `src/cli.ts` and `src/commands/system-tools-cli.ts` — `my-setup` installation and external-tool maintenance CLI entrypoints.
-- `src/commands/install.ts` — Local installer that renders and syncs rules, config, permissions, skills, shell helpers, secrets, and shared bin
-  commands.
-- `src/commands/doctor-checks.ts` — Local hygiene checks run by `doctor`; extend it when the installer starts owning a new local surface.
-- `shell/zsh-custom.zsh` and `shell/doctor.zsh` — Synced shell config and local tool health checks.
-- `src/lib/system-tools.ts` — System-tool inventory, ownership, update commands, and notes; keep it aligned with `doctor`.
-- `config/active-projects.ts` — Active project defaults and canonical clone roots (see ACTIVE-PROJECTS).
+- `config/skills.ts` — Remote skills; local skills follow SKILL-STRUCTURE below.
+- `config/{codex,opencode,claude,mcp}.ts` — Managed agent and MCP keys.
+- `config/t3.ts`, `config/t3-theme.json` — T3 settings and theme applied on every device; providers stay per device.
+- `config/devices.ts` — Profile-specific agents, skills, features, secrets, and allowlists. Each machine selects `personal` or `work` in untracked
+  `~/.config/my-setup/device.json`.
+- `config/permissions.ts` — Renders command and path allowlists for each agent.
+- `src/cli.ts`, `src/commands/system-tools-cli.ts` — Installation and external-tool CLI entrypoints.
+- `src/commands/install.ts` — Renders and syncs managed local state.
+- `src/commands/doctor-checks.ts` — Health checks; extend when the installer owns a new surface.
+- `shell/doctor.zsh` — Shell health checks.
+- `shell/zsh-custom.zsh` — Synced shell configuration.
+- `src/lib/system-tools.ts` — Tool inventory, ownership, update commands, and notes.
 
-- **ACTIVE-PROJECTS** — Active project defaults are declared in `config/active-projects.ts` and rendered into the installed rules. Each project owns
-  its own development services through its own commands; this repo holds no runtime environment state.
-- **MAIN-ONLY** — Work directly on `main`; do not create branches unless explicitly requested.
-- **NO-COMMITS** — Never commit in this repository. Leave every change uncommitted in the working tree; the owner reviews and commits.
-  Do not ask about commits or list uncommitted changes as pending work.
-- **INSTALL** — Use `mise run install` as the only supported local sync/install command after changing content/config/generator behavior.
-- **AGENT-OUTPUT** — Agents run the commands and scripts here, so print for them: on success one short line; on failure only the failed items, each with the path to its full log. No banners, colors, progress output, tables, or decoration. Offer `--json` for structured results and `--verbose` for detail; the exit code carries the result.
-- **THIN-ZSHRC** — If user `~/.zshrc` contains anything beyond the managed `shell/zsh-custom.zsh` import, repair it directly instead of leaving
-  installation blocked. Preserve custom shell code by migrating it into `shell/zsh-custom.zsh`, then restore the thin `~/.zshrc` and rerun
-  installation.
-- **SYSTEM-TOOLS** — Keep `src/lib/system-tools.ts` and `doctor` aligned when repository workflows add, remove, or change a system-tool dependency.
-- **SKILL-STRUCTURE** — Each skill must live in `content/skills/<category>/<name>/SKILL.md` with YAML frontmatter (`name`, `description`) and
-  instructions body.
+- **ACTIVE-PROJECTS** — `config/active-projects.ts` defines project defaults and canonical clones rendered into installed rules. Projects own their
+  development services and commands; keep runtime state out of this repo.
+- **MAIN-ONLY** — Work on `main`; create branches only when explicitly requested.
+- **NO-COMMITS** — Leave changes uncommitted for owner review. Never commit, ask about committing, or list uncommitted changes as pending work.
+- **INSTALL** — After changing content, config, or generator behavior, sync only with `mise run install`.
+- **THIN-ZSHRC** — Migrate custom `~/.zshrc` code into `shell/zsh-custom.zsh`, leave only its managed import in `~/.zshrc`, and rerun installation.
+  Repair this directly if it blocks installation.
+- **SYSTEM-TOOLS** — Keep `src/lib/system-tools.ts` and `doctor` aligned when workflows change a system-tool dependency.
+- **SKILL-STRUCTURE** — Put skill instructions in `content/skills/<category>/<name>/SKILL.md`; `src/lib/skills.ts` validates frontmatter and names.
 - **SKILL-OPENAI-YAML** — Never add `agents/openai.yaml` to a skill unless the user explicitly requests it.
-- **SKILL-REFERENCES** — When reading or editing a skill, inspect its referenced files and relevant nearby source files too; do not judge the skill
-  from `SKILL.md` alone.
-- **SKILL-CROSS-REFERENCES** — When one skill refers to another, write `$skill-name` instead of a bare or code-formatted name so renames, removals,
-  and typos are validated.
-- **SKILL-PORTABLE** — Installed-facing skill files must not point back to source-only repo paths such as `content/skills/...` or local `my-setup`
-  paths; use skill-relative references.
-- **PROFILE-BLOCKS** — Put content that only fits one device profile between `<!-- profile:<name> -->` and `<!-- /profile -->` lines in
-  `content/base-rules.md` or skill Markdown. Inside a list, indent the marker lines to the list item's text so the formatter leaves them alone.
-- **WORK-ONLY** — Keep work-specific instructions, including employer tooling and VPN requirements, inside `<!-- profile:work -->` blocks so they
-  are injected only on the work laptop. Keep device selection in the untracked local `~/.config/my-setup/device.json`; never sync it between machines.
-  Before installing a work-only change, verify that it appears in the `work` render and is absent from the `personal` render.
-- **SKILL-GLOBAL** — Skill instructions are global capabilities; do not mention any project, repo, product, client, or local workspace by name.
-- **SKILL-INSTALL** — Never install skills with `npx skills add`; local skills live in this repo under `content/skills/<category>/*`, and remote
-  skills must be declared in `config/skills.ts` for this repo's source/import logic.
-- **MY-SETUP-CLI** — `my-setup` only provides `install` and built-in help. Use `doctor` for setup health checks and `system-tools status` or
-  `system-tools update-plan` for external CLI maintenance.
-- **WORDING-QUALITY** — Preserve user intent, but do not reuse the user's rough wording. Rewrite it into the clearest, strongest wording that fits the
-  repo's voice.
+- **SKILL-REFERENCES** — When editing or auditing a skill, inspect its referenced files and relevant nearby source, beyond `SKILL.md`.
+- **SKILL-CROSS-REFERENCES** — Refer to other skills as `$skill-name` in prose; `src/lib/skills.ts` validates targets.
+- **SKILL-PORTABLE** — Use skill-relative references in installed skill files; never source-only `content/skills/...` or local `my-setup` paths.
+- **PROFILE-BLOCKS** — In `content/base-rules.md` and skill Markdown, wrap profile-specific content in `<!-- profile:<name> -->` and
+  `<!-- /profile -->` lines. Inside lists, align markers with item text so formatting preserves them.
+- **WORK-ONLY** — Wrap employer tooling, VPN requirements, and other work instructions in `<!-- profile:work -->` blocks. Before installation,
+  verify they appear only in the `work` render. Never sync the device selector between machines.
+- **SKILL-GLOBAL** — Keep skills project-independent; name no project, repo, product, client, or local workspace.
+- **SKILL-INSTALL** — Never use `npx skills add`; use SKILL-STRUCTURE for local skills and `config/skills.ts` for remote imports.
+- **MY-SETUP-CLI** — `my-setup` provides only `install` and help. Use `doctor` for health and `system-tools status` or `system-tools update-plan`
+  for external tools.
+- **WORDING-QUALITY** — Preserve user intent; rewrite rough wording clearly in the repo's voice.

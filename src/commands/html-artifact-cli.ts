@@ -2,7 +2,7 @@
 
 import { agentOutput, parseCli } from "../lib/agent-output";
 import { cac } from "cac";
-import { addImagesToArtifact, checkArtifact, createArtifact } from "./html-artifact";
+import { checkArtifact, createArtifact } from "./html-artifact";
 
 agentOutput("html-artifact", {
   nativeJson: true,
@@ -34,22 +34,8 @@ async function run(task: () => Promise<void>): Promise<void> {
 }
 
 cli
-  .command(
-    "new <kind> <topic>",
-    "Create a page folder from a template (options, plan-review, blank) with the project's mockup kit",
-  )
-  .option("--images <names>", "Comma-separated kit images to copy, resized, into kit/images/")
-  .option("--project <dir>", "Project whose mockup-kit/ to use, defaults to the current repo")
-  .action((kind: string, topic: string, options) =>
-    run(() => createArtifact(kind, topic, options)),
-  );
-
-cli
-  .command("images <folder> <...names>", "Add more kit images to a page folder")
-  .option("--project <dir>", "Project whose mockup-kit/ to use, defaults to the current repo")
-  .action((folder: string, names: string[], options) =>
-    run(() => addImagesToArtifact(folder, names, options)),
-  );
+  .command("new <topic>", "Create an empty page folder with feedback.js")
+  .action((topic: string) => run(() => createArtifact(topic)));
 
 cli
   .command(

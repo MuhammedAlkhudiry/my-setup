@@ -149,5 +149,25 @@ describe("triage-prs", () => {
     expect(ciFromChecks([{ conclusion: "SUCCESS", status: "COMPLETED" }])).toBe("success");
     expect(ciFromChecks([{ conclusion: "success" }, { conclusion: "failure" }])).toBe("failure");
     expect(ciFromChecks([{ conclusion: "SUCCESS" }, { status: "IN_PROGRESS" }])).toBe("pending");
+
+    for (const state of ["PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED", "REQUESTED", "WAITING"]) {
+      expect(ciFromChecks([{ state: "SUCCESS" }, { state }])).toBe("pending");
+    }
+    for (const conclusion of ["ACTION_REQUIRED", "STALE", "STARTUP_FAILURE"]) {
+      expect(ciFromChecks([{ state: "PENDING" }, { conclusion }])).toBe("failure");
+    }
+    for (const conclusion of ["NEUTRAL", "SKIPPED"]) {
+      expect(ciFromChecks([{ conclusion, status: "COMPLETED" }])).toBe("success");
+      expect(ciFromChecks([{ conclusion, status: "QUEUED" }])).toBe("pending");
+    }
+    for (const check of [
+      {},
+      { conclusion: null, status: "COMPLETED" },
+      { conclusion: "", status: "completed" },
+      { state: "NEW_STATE" },
+      { conclusion: "NEW_CONCLUSION", status: "COMPLETED" },
+    ]) {
+      expect(ciFromChecks([check])).toBe("pending");
+    }
   });
 });

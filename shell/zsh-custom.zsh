@@ -156,6 +156,28 @@ ai() {
     opencode
 }
 
+# --- Mac load ----------------------------------------------------------------
+# `macq` shows the shared check and device queues with load, memory, and disk;
+# `macq -w` refreshes it every 5 seconds until Ctrl-C.
+_macq_once() {
+    local cores=$(sysctl -n hw.ncpu)
+    local load=$(sysctl -n vm.loadavg | awk '{print $2}')
+    local memory=$(memory_pressure 2>/dev/null | awk '/free percentage/ {print $NF}')
+    local disk=$(df -g / | awk 'NR == 2 {print $4}')
+
+    echo "load ${load} on ${cores} cores · memory free ${memory} · disk free ${disk} GiB"
+    heavy-run status 2>&1 | sed 's/; waiting/\nwaiting/; s/ (\([a-z]*\); [a-z]*; [a-z0-9-]*)/ \1/g'
+    device-queue status 2>&1 | head -1
+}
+
+macq() {
+    if [[ "$1" == "-w" ]]; then
+        watch -n 5 -t "zsh -ic _macq_once 2>/dev/null"
+    else
+        _macq_once
+    fi
+}
+
 # --- Bun ---------------------------------------------------------------------
 # Loads Bun's completions and binary path for host-side scripts in this repo and
 # other JavaScript projects.

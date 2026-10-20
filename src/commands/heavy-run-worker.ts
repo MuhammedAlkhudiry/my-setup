@@ -19,9 +19,10 @@ send({ ready: true });
 
 const input = await Bun.stdin.text();
 if (!input) process.exit(0);
-const { argv, deferred, cliPath, owner, waitSeconds } = JSON.parse(input) as {
+const { argv, deferred, uncapped, cliPath, owner, waitSeconds } = JSON.parse(input) as {
   argv: string[];
   deferred: boolean;
+  uncapped: boolean;
   cliPath: string;
   owner: string;
   waitSeconds: number;
@@ -29,6 +30,8 @@ const { argv, deferred, cliPath, owner, waitSeconds } = JSON.parse(input) as {
 const env = { ...process.env };
 delete env.HEAVY_RUN_DEFERRED;
 delete env.HEAVY_RUN_RESERVATION_ID;
+delete env.HEAVY_RUN_UNCAPPED;
+if (uncapped) env.HEAVY_RUN_UNCAPPED = "1";
 if (deferred) {
   env.HEAVY_RUN_DEFERRED = "1";
   env.HEAVY_RUN_CLI = cliPath;

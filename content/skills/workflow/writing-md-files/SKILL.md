@@ -1,35 +1,28 @@
 ---
 name: writing-md-files
-description: Use before creating or editing any Markdown file, such as a README, doc, plan, skill, `AGENTS.md`, or `CLAUDE.md`.
+description: Use before creating or editing Markdown files.
 ---
-
-Follow the shared response guidance.
 
 ## Minimal by default
 
-The reader has little time and skims. Every extra line costs attention and hides the lines that matter, so a long document often goes unread. A line
-stays only if a reader would act wrongly or waste time without it. When nothing breaks without a line, delete it.
+A line stays only if removing it would cause a wrong action or wasted time. Follow shared response guidance.
 
-- Keep lasting decisions and their reasons, boundaries and limits, steps that are not obvious, and how to tell the work is done.
-- Cut anything the reader can get from the code, a command's help, or a linked source.
-- Cut obvious steps, background, history, and motivation that change no action.
-- Cut examples that only restate a rule. Keep one example only when the rule is unclear without it.
-- Cut introductions, summaries of what follows, closing recaps, hedges, and filler.
-- Say each fact once. Link to it everywhere else.
-- Do not add headings, sections, or template fields that the content does not fill.
-- Before you add text, look for text to remove. Prefer a short document with gaps over a complete one that nobody reads; add back only what a reader
-  turns out to need.
+- Keep lasting decisions and reasons, boundaries, non-obvious steps, and completion criteria.
+- Cut what code, command help, or linked sources already explain; remove obvious steps, background, history, and motivation that change no action.
+- Keep one example only when needed to clarify a rule.
+- Cut introductions, previews, recaps, hedges, filler, and empty headings or template fields.
+- State each fact once; link elsewhere.
+- Look for cuts before additions. Prefer a short document with gaps over a complete one that goes unread; add back only what readers need.
 
 ## Accuracy
 
-- Check facts before editing. Give each fact or instruction one authoritative source, and link to it instead of copying its details elsewhere. Mark
-  claims you cannot verify as unresolved.
-- Look for outdated or repeated documentation while you work. Fix any you find immediately.
-- Read the finished document and inspect the diff. Check for lost or invented meaning. Run any available Markdown and link checks. Report major
-  structural changes, factual corrections, and unresolved gaps.
+- Verify facts before editing; use one authoritative source per fact/instruction and link instead of copying. Mark unverifiable claims unresolved.
+- Fix stale or repeated documentation as you find it.
+- Read the result and diff for lost or invented meaning. Run available Markdown/link checks; report structural changes, factual corrections,
+  and unresolved gaps.
 
 ## Skills and instruction files
 
-- Assume the agent handles routine work. Include only reusable guidance it cannot get from general rules or authoritative sources.
-- Include exact commands, file layouts, or templates only when they prevent guessing.
-- Make a skill's description a brief trigger: say when to use the skill, not everything it covers.
+- Assume routine competence; keep reusable guidance unavailable from general rules or authoritative sources.
+- Include exact commands, layouts, or templates only to prevent guessing.
+- Keep skill descriptions to brief triggers: when to use them.

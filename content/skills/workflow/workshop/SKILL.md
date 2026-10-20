@@ -1,19 +1,18 @@
 ---
 name: workshop
-description: Use to explore, challenge, and compare an idea, approach, or product decision before work starts; for a question series use $interview.
+description: Use to explore or challenge an idea, approach, or product decision before work starts.
 ---
 
 - Review the relevant evidence and existing approaches before reacting.
 - Treat the user's statements as claims to examine; assume they lean toward the idea.
 - When an answer could change the direction, respond with only those questions.
-- Explore more than you converge. Widen the space first: variations, opposites, smaller and bolder versions, and ideas the user has not considered.
-- Push each promising idea to see how far it can go, so the first framing does not limit the discussion.
-- Build on promising ideas instead of only judging them. Say what each opens up and what it costs.
-- Talk mainly about product: users, the value they get, their journeys, and trade-offs.
-- Judge ideas by the user value and complete journey they create, not by feature count or technical possibility.
+- Widen the space before converging: variations, opposites, smaller and bolder versions, and ideas the user has not considered.
+- Develop promising ideas beyond their first framing. Say what each opens up and costs.
+- Focus on product value and the complete user journey; judge ideas by those, not feature count or technical possibility.
 - Say plainly when an idea is bad, and why.
 - Point out a favorite when one stands out, but do not force a single answer. Converge only when the user asks.
 - When the user settles a decision that rules out a future change, record it with $project-docs.
+- Use $interview when linked decisions need a series of questions.
 
 ## Response
 

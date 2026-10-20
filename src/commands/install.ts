@@ -35,7 +35,7 @@ import { createClaudeManagedSettings } from "../../config/claude";
 import { CODEX_RETIRED_TOP_LEVEL_KEYS } from "../../config/codex";
 import { CREDENTIALS_HOME_ENV, CREDENTIALS_ROOT } from "../../config/credentials";
 import { MCP_SERVERS, RETIRED_MCP_SERVERS } from "../../config/mcp";
-import { createOpencodeConfig } from "../../config/opencode";
+import { createOpencodeCliConfig, mergeOpencodeConfig } from "../../config/opencode";
 import { removeRetiredHooks } from "../../config/hooks";
 import { renderCodexRules } from "../../config/permissions";
 import { codexManagedSectionValues, renderCodexMcpServersToml } from "../lib/codex-config";
@@ -67,6 +67,7 @@ const STATE_HOME = process.env.XDG_STATE_HOME || join(HOME, ".local/state");
 const OPENCODE_PATHS = {
   rules: join(HOME, ".config/opencode/AGENTS.md"),
   config: join(HOME, ".config/opencode/opencode.json"),
+  cli: join(HOME, ".config/opencode/cli.json"),
 };
 
 const CODEX_PATHS = {
@@ -309,7 +310,6 @@ async function installOpencode(profile: DeviceProfile, rtk: boolean): Promise<vo
 
 async function mergeOpencodeConfigAsync(profile: DeviceProfile): Promise<void> {
   print.info(`Merging OpenCode config into ${OPENCODE_PATHS.config}...`);
-  const settings = createOpencodeConfig(profile, HOME);
   await ensureParentDir(OPENCODE_PATHS.config);
   let existingConfig: Record<string, unknown> = {};
   if (existsSync(OPENCODE_PATHS.config)) {
@@ -319,30 +319,24 @@ async function mergeOpencodeConfigAsync(profile: DeviceProfile): Promise<void> {
       print.warning("Failed to parse existing config, creating new file");
     }
   }
-  const merged = {
-    ...existingConfig,
-    model: settings.model,
-    small_model: settings.small_model,
-    keybinds: {
-      ...(existingConfig.keybinds as Record<string, unknown>),
-      ...(settings.keybinds as Record<string, unknown>),
-    },
-    permission: {
-      ...(existingConfig.permission as Record<string, unknown>),
-      ...(settings.permission as Record<string, unknown>),
-    },
-    agent: {
-      ...(existingConfig.agent as Record<string, unknown>),
-      ...(settings.agent as Record<string, unknown>),
-    },
-    plugin: settings.plugin,
-    mcp: settings.mcp,
-    tools: {
-      ...(existingConfig.tools as Record<string, boolean>),
-      ...settings.tools,
-    },
-  };
+  const merged = mergeOpencodeConfig(existingConfig, profile, HOME);
   await writeFile(OPENCODE_PATHS.config, JSON.stringify(merged, null, 2) + "\n");
+  const cliSettings = createOpencodeCliConfig();
+  const existingCli = existsSync(OPENCODE_PATHS.cli)
+    ? JSON.parse(await readFile(OPENCODE_PATHS.cli, "utf-8"))
+    : {};
+  await writeFile(
+    OPENCODE_PATHS.cli,
+    JSON.stringify(
+      {
+        ...existingCli,
+        $schema: cliSettings.$schema,
+        keybinds: { ...existingCli.keybinds, ...cliSettings.keybinds },
+      },
+      null,
+      2,
+    ) + "\n",
+  );
   print.success("OpenCode config merged");
 }
 

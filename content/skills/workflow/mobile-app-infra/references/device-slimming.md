@@ -1,14 +1,11 @@
 # Device Slimming
 
-Slim every simulator and emulator that agents use, so several can run in parallel. Slim a shared device only after its owner releases it,
-because slimming reboots it.
-
-Never slim a device used for performance profiling; the disabled services change the measurements.
+Slim agent devices. Slim shared devices only after their owner releases them; slimming reboots them. Never slim performance-profiling devices:
+disabled services change measurements.
 
 ## iOS simulators
 
-Use `simslim`. Keep the categories apps commonly need: sign-in, purchases, push notifications, universal links, contacts and calendar pickers,
-the photo picker, and share sheets.
+Preserve sign-in, purchases, push, universal links, contacts/calendar/photo pickers, and share sheets:
 
 ```sh
 simslim on <udid> --except icloud,store,web,pim,photos,connectivity --preserve-boot-state
@@ -19,20 +16,17 @@ Undo with `simslim off <udid>`.
 
 ## Android emulators
 
-Use `avdslim`. Its package list and defaults would break common app features, so always pass the flags below:
+Override `avdslim` defaults to preserve app features:
 
-- **Never pass `--aggressive`.** It disables the Play Store, which in-app purchases need, and Chrome, which web sign-in and links need.
-- **Keep location and the background-process limit** with `--skip=location,bglimit`. Otherwise slimming turns device location off and
-  caps background processes at 4, which can kill the app while a share sheet, photo picker, or browser sign-in covers it.
-- **Keep the contacts, calendar, and camera apps.** Contact pickers, calendar event screens, and camera capture open these apps.
-- **Keep host camera and audio.** `tune-avd` turns both off.
-- **Use 2048 MB RAM** for Google Play images. The 1536 MB default is too tight for Play services plus a development build.
+- Never pass `--aggressive`: purchases need Play Store; web sign-in and links need Chrome.
+- Use `--skip=location,bglimit` to keep location and avoid the four-process cap, which can kill the app behind a picker or browser sign-in.
+- Keep contacts, calendar, and camera apps for pickers/capture, plus host camera and audio, which `tune-avd` disables.
+- Use 2048 MB RAM for Google Play images; the 1536 MB default is too tight for Play services and a development build.
 
-`avdslim` does not follow a symlinked `~/.android/avd`; if it finds no AVDs, set `ANDROID_AVD_HOME` to the real AVD directory.
+If a symlinked `~/.android/avd` hides AVDs from `avdslim`, set `ANDROID_AVD_HOME` to the real directory.
 
-An emulator started with `-read-only` discards everything written since boot. That includes apps installed after boot and the `avdslim on`
-changes. Before restarting it, check for app installs newer than its boot and have the owner confirm they can reinstall. After each boot, run
-`avdslim on` again.
+`-read-only` emulators lose post-boot installs and slimming changes on restart. Check for newer installs and have the owner confirm they can
+reinstall before restarting. Reapply `avdslim on` after each boot.
 
 1. Record the emulator's launch flags, then stop it.
 2. Tune the AVD once:
@@ -43,10 +37,10 @@ changes. Before restarting it, check for app installs newer than its boot and ha
    avdslim enable audio <avd>
    ```
 
-   `tune-avd` deletes the AVD's saved snapshots, so the next boot is a cold boot. Installed apps and data stay. `enable camera` sets both
-   cameras to `emulated`; restore a back camera that was `virtualscene` in the AVD's `config.ini`.
+   `tune-avd` deletes saved snapshots, preserving installed apps/data. `enable camera` sets both cameras to `emulated`; restore a previously
+   `virtualscene` back camera in `config.ini`.
 
-3. Cold-boot it with its recorded flags, but without `-memory`, which would override the tuned RAM.
+3. Cold-boot with the recorded flags, omitting `-memory` so it cannot override the tuned RAM.
 4. Slim it after boot:
 
    ```sh
@@ -56,9 +50,7 @@ changes. Before restarting it, check for app installs newer than its boot and ha
      --keep=com.android.camera2
    ```
 
-5. Verify that `adb -s emulator-<port> shell pm list packages` still lists the app and `com.android.vending`.
+5. Verify the app and `com.android.vending` remain installed.
 
-`avdslim` has no dry run; every `on` applies its changes immediately.
-
-Undo with `avdslim off emulator-<port>`. If a slimmed emulator hangs on a black screen, run `avdslim repair`. It needs `adb root`, which Google
-Play images refuse, so use `avdslim off` there instead.
+`avdslim on` has no dry run. Undo with `avdslim off emulator-<port>`. For a black screen, use `avdslim repair`; it needs root, so use `off` on
+Google Play images.

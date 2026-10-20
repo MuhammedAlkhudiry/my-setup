@@ -1,17 +1,30 @@
 import { existsSync, readdirSync, realpathSync, statSync } from "node:fs";
-import { lstat, mkdir, readFile, readdir, rm, rmdir, unlink } from "node:fs/promises";
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  readdir,
+  rm,
+  rmdir,
+  statfs,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, relative, sep } from "node:path";
 
-import { execa } from "execa";
 import { z } from "zod";
 
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
 import { MAC_WATCHER } from "../../config/mac-watcher";
+import { timedCommand } from "./timed-command";
 import {
   cleanupBoundThreads,
   cleanupProjectThreadTitles,
   cleanupWorktreeAllowed,
-  finishedCleanupHead,
   readCleanupThreads,
   type CleanupThread,
   cleanupFilesChangedRecently,
@@ -22,6 +35,12 @@ const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 const ARCHIVE_COPY_TIMEOUT_MS = 5 * 60 * 1000;
 const SLOW_STEP_SECONDS = 60;
+
+/** Include this setup repository without making it a product in ACTIVE_PROJECTS. */
+export const STORAGE_WORKTREE_PROJECTS = [
+  ...ACTIVE_PROJECTS,
+  { name: "my-setup", canonicalRoot: join(import.meta.dir, "../.."), baseBranch: "main" },
+];
 
 // =============================================================================
 // Rules
@@ -43,7 +62,10 @@ export function staleChildren<T extends AgedEntry & { projectGone: boolean }>(
 ): T[] {
   return children.filter((child) => {
     const age = options.now - child.mtimeMs;
-    const gone = child.projectGone && options.projectGoneHours !== undefined && age > options.projectGoneHours * HOUR_MS;
+    const gone =
+      child.projectGone &&
+      options.projectGoneHours !== undefined &&
+      age > options.projectGoneHours * HOUR_MS;
     return age > options.days * DAY_MS || gone;
   });
 }
@@ -76,36 +98,34 @@ export interface WorktreeFacts {
   mergedIntoBase: boolean;
   lastCommitMs: number;
   recentFiles: boolean;
+  filesChangedWithinIdleWindow?: boolean;
+  filesChangedWithinDay?: boolean;
   prFinishedAt: string | null;
   pr: { state: "OPEN" | "MERGED" | "CLOSED"; headRefOid: string } | undefined;
   /** Titles of the T3 threads still bound to the worktree that are not running, such as a settled thread. */
   threads?: string[];
 }
 
-export type WorktreeDecision = { remove: true } | { remove: false; reason: string };
+export type WorktreeDecision = { remove: true; archive?: true } | { remove: false; reason: string };
 
 /**
- * A worktree goes only when removing it loses nothing: it has no uncommitted or untracked files, nobody is using it, and
- * its commits stay reachable from a finished PR or its own branch, which is kept. A landed worktree goes
- * soon after its work is done; one whose branch never landed waits longer in case its work resumes, and stays while its
- * PR is open. Default-branch ancestry without a finished PR keeps a fresh start. Detached unpublished commits always stay.
- * A thread that is not running keeps only work that has not landed: T3 recreates a landed checkout from its branch if the
- * thread resumes.
+ * Finished branches require a verified archive before removal. Other branches must be clean and keep their refs;
+ * detached heads must be clean and untouched for a full day. Process, lock, and recent activity protections apply first.
  */
 export function decideWorktree(
   facts: WorktreeFacts,
   now: number,
-  idleDays: { landed: number; abandoned: number },
+  idleDays: { landed: number; abandoned: number; thread: number },
 ): WorktreeDecision {
   if (facts.locked) return { remove: false, reason: "locked" };
   if (facts.inUse) return { remove: false, reason: "in use by a running process" };
-  if (facts.dirty) return { remove: false, reason: "uncommitted changes" };
-  if (!facts.branch) return { remove: false, reason: "detached HEAD" };
 
   // Git activity during the run itself can land after `now`.
   const idle = Math.max(0, now - facts.lastActivityMs) / DAY_MS;
   const active = `active ${Math.floor(idle)}d ago`;
-  const prFinished = finishedCleanupHead(facts.head, facts.pr?.headRefOid, facts.pr?.state);
+  const prFinished = Boolean(
+    facts.branch && (facts.pr?.state === "MERGED" || facts.pr?.state === "CLOSED"),
+  );
   if (
     facts.recentFiles ||
     facts.lastCommitMs >= now - WORKTREE_CLEANUP_GRACE_MS ||
@@ -115,28 +135,45 @@ export function decideWorktree(
         Date.parse(facts.prFinishedAt) >= now - WORKTREE_CLEANUP_GRACE_MS))
   )
     return { remove: false, reason: "four-hour activity grace period" };
-  if (facts.mergedIntoBase && !prFinished)
-    return { remove: false, reason: "default-branch ancestry alone does not prove finished work" };
   if (prFinished) {
     return idle < idleDays.landed
       ? { remove: false, reason: `landed, ${active}` }
-      : { remove: true };
+      : { remove: true, archive: true };
   }
 
+  if (facts.dirty) return { remove: false, reason: "uncommitted changes" };
+  if (!facts.branch)
+    return idle < 1 || facts.filesChangedWithinDay
+      ? { remove: false, reason: "detached HEAD active within 24 hours" }
+      : { remove: true };
+  if (facts.mergedIntoBase)
+    return { remove: false, reason: "default-branch ancestry alone does not prove finished work" };
+
   if (facts.pr?.state === "OPEN") return { remove: false, reason: "PR open" };
-  if (facts.threads?.length) return { remove: false, reason: `T3 thread: ${facts.threads.join(", ")}` };
-  if (idle < idleDays.abandoned) return { remove: false, reason: active };
+  if (facts.filesChangedWithinIdleWindow)
+    return { remove: false, reason: "files changed within idle window" };
+  if (facts.threads?.length) {
+    if (idle < idleDays.thread)
+      return { remove: false, reason: `T3 thread: ${facts.threads.join(", ")}` };
+  } else if (idle < idleDays.abandoned) return { remove: false, reason: active };
   return { remove: true };
 }
 
-/** The folders git lists as ignored that hold native build output, and the dependency folders to search for more. */
+/** Git-ignored build output and installed dependencies; tracked descendants always protect the whole folder. */
 export function nativeBuildCandidates(
   ignoredPaths: string[],
   rule: { ignored: RegExp; dependencies: { dir: RegExp } },
+  trackedPaths: string[] = [],
 ): { outputs: string[]; dependencyDirs: string[] } {
+  const safe = ignoredPaths.filter(
+    (path) =>
+      path.endsWith("/") &&
+      !trackedPaths.some((tracked) => tracked === path.slice(0, -1) || tracked.startsWith(path)),
+  );
+
   return {
-    outputs: ignoredPaths.filter((path) => rule.ignored.test(path)),
-    dependencyDirs: ignoredPaths.filter((path) => rule.dependencies.dir.test(path)),
+    outputs: safe.filter((path) => rule.ignored.test(path)),
+    dependencyDirs: safe.filter((path) => rule.dependencies.dir.test(path)),
   };
 }
 
@@ -179,15 +216,60 @@ export interface TempEntry extends AgedEntry {
 /** Temp entries agent runs left behind: this user's plain files and folders that no live service may still need. */
 export function tempLeftovers(
   entries: TempEntry[],
-  options: { days: number; skip: RegExp; now: number },
+  options: {
+    days: number;
+    skip: RegExp;
+    now: number;
+    toolCaches?: { days: number; match: RegExp };
+  },
 ): TempEntry[] {
-  return olderThan(entries, options.days, options.now).filter(
+  return entries.filter(
     (entry) =>
+      options.now - entry.mtimeMs >
+        (options.toolCaches?.match.test(entry.name) ? options.toolCaches.days : options.days) *
+          DAY_MS &&
       entry.kind !== "other" &&
       entry.ownedByUser &&
       !entry.holdsSocket &&
       !options.skip.test(entry.name),
   );
+}
+
+/** Reusable caches may hide newer files or service leases several levels below an old top-level directory. */
+export async function toolCacheIdle(path: string, now: number, days: number): Promise<boolean> {
+  if (await cleanupFilesChangedRecently(path, now, undefined, days * DAY_MS)) return false;
+  // Dependency manifests are data in disposable tool workspaces, not process leases.
+  const dependencyLocks = [
+    "composer.lock",
+    "bun.lock",
+    "yarn.lock",
+    "Cargo.lock",
+    "Gemfile.lock",
+    "uv.lock",
+    "poetry.lock",
+  ];
+  const protectedFiles = await run("find", [
+    path,
+    "(",
+    "-type",
+    "s",
+    "-o",
+    "(",
+    "(",
+    "-name",
+    "*.lock",
+    "-o",
+    "-name",
+    "*.pid",
+    ")",
+    ...dependencyLocks.flatMap((name) => ["!", "-name", name]),
+    ")",
+    ")",
+    "-print",
+    "-quit",
+  ]);
+  if (protectedFiles.exitCode !== 0) throw new Error(`cannot inspect tool cache ${path}`);
+  return protectedFiles.stdout.trim() === "";
 }
 
 /** Direct children of `dir` that a running process holds open or works in, found in one pass over the open paths. */
@@ -225,6 +307,7 @@ export interface TestDatabaseFacts {
   checkouts: string[];
   touchedMs: number;
   bytes: number;
+  inUse: boolean;
 }
 
 /** A parallel worker's copy is named after the database it was made from. */
@@ -233,32 +316,38 @@ export function testDatabaseFamily(name: string): string {
 }
 
 /**
- * Test databases whose checkout is gone, with their workers' copies. A family without a recorded checkout goes only when
- * it belongs to an active project, whose suite rebuilds a missing database, and none of it was touched for `unmarkedDays`.
+ * Matching test databases whose checkout is gone or whose active-project family is idle, including parallel copies.
+ * A connection to any member protects the whole family, including sleeping connections between test queries.
  */
 export function testDatabasesToDrop(
   databases: TestDatabaseFacts[],
   options: {
     now: number;
-    unmarkedDays: number;
+    idleDays: number;
     prefixes: string[];
     checkoutExists: (path: string) => boolean;
   },
 ): TestDatabaseFacts[] {
   const families = new Map<string, TestDatabaseFacts[]>();
   for (const database of databases) {
+    if (
+      !/^\w+$/.test(database.name) ||
+      !MAC_WATCHER.storage.testDatabases.match.test(database.name)
+    )
+      continue;
     const family = testDatabaseFamily(database.name);
     families.set(family, [...(families.get(family) ?? []), database]);
   }
 
   return [...families.entries()].flatMap(([family, members]) => {
-    // A family stays while any checkout recorded in it still exists.
-    const checkouts = members.flatMap((member) => member.checkouts);
-    if (checkouts.length > 0) return checkouts.some(options.checkoutExists) ? [] : members;
+    if (members.some((member) => member.inUse)) return [];
 
-    const owned = options.prefixes.some((prefix) => family.startsWith(prefix));
+    const checkouts = members.flatMap((member) => member.checkouts);
+    if (checkouts.length > 0 && !checkouts.some(options.checkoutExists)) return members;
+
+    if (!options.prefixes.some((prefix) => family.startsWith(prefix))) return [];
     const touched = Math.max(...members.map((member) => member.touchedMs));
-    return owned && options.now - touched > options.unmarkedDays * DAY_MS ? members : [];
+    return options.now - touched >= options.idleDays * DAY_MS ? members : [];
   });
 }
 
@@ -272,8 +361,15 @@ const reportSchema = z.object({
   freedBytes: z.number(),
   deleted: z.array(z.object({ path: z.string(), bytes: z.number() })),
   archived: z.object({ files: z.number(), bytes: z.number() }),
+  lowSpaceArchived: z
+    .object({ files: z.number(), bytes: z.number() })
+    .default({ files: 0, bytes: 0 }),
+  browserCachesPruned: z
+    .object({ files: z.number(), bytes: z.number() })
+    .default({ files: 0, bytes: 0 }),
   temp: z.object({ entries: z.number(), bytes: z.number() }).default({ entries: 0, bytes: 0 }),
   worktreesRemoved: z.array(z.object({ path: z.string(), bytes: z.number() })),
+  worktreesArchived: z.array(z.object({ path: z.string(), archive: z.string() })).default([]),
   worktreesKept: z.array(z.object({ path: z.string(), reason: z.string(), idleDays: z.number() })),
   nativeBuildsCleared: z.array(z.object({ path: z.string(), bytes: z.number() })).default([]),
   codexThreadsDeleted: z
@@ -302,6 +398,8 @@ export function summarizePrune(report: PruneReport): string {
     `${report.dryRun ? "would free" : "freed"} ${gib(report.freedBytes)}`,
     `deleted ${report.deleted.length}`,
     `archived ${report.archived.files} files (${gib(report.archived.bytes)})`,
+    `low-space sessions archived ${report.lowSpaceArchived.files} (${gib(report.lowSpaceArchived.bytes)})`,
+    `browser cache files removed ${report.browserCachesPruned.files} (${gib(report.browserCachesPruned.bytes)})`,
     `temp entries removed ${report.temp.entries} (${gib(report.temp.bytes)})`,
     `worktrees removed ${report.worktreesRemoved.length}`,
     `native builds cleared in ${report.nativeBuildsCleared.length} worktrees`,
@@ -328,16 +426,15 @@ async function run(
   args: string[],
   options: { cwd?: string; timeout?: number } = {},
 ) {
-  return execa(command, args, {
-    reject: false,
+  return timedCommand(command, args, {
     timeout: options.timeout ?? 60_000,
     cwd: options.cwd,
   });
 }
 
-/** Every path any of this user's processes holds open, including working directories; undefined when lsof fails. */
+/** Every visible process's open paths, including working directories; undefined when lsof fails. */
 async function listOpenPaths(): Promise<Set<string> | undefined> {
-  const result = await run("lsof", ["-nP", "-w", "-Fn", "-u", String(process.getuid?.() ?? 0)], {
+  const result = await run("lsof", ["-nP", "-w", "-Fn"], {
     timeout: 120_000,
   });
   if (!result.stdout) return undefined;
@@ -460,6 +557,7 @@ async function filesWithAge(dir: string): Promise<Array<AgedEntry & { size: numb
  * time limit, because a copy to a stalled external disk can wait for hours and an in-process copy cannot be stopped.
  */
 async function moveFile(source: string, target: string): Promise<void> {
+  const before = await lstat(source);
   await mkdir(dirname(target), { recursive: true });
   const copied = await run("cp", ["-p", source, target], { timeout: ARCHIVE_COPY_TIMEOUT_MS });
   if (copied.exitCode !== 0) {
@@ -468,8 +566,16 @@ async function moveFile(source: string, target: string): Promise<void> {
       `cannot copy ${source}${copied.timedOut ? " within the time limit" : `: ${copied.stderr.trim()}`}`,
     );
   }
-  if ((await lstat(target)).size !== (await lstat(source)).size) {
-    throw new Error(`copy size mismatch for ${source}`);
+  const verified = await run("cmp", ["-s", source, target], { timeout: ARCHIVE_COPY_TIMEOUT_MS });
+  const after = await lstat(source);
+  if (
+    verified.exitCode !== 0 ||
+    before.ino !== after.ino ||
+    before.size !== after.size ||
+    before.mtimeMs !== after.mtimeMs ||
+    before.ctimeMs !== after.ctimeMs
+  ) {
+    throw new Error(`copy verification failed or source changed for ${source}`);
   }
   await unlink(source);
 }
@@ -489,6 +595,135 @@ async function removeEmptyParents(files: string[], root: string): Promise<void> 
 function archiveMounted(home: string): boolean {
   const volume = statSync(MAC_WATCHER.storage.archiveVolume, { throwIfNoEntry: false });
   return Boolean(volume?.isDirectory() && volume.dev !== statSync(home).dev);
+}
+
+interface ArchiveRule {
+  path: string;
+  days: number;
+  to: string;
+}
+
+export interface FileStorageRules {
+  archiveVolume: string;
+  archiveRoot: string;
+  archiveFiles: readonly ArchiveRule[];
+  lowSpace: {
+    freeGiB: number;
+    archiveFiles: readonly ArchiveRule[];
+    browserCaches: { days: number; paths: readonly string[] };
+  };
+}
+
+/** Archive files at the normal age, or sooner under disk pressure; delete only old files inside named cache folders. */
+export async function pruneFileStorage(options: {
+  home: string;
+  now: number;
+  dryRun: boolean;
+  freeBytes: number | undefined;
+  openPaths: Set<string>;
+  archiveMounted: boolean;
+  rules?: FileStorageRules;
+}): Promise<
+  Pick<
+    PruneReport,
+    "archived" | "lowSpaceArchived" | "browserCachesPruned" | "freedBytes" | "skipped" | "errors"
+  >
+> {
+  const { home, now, dryRun, openPaths } = options;
+  const rules: FileStorageRules = options.rules ?? MAC_WATCHER.storage;
+  const lowSpace =
+    options.freeBytes !== undefined && options.freeBytes < rules.lowSpace.freeGiB * 1024 ** 3;
+  const report = {
+    archived: { files: 0, bytes: 0 },
+    lowSpaceArchived: { files: 0, bytes: 0 },
+    browserCachesPruned: { files: 0, bytes: 0 },
+    freedBytes: 0,
+    skipped: [] as string[],
+    errors: [] as string[],
+  };
+  const attempt = async (path: string, action: () => Promise<void>) => {
+    try {
+      await action();
+    } catch (error) {
+      report.errors.push(
+        `${path}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300),
+      );
+    }
+  };
+
+  if (options.freeBytes === undefined)
+    report.skipped.push("Internal free space unavailable; low-space rules skipped");
+  if (!options.archiveMounted) {
+    report.skipped.push(`${rules.archiveVolume} is not mounted, so nothing was archived`);
+  } else {
+    const accelerated = lowSpace ? rules.lowSpace.archiveFiles : [];
+    const archiveRules = [
+      ...accelerated,
+      ...rules.archiveFiles.filter(
+        (rule) => !accelerated.some((early) => early.path === rule.path),
+      ),
+    ];
+    for (const rule of archiveRules) {
+      await attempt(rule.path, async () => {
+        const source = join(home, rule.path);
+        const files = olderThan(await filesWithAge(source), rule.days, now).filter(
+          (file) => !isInUse(file.path, openPaths),
+        );
+        for (const file of files) {
+          await attempt(file.path, async () => {
+            if (!dryRun)
+              await moveFile(
+                file.path,
+                join(rules.archiveRoot, rule.to, relative(source, file.path)),
+              );
+            report.archived.files += 1;
+            report.archived.bytes += file.size;
+            report.freedBytes += file.size;
+            if (accelerated.includes(rule)) {
+              report.lowSpaceArchived.files += 1;
+              report.lowSpaceArchived.bytes += file.size;
+            }
+          });
+        }
+        if (!dryRun)
+          await removeEmptyParents(
+            files.map((file) => file.path),
+            source,
+          );
+      });
+    }
+  }
+
+  if (lowSpace) {
+    const cacheDirs = new Set<string>();
+    for (const pattern of rules.lowSpace.browserCaches.paths) {
+      await attempt(pattern, async () => {
+        for await (const path of new Bun.Glob(pattern).scan({
+          cwd: home,
+          absolute: true,
+          onlyFiles: false,
+          followSymlinks: false,
+        })) {
+          if ((await lstat(path)).isDirectory()) cacheDirs.add(path);
+        }
+      });
+    }
+    for (const dir of cacheDirs) {
+      await attempt(dir, async () => {
+        const files = olderThan(await filesWithAge(dir), rules.lowSpace.browserCaches.days, now);
+        for (const file of files) {
+          if (isInUse(file.path, openPaths)) continue;
+          await attempt(file.path, async () => {
+            if (!dryRun) await unlink(file.path);
+            report.browserCachesPruned.files += 1;
+            report.browserCachesPruned.bytes += file.size;
+            report.freedBytes += file.size;
+          });
+        }
+      });
+    }
+  }
+  return report;
 }
 
 // =============================================================================
@@ -519,7 +754,7 @@ function mysqlClient(home: string): MysqlQuery | undefined {
   };
 }
 
-/** The newest change to any file of a database, from its folder in the server's data directory. */
+/** File mtimes survive MySQL restarts, unlike InnoDB UPDATE_TIME. Unknown ages count as fresh. */
 async function newestChangeMs(dir: string): Promise<number> {
   try {
     const names = await readdir(dir);
@@ -688,6 +923,12 @@ async function testDatabaseFacts(mysql: MysqlQuery): Promise<TestDatabaseFacts[]
     .filter((name) => /^\w+$/.test(name) && rules.match.test(name));
   if (names.length === 0) return [];
 
+  const connections = await mysql(
+    "select distinct db from information_schema.processlist where db is not null",
+  );
+  if (!connections) return undefined;
+  const inUse = new Set(connections.map(([name]) => name));
+
   const dataDir = (await mysql("select @@datadir"))?.[0]?.[0] ?? "";
   const sizes = new Map(
     (
@@ -721,8 +962,138 @@ async function testDatabaseFacts(mysql: MysqlQuery): Promise<TestDatabaseFacts[]
       checkouts: checkouts.get(name) ?? [],
       touchedMs: dataDir ? await newestChangeMs(join(dataDir, name)) : Date.now(),
       bytes: sizes.get(name) ?? 0,
+      inUse: inUse.has(name),
     })),
   );
+}
+
+/** Protects suites between connections, including parallel workers and a runner still starting up. */
+export function testRunInProgress(commands: string): boolean {
+  return /(?:^|[\s/])(?:pest|phpunit|paratest)(?:[\s.]|$)|(?:^|[\s/])artisan\s+test(?:\s|$)|(?:^|[\s/])(?:backend-test|test-runtime)\.ts(?:\s|$)/m.test(
+    commands,
+  );
+}
+
+/** Unknown runner locations or unmarked families stay protected while any suite is running. */
+export function testDatabaseRunInProgress(
+  databases: TestDatabaseFacts[],
+  runnerPaths: Set<string> | undefined,
+): boolean {
+  if (!runnerPaths) return true;
+  if (runnerPaths.size === 0) return false;
+  const checkouts = databases.flatMap((database) => database.checkouts);
+  if (checkouts.length === 0) return true;
+
+  return checkouts.some((checkout) => {
+    const path = existsSync(checkout) ? realpathSync(checkout) : checkout;
+    return (
+      isInUse(path, runnerPaths) ||
+      [...runnerPaths].some((runner) => isInUse(runner, new Set([path])))
+    );
+  });
+}
+
+/** The database-only prune is also used for an explicitly scoped manual cleanup. All drops go through SQL. */
+export async function pruneTestDatabases(options: {
+  home: string;
+  now: Date;
+  dryRun: boolean;
+}): Promise<Pick<PruneReport, "testDatabasesDropped" | "freedBytes" | "skipped" | "errors">> {
+  const report = {
+    testDatabasesDropped: [] as { name: string; bytes: number }[],
+    freedBytes: 0,
+    skipped: [] as string[],
+    errors: [] as string[],
+  };
+  const mysql = mysqlClient(options.home);
+  const databases = mysql && (await testDatabaseFacts(mysql));
+  if (!mysql || !databases) {
+    report.skipped.push("MySQL activity could not be checked, so no test database was touched");
+    return report;
+  }
+
+  const doomed = testDatabasesToDrop(databases, {
+    now: options.now.getTime(),
+    idleDays: MAC_WATCHER.storage.testDatabases.idleDays,
+    prefixes: ACTIVE_PROJECTS.map((project) => `${project.name.toLowerCase()}_`),
+    checkoutExists: existsSync,
+  });
+  let runnerSignature: string | undefined;
+  let runnerPaths: Set<string> | undefined;
+  for (const database of doomed) {
+    // Recheck immediately before each drop: a suite may start after the initial inventory.
+    const processes = await run("ps", ["-axo", "pid=,command="]);
+    if (processes.exitCode !== 0) {
+      report.skipped.push("Process visibility unavailable; remaining test databases kept");
+      break;
+    }
+    const runners = processes.stdout.split("\n").flatMap((line) => {
+      const match = line.match(/^\s*(\d+)\s+(.*)$/);
+      return match && testRunInProgress(match[2]!) ? [match[1]!] : [];
+    });
+    const signature = runners.join(",");
+    if (signature !== runnerSignature) {
+      runnerSignature = signature;
+      runnerPaths = new Set();
+      if (runners.length) {
+        const cwd = await run("lsof", ["-a", "-p", signature, "-d", "cwd", "-Fn"]);
+        const seen = new Set<string>();
+        let pid: string | undefined;
+        for (const line of cwd.stdout.split("\n")) {
+          if (line.startsWith("p")) pid = line.slice(1);
+          if (line.startsWith("n") && pid) {
+            seen.add(pid);
+            const path = line.slice(1);
+            runnerPaths.add(existsSync(path) ? realpathSync(path) : path);
+          }
+        }
+        if (cwd.exitCode !== 0 || runners.some((pid) => !seen.has(pid))) runnerPaths = undefined;
+      }
+    }
+    if (!runnerPaths) {
+      report.skipped.push("Test runner locations unavailable; remaining test databases kept");
+      break;
+    }
+    const family = databases.filter(
+      (member) =>
+        testDatabaseFamily(member.name) === testDatabaseFamily(database.name) &&
+        !report.testDatabasesDropped.some((dropped) => dropped.name === member.name),
+    );
+    if (testDatabaseRunInProgress(family, runnerPaths)) continue;
+    const connections = await mysql(
+      "select distinct db from information_schema.processlist where db is not null",
+    );
+    if (!connections) {
+      report.skipped.push("MySQL activity unavailable; remaining test databases kept");
+      break;
+    }
+    if (connections.some(([name]) => family.some((member) => member.name === name))) continue;
+
+    const dataDir = (await mysql("select @@datadir"))?.[0]?.[0];
+    const refreshed = await Promise.all(
+      family.map(async (member) => ({
+        ...member,
+        touchedMs: dataDir ? await newestChangeMs(join(dataDir, member.name)) : Date.now(),
+      })),
+    );
+    if (
+      !testDatabasesToDrop(refreshed, {
+        now: options.now.getTime(),
+        idleDays: MAC_WATCHER.storage.testDatabases.idleDays,
+        prefixes: ACTIVE_PROJECTS.map((project) => `${project.name.toLowerCase()}_`),
+        checkoutExists: existsSync,
+      }).some((member) => member.name === database.name)
+    )
+      continue;
+
+    if (!options.dryRun && !(await mysql(`drop database if exists \`${database.name}\``))) {
+      report.errors.push(`test database ${database.name}: drop failed`);
+      continue;
+    }
+    report.testDatabasesDropped.push({ name: database.name, bytes: database.bytes });
+    report.freedBytes += database.bytes;
+  }
+  return report;
 }
 
 // =============================================================================
@@ -759,6 +1130,7 @@ async function worktreeFacts(
   worktree: ListedWorktree,
   openPaths: Set<string>,
   now: number,
+  abandonedIdleDays: number,
 ): Promise<WorktreeFacts> {
   const git = (...args: string[]) =>
     run("git", ["--no-optional-locks", "-C", worktree.path, ...args]);
@@ -811,18 +1183,199 @@ async function worktreeFacts(
     locked: worktree.locked,
     dirty: status.exitCode !== 0 || status.stdout.trim() !== "",
     inUse: isInUse(worktree.path, openPaths),
-    lastActivityMs,
+    lastActivityMs: Math.max(lastActivityMs, lastCommitMs),
     mergedIntoBase: merged.exitCode === 0,
     pr: finishedPr,
     prFinishedAt: finishedPr?.mergedAt ?? finishedPr?.closedAt ?? null,
     lastCommitMs,
     recentFiles,
+    filesChangedWithinIdleWindow: await cleanupFilesChangedRecently(
+      worktree.path,
+      now,
+      undefined,
+      abandonedIdleDays * DAY_MS,
+    ),
+    filesChangedWithinDay: !worktree.branch
+      ? await cleanupFilesChangedRecently(worktree.path, now, undefined, DAY_MS)
+      : undefined,
   };
 }
 
-/** A worktree's native build output as absolute paths; empty while any of it changed within the idle window. */
-async function idleNativeBuilds(worktree: string): Promise<string[]> {
+async function archiveFileDigest(path: string): Promise<string> {
+  const info = await lstat(path);
+  const hash = createHash("sha256").update(String(info.mode));
+  if (info.isSymbolicLink()) return hash.update(await readlink(path)).digest("hex");
+  if (!info.isFile()) throw new Error(`cannot archive special file ${path}`);
+  for await (const chunk of Bun.file(path).stream()) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+/** Full HEAD bundle includes every unpublished commit and needs no surviving local or remote prerequisite. */
+export async function archiveWorktree(options: {
+  path: string;
+  repo: string;
+  archiveRoot: string;
+  now: Date;
+  mounted: () => boolean;
+}): Promise<{ archive: string; unchanged: () => Promise<boolean> }> {
+  const { path, repo, archiveRoot, now, mounted } = options;
+  if (!mounted()) throw new Error("archive SSD is not mounted; worktree kept");
+  const git = async (...args: string[]) => {
+    const result = await run("git", ["--no-optional-locks", "-C", path, ...args], {
+      timeout: ARCHIVE_COPY_TIMEOUT_MS,
+    });
+    if (result.exitCode !== 0)
+      throw new Error(`archive git ${args[0]} failed: ${result.stderr.trim()}`);
+    return result.stdout;
+  };
+  // A superproject patch cannot preserve unpublished commits or dirty files inside nested repositories.
+  if ((await git("ls-files", "--stage")).split("\n").some((line) => line.startsWith("160000 ")))
+    throw new Error("submodule work requires a separate archive; worktree kept");
+  const snapshot = async () => {
+    const head = (await git("rev-parse", "HEAD")).trim();
+    const status = await git("status", "--porcelain=v1", "-z", "--untracked-files=all");
+    const untracked = (await git("ls-files", "--others", "--exclude-standard", "-z"))
+      .split("\0")
+      .filter(Boolean);
+    const hashes: Record<string, string> = Object.create(null);
+    for (const file of untracked) hashes[file] = await archiveFileDigest(join(path, file));
+    return { head, status, hashes };
+  };
+  const before = await snapshot();
+  const parent = join(archiveRoot, "worktrees", repo);
+  await mkdir(parent, { recursive: true, mode: 0o700 });
+  const archive = await mkdtemp(
+    join(parent, `${basename(path)}-${now.toISOString().replaceAll(":", "-")}-`),
+  );
+  const patch = join(archive, "changes.patch");
+  const staged = join(archive, "staged.patch");
+  await git(
+    "diff",
+    "--binary",
+    "--no-ext-diff",
+    "--no-textconv",
+    `--output=${patch}`,
+    "HEAD",
+    "--",
+  );
+  await git(
+    "diff",
+    "--cached",
+    "--binary",
+    "--no-ext-diff",
+    "--no-textconv",
+    `--output=${staged}`,
+    "HEAD",
+    "--",
+  );
+  const patchHash = await archiveFileDigest(patch);
+  const stagedHash = await archiveFileDigest(staged);
+  for (const [file, hash] of Object.entries(before.hashes)) {
+    const target = join(archive, "untracked", file);
+    await mkdir(dirname(target), { recursive: true, mode: 0o700 });
+    const copied = await run("cp", ["-pPR", join(path, file), target], {
+      timeout: ARCHIVE_COPY_TIMEOUT_MS,
+    });
+    if (copied.exitCode !== 0) throw new Error(`cannot copy untracked file ${file} to archive`);
+    if ((await archiveFileDigest(target)) !== hash)
+      throw new Error(`untracked archive verification failed: ${file}`);
+  }
+  const bundle = join(archive, "commits.bundle");
+  await git("bundle", "create", bundle, "HEAD");
+  const bundleHash = await archiveFileDigest(bundle);
+  const scratch = await mkdtemp(join(tmpdir(), "worktree-archive-verify-"));
+  try {
+    const verification = join(scratch, "repo.git");
+    const checked = async (...args: string[]) => {
+      const result = await run("git", args, { timeout: ARCHIVE_COPY_TIMEOUT_MS });
+      if (result.exitCode !== 0)
+        throw new Error(`archive verification failed: ${result.stderr.trim()}`);
+      return result.stdout.trim();
+    };
+    await checked("clone", "--bare", bundle, verification);
+    await checked("-C", verification, "fsck", "--full");
+    if ((await checked("-C", verification, "rev-parse", "HEAD")) !== before.head)
+      throw new Error("archive bundle HEAD mismatch");
+    await checked("-C", verification, "read-tree", "HEAD");
+    if ((await lstat(patch)).size)
+      await checked("-C", verification, "apply", "--cached", "--check", patch);
+    if ((await lstat(staged)).size)
+      await checked("-C", verification, "apply", "--cached", "--check", staged);
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+  const unchanged = async () => {
+    if (!mounted() || JSON.stringify(await snapshot()) !== JSON.stringify(before)) return false;
+    if (
+      (await archiveFileDigest(bundle)) !== bundleHash ||
+      (await archiveFileDigest(patch)) !== patchHash ||
+      (await archiveFileDigest(staged)) !== stagedHash
+    )
+      return false;
+    for (const [file, hash] of Object.entries(before.hashes))
+      if ((await archiveFileDigest(join(archive, "untracked", file))) !== hash) return false;
+    const scratch = await mkdtemp(join(tmpdir(), "worktree-archive-diff-"));
+    try {
+      const current = join(scratch, "changes.patch");
+      const index = join(scratch, "staged.patch");
+      await git(
+        "diff",
+        "--binary",
+        "--no-ext-diff",
+        "--no-textconv",
+        `--output=${current}`,
+        "HEAD",
+        "--",
+      );
+      await git(
+        "diff",
+        "--cached",
+        "--binary",
+        "--no-ext-diff",
+        "--no-textconv",
+        `--output=${index}`,
+        "HEAD",
+        "--",
+      );
+      return (
+        (await archiveFileDigest(current)) === patchHash &&
+        (await archiveFileDigest(index)) === stagedHash
+      );
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  };
+  if (!(await unchanged())) throw new Error("worktree changed during archive; worktree kept");
+  await writeFile(
+    join(archive, "manifest.json"),
+    JSON.stringify(
+      {
+        source: path,
+        at: now.toISOString(),
+        ...before,
+        patchHash,
+        stagedHash,
+        bundleHash,
+        unpublishedCommits: (await git("rev-list", "HEAD", "--not", "--remotes"))
+          .trim()
+          .split("\n")
+          .filter(Boolean),
+        verified: true,
+      },
+      null,
+      2,
+    ),
+    { mode: 0o600 },
+  );
+  return { archive, unchanged };
+}
+
+/** Reinstallable ignored folders; any change anywhere in the checkout protects all of them. */
+export async function idleNativeBuilds(worktree: string, now: number): Promise<string[]> {
   const rule = MAC_WATCHER.storage.nativeBuilds;
+  if (await cleanupFilesChangedRecently(worktree, now, undefined, rule.idleHours * HOUR_MS))
+    return [];
+
   const listed = await run("git", [
     "-C",
     worktree,
@@ -834,42 +1387,18 @@ async function idleNativeBuilds(worktree: string): Promise<string[]> {
     "--directory",
   ]);
   if (listed.exitCode !== 0) throw new Error(`cannot list ignored files in ${worktree}`);
+  const tracked = await run("git", ["-C", worktree, "ls-files", "-z", "--cached"]);
+  if (tracked.exitCode !== 0) throw new Error(`cannot list tracked files in ${worktree}`);
   const { outputs, dependencyDirs } = nativeBuildCandidates(
     listed.stdout.split("\0").filter(Boolean),
     rule,
+    tracked.stdout.split("\0").filter(Boolean),
   );
+  const paths = [...new Set([...outputs, ...dependencyDirs])];
 
-  let dependencyBuilds: string[] = [];
-  if (dependencyDirs.length > 0) {
-    const builds = rule.dependencies.builds.flatMap((pattern, index) => [
-      ...(index > 0 ? ["-o"] : []),
-      "-path",
-      pattern,
-    ]);
-    const dirs = dependencyDirs.map((dir) => join(worktree, dir));
-    const found = await run(
-      "find",
-      [...dirs, "-type", "d", "(", ...builds, ")", "-prune", "-print0"],
-      { timeout: 180_000 },
-    );
-    if (found.exitCode !== 0) throw new Error(`cannot search dependencies in ${worktree}`);
-    dependencyBuilds = found.stdout.split("\0").filter(Boolean);
-  }
-  const paths = [
-    ...outputs.map((path) => join(worktree, path).replace(/\/$/, "")),
-    ...dependencyBuilds,
-  ];
-  if (paths.length === 0) return [];
-
-  // One recent file means a build may still need the rest; find stops at the first.
-  const recent = await run(
-    "find",
-    [...paths, "-mmin", `-${rule.idleHours * 60}`, "-print", "-quit"],
-    { timeout: 180_000 },
-  );
-  if (recent.stdout.trim()) return [];
-  if (recent.exitCode !== 0) throw new Error(`cannot check native build ages in ${worktree}`);
-  return paths;
+  return paths
+    .filter((path) => !paths.some((parent) => parent !== path && path.startsWith(parent)))
+    .map((path) => join(worktree, path).replace(/\/$/, ""));
 }
 
 // =============================================================================
@@ -892,8 +1421,11 @@ export async function pruneStorage(options: {
     freedBytes: 0,
     deleted: [],
     archived: { files: 0, bytes: 0 },
+    lowSpaceArchived: { files: 0, bytes: 0 },
+    browserCachesPruned: { files: 0, bytes: 0 },
     temp: { entries: 0, bytes: 0 },
     worktreesRemoved: [],
+    worktreesArchived: [],
     worktreesKept: [],
     nativeBuildsCleared: [],
     codexThreadsDeleted: { threads: 0, bytes: 0 },
@@ -925,6 +1457,12 @@ export async function pruneStorage(options: {
     return report;
   }
 
+  let freeBytes: number | undefined;
+  await attempt("internal free space", async () => {
+    const disk = await statfs(home);
+    freeBytes = disk.bavail * disk.bsize;
+  });
+
   let cleanupThreads: CleanupThread[] | null = null;
   let worktreeVisibility = false;
   const protectedWorktreePaths = new Set(openPaths);
@@ -937,7 +1475,7 @@ export async function pruneStorage(options: {
       protect(thread.projectRoot);
       if (thread.worktreePath) protect(thread.worktreePath);
     }
-    for (const project of ACTIVE_PROJECTS) {
+    for (const project of STORAGE_WORKTREE_PROJECTS) {
       if (!existsSync(project.canonicalRoot)) continue;
       const result = await run("git", [
         "-C",
@@ -989,9 +1527,16 @@ export async function pruneStorage(options: {
         ...childrenInUse(dir, protectedWorktreePaths),
         ...(await protectedChildren(dir)),
       ]);
-      const leftovers = tempLeftovers(await tempEntries(dir, uid), { ...rules.temp, now }).filter(
-        (entry) => !kept.has(entry.path),
-      );
+      const leftovers: TempEntry[] = [];
+      for (const entry of tempLeftovers(await tempEntries(dir, uid), { ...rules.temp, now })) {
+        if (kept.has(entry.path)) continue;
+        if (
+          rules.temp.toolCaches.match.test(entry.name) &&
+          !(await toolCacheIdle(entry.path, now, rules.temp.toolCaches.days))
+        )
+          continue;
+        leftovers.push(entry);
+      }
       const bytes = await totalSizeBytes(leftovers.map((entry) => entry.path));
       if (!dryRun) {
         for (const entry of leftovers)
@@ -1003,33 +1548,22 @@ export async function pruneStorage(options: {
     }
   });
 
-  if (!archiveMounted(home)) {
-    report.skipped.push(`${rules.archiveVolume} is not mounted, so nothing was archived`);
-  } else {
-    for (const rule of rules.archiveFiles) {
-      await attempt(rule.path, async () => {
-        const source = join(home, rule.path);
-        const files = olderThan(await filesWithAge(source), rule.days, now).filter(
-          (file) => !isInUse(file.path, openPaths),
-        );
-        for (const file of files) {
-          if (!dryRun)
-            await moveFile(
-              file.path,
-              join(rules.archiveRoot, rule.to, relative(source, file.path)),
-            );
-          report.archived.files += 1;
-          report.archived.bytes += file.size;
-          report.freedBytes += file.size;
-        }
-        if (!dryRun)
-          await removeEmptyParents(
-            files.map((file) => file.path),
-            source,
-          );
-      });
-    }
-  }
+  await attempt("archives and browser caches", async () => {
+    const result = await pruneFileStorage({
+      home,
+      now,
+      dryRun,
+      freeBytes,
+      openPaths,
+      archiveMounted: archiveMounted(home),
+    });
+    report.archived = result.archived;
+    report.lowSpaceArchived = result.lowSpaceArchived;
+    report.browserCachesPruned = result.browserCachesPruned;
+    report.freedBytes += result.freedBytes;
+    report.skipped.push(...result.skipped);
+    report.errors.push(...result.errors);
+  });
 
   const codexState = codexDatabase(home, "state");
   const codexHistory = codexDatabase(home, "thread_history");
@@ -1114,7 +1648,7 @@ export async function pruneStorage(options: {
     }
   });
 
-  for (const project of ACTIVE_PROJECTS) {
+  for (const project of STORAGE_WORKTREE_PROJECTS) {
     if (!existsSync(project.canonicalRoot)) continue;
     await attempt(project.name, async () => {
       if (!cleanupThreads) {
@@ -1165,7 +1699,14 @@ export async function pruneStorage(options: {
             return;
           }
           const facts: WorktreeFacts = {
-            ...(await worktreeFacts(project.canonicalRoot, project.baseBranch, worktree, openPaths, now)),
+            ...(await worktreeFacts(
+              project.canonicalRoot,
+              project.baseBranch,
+              worktree,
+              openPaths,
+              now,
+              bound.length ? rules.worktreeIdleDays.thread : rules.worktreeIdleDays.abandoned,
+            )),
             threads: bound.filter((thread) => !thread.running).map((thread) => thread.title),
           };
           const decision = decideWorktree(facts, now, rules.worktreeIdleDays);
@@ -1173,9 +1714,13 @@ export async function pruneStorage(options: {
             const idleDays = Math.max(0, Math.floor((now - facts.lastActivityMs) / DAY_MS));
             report.worktreesKept.push({ path: worktree.path, reason: decision.reason, idleDays });
 
-            if (facts.inUse || now - facts.lastActivityMs < rules.nativeBuilds.idleHours * HOUR_MS)
+            if (
+              facts.locked ||
+              facts.inUse ||
+              now - facts.lastActivityMs < rules.nativeBuilds.idleHours * HOUR_MS
+            )
               return;
-            const builds = await idleNativeBuilds(worktree.path);
+            const builds = await idleNativeBuilds(worktree.path, now);
             if (builds.length === 0) return;
             const buildBytes = await totalSizeBytes(builds);
             if (!dryRun)
@@ -1184,17 +1729,93 @@ export async function pruneStorage(options: {
             report.freedBytes += buildBytes;
             return;
           }
+          if (decision.archive && !archiveMounted(home)) {
+            report.worktreesKept.push({
+              path: worktree.path,
+              reason: "archive SSD is not mounted",
+              idleDays: Math.floor((now - facts.lastActivityMs) / DAY_MS),
+            });
+            return;
+          }
           const bytes = await sizeBytes(worktree.path);
           if (!dryRun) {
-            const removed = await run("git", [
+            const archived = decision.archive
+              ? await archiveWorktree({
+                  path: worktree.path,
+                  repo: basename(project.canonicalRoot),
+                  archiveRoot: rules.archiveRoot,
+                  now: options.now,
+                  mounted: () => archiveMounted(home),
+                })
+              : undefined;
+            if (archived)
+              report.worktreesArchived.push({ path: worktree.path, archive: archived.archive });
+
+            // Archiving can take minutes. Refresh process, thread, lock, branch, HEAD, and file activity before deletion.
+            const freshOpen = await listOpenPaths();
+            if (!freshOpen) throw new Error("cannot recheck open paths; worktree kept");
+            const freshThreads = await readCleanupThreads(home);
+            if (
+              cleanupBoundThreads(
+                project.canonicalRoot,
+                worktree.path,
+                worktree.branch ?? null,
+                freshThreads,
+              ).some((thread) => thread.running)
+            )
+              throw new Error("T3 thread started during cleanup; worktree kept");
+            const refreshed = await run("git", [
               "-C",
               project.canonicalRoot,
               "worktree",
-              "remove",
-              worktree.path,
+              "list",
+              "--porcelain",
             ]);
+            if (refreshed.exitCode !== 0) throw new Error("cannot recheck worktree registration");
+            const current = parseWorktreeList(refreshed.stdout).find(
+              (tree) => tree.path === worktree.path,
+            );
+            if (!current || current.head !== facts.head || current.branch !== facts.branch)
+              throw new Error("worktree identity changed; worktree kept");
+            const freshFacts = await worktreeFacts(
+              project.canonicalRoot,
+              project.baseBranch,
+              current,
+              freshOpen,
+              Date.now(),
+              bound.length ? rules.worktreeIdleDays.thread : rules.worktreeIdleDays.abandoned,
+            );
+            const freshDecision = decideWorktree(
+              { ...freshFacts, threads: facts.threads },
+              Date.now(),
+              rules.worktreeIdleDays,
+            );
+            if (
+              !freshDecision.remove ||
+              Boolean(freshDecision.archive) !== Boolean(decision.archive)
+            )
+              throw new Error(
+                `worktree safety changed; worktree kept${!freshDecision.remove ? `: ${freshDecision.reason}` : ""}`,
+              );
+            if (archived && !(await archived.unchanged()))
+              throw new Error("archive or source changed; worktree kept");
+            const removed = await run(
+              "git",
+              [
+                "-C",
+                project.canonicalRoot,
+                "worktree",
+                "remove",
+                ...(decision.archive ? ["--force"] : []),
+                worktree.path,
+              ],
+              { timeout: ARCHIVE_COPY_TIMEOUT_MS },
+            );
             if (removed.exitCode !== 0)
               throw new Error(removed.stderr.trim() || "git worktree remove failed");
+            const pruned = await run("git", ["-C", project.canonicalRoot, "worktree", "prune"]);
+            if (pruned.exitCode !== 0)
+              report.errors.push(`${project.name}: git worktree prune failed`);
           }
           report.worktreesRemoved.push({ path: worktree.path, bytes });
           report.freedBytes += bytes;
@@ -1204,27 +1825,11 @@ export async function pruneStorage(options: {
   }
 
   await attempt("test databases", async () => {
-    const mysql = mysqlClient(home);
-    const databases = mysql && (await testDatabaseFacts(mysql));
-    if (!mysql || !databases) {
-      report.skipped.push("MySQL is not reachable, so no test database was checked");
-      return;
-    }
-    const doomed = testDatabasesToDrop(databases, {
-      now,
-      unmarkedDays: rules.testDatabases.unmarkedDays,
-      prefixes: ACTIVE_PROJECTS.map((project) => `${project.name.toLowerCase()}_`),
-      checkoutExists: existsSync,
-    });
-    // One call per database, so a slow drop on a busy disk never times out the rest.
-    for (const database of doomed) {
-      await attempt(`test database ${database.name}`, async () => {
-        if (!dryRun && !(await mysql(`drop database if exists \`${database.name}\``)))
-          throw new Error("drop failed");
-        report.testDatabasesDropped.push({ name: database.name, bytes: database.bytes });
-        report.freedBytes += database.bytes;
-      });
-    }
+    const result = await pruneTestDatabases({ home, now: options.now, dryRun });
+    report.testDatabasesDropped.push(...result.testDatabasesDropped);
+    report.freedBytes += result.freedBytes;
+    report.skipped.push(...result.skipped);
+    report.errors.push(...result.errors);
   });
 
   return report;

@@ -2,10 +2,10 @@ import { prepareConcurrentTurns } from "./concurrent-turns";
 import type { HostJob } from "./host-capacity";
 import { groupIsAlive, matchesProcess, type ProcessRow } from "./process-identity";
 
-export const HEAVY_CAPACITY = 3;
+export const HEAVY_CAPACITY = 10;
 
 export interface ConcurrentJob extends HostJob {
-  clientVersion?: "concurrent-v2" | "concurrent-v3";
+  clientVersion?: "concurrent-v2" | "concurrent-v3" | "concurrent-v4";
 }
 
 export interface ConcurrentCapacity {
@@ -55,6 +55,7 @@ export function claimConcurrentCapacity(
   blocked: boolean,
   otherActive: HostJob[] = [],
   legacyWaiting: HostJob[] = [],
+  admit: (job: HostJob, active: HostJob[]) => boolean = () => true,
 ): boolean {
   if (!host.waiting.some((ticket) => ticket.reservationId === job.reservationId)) {
     job.sequence = host.nextSequence++;
@@ -62,6 +63,16 @@ export function claimConcurrentCapacity(
   }
 
   if (blocked) return false;
+
+  const allActive = [...host.active, ...otherActive];
+  if (job.reservationMode === "express") {
+    if (!admit(job, allActive)) return false;
+
+    host.waiting = host.waiting.filter((ticket) => ticket.reservationId !== job.reservationId);
+    job.acquiredAt = now;
+    host.active.push(job);
+    return true;
+  }
 
   const requester = (ticket: HostJob) => ticket.requester ?? ticket.reservationId;
   const { next, yieldLegacy } = prepareConcurrentTurns(
@@ -72,12 +83,12 @@ export function claimConcurrentCapacity(
   );
   if (
     yieldLegacy ||
-    host.active.length + otherActive.length >= HEAVY_CAPACITY ||
-    [...host.active, ...otherActive].some((ticket) => ticket.class === "benchmark") ||
-    next?.reservationId !== job.reservationId ||
-    (job.class === "benchmark" && host.active.length + otherActive.length > 0)
+    allActive.filter((ticket) => ticket.reservationMode !== "express").length >= HEAVY_CAPACITY ||
+    next?.reservationId !== job.reservationId
   )
     return false;
+
+  if (!admit(next, allActive)) return false;
 
   host.waiting = host.waiting.filter((ticket) => ticket.reservationId !== job.reservationId);
   Object.assign(job, next, { acquiredAt: now });

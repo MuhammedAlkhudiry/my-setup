@@ -1,17 +1,23 @@
 ---
 name: align
-description: Use when the user asks to align or recap the goal, problem, and current progress.
+description: Use only when the user asks for a status recap of the goal, problem, and progress; not for discussing or agreeing on an idea.
 ---
 
-Read the whole thread and relevant evidence unless the user narrows the scope. Respond with one tree only, rooted at the current goal.
-Keep each line concrete; include the problem, relevant assumptions, completed work, current work and its owner or blocker, and next steps
-only when they apply. Link relevant PRs and state their current status. Do not add introductory bullets, tables, or automatic PR triage.
+Read the whole thread and relevant evidence unless the user narrows the scope. Return only the list below, rooted at the current goal,
+with applicable items in this order. Name the owner or blocker for current work. Link relevant PRs with their current status; do not
+triage them automatically.
 
-```text
-Goal: <outcome>
-├─ Problem: <what prevents it>
-├─ Assumption: <unverified belief>
-├─ ✅ Done: <result>
-├─ 🔄 In progress: <work, owner, or wait>
-└─ ⬜ Next: <action>
+Write it as a Markdown list, never box-drawing characters or a code block: links must stay clickable and lines must wrap on a phone.
+Give each point its own list item; nest a sub-list when one label has several points.
+
+```markdown
+**Goal:** <outcome>
+
+- ⚠️ **Problem:** <what prevents it>
+- ❓ **Assumption:** <unverified belief>
+- ✅ **Done:**
+  - <result>
+  - <result>
+- 🔄 **In progress:** <work, owner, or wait>
+- ⬜ **Next:** <action>
 ```

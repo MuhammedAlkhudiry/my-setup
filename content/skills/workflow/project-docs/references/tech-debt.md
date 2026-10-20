@@ -1,7 +1,6 @@
 # Tech debt
 
-`docs/tech-debt/<slug>.md` holds one piece of intentionally postponed work, or a follow-up a change leaves behind, such as a known failing test
-or something to watch after release. State:
+Use `docs/tech-debt/<slug>.md` for one postponed task or follow-up, including known failures and post-release monitoring. State:
 
 - what remains and where it applies;
 - why it is postponed;

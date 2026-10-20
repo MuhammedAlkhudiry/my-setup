@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 
+import { parseMemoryPressure } from "../lib/host-capacity";
+
 /**
  * Mac resource watcher. `run` is the scheduled pass and `guard` the minute-by-minute CPU guard, each started by its own
  * LaunchAgent; `status`, `resolve`, `prune`, and `review` are for people.
@@ -35,6 +37,7 @@ import {
   type Alert,
   type Review,
   REVIEW_JSON_SCHEMA,
+  collectSystemDaemons,
   fileAgeSeconds,
   isLaunchAgentLoaded,
   isMemcapActionLine,
@@ -50,9 +53,15 @@ import {
   writeJson,
 } from "../lib/mac-watcher";
 import { pruneStorage, summarizePrune } from "../lib/storage-prune";
+import { timedCommand } from "../lib/timed-command";
 
 /** launchd runs `run` and `guard` and appends their output to the watcher log, which keeps each run's full report. */
-if (!["run", "guard"].includes(process.argv[2] ?? "")) agentOutput("mac-watcher", { nativeJson: false });
+if (!["run", "guard"].includes(process.argv[2] ?? ""))
+  agentOutput("mac-watcher", {
+    nativeJson: false,
+    summary: (output) =>
+      output.split("\n").find((line) => line.includes("] storage:")) ?? "mac-watcher: ok",
+  });
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
 const HOME = process.env.HOME || "";
@@ -66,7 +75,7 @@ const MAX_LOG_LINES = 80;
 // =============================================================================
 
 async function run(command: string, args: string[], timeout = 20_000): Promise<string> {
-  const result = await execa(command, args, { reject: false, timeout });
+  const result = await timedCommand(command, args, { timeout });
   return result.exitCode === 0 ? result.stdout : "";
 }
 
@@ -151,11 +160,10 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
   ]);
 
   const freePercent = Number(pressureText.match(/free percentage: (\d+)%/)?.[1]);
-  const pressureLevel =
-    ({ "1": "normal", "2": "warning", "4": "critical" } as const)[
-      pressureLevelText.trim() as "1" | "2" | "4"
-    ] ?? "unknown";
+  const systemDaemons = await collectSystemDaemons(processes);
+  const pressureLevel = parseMemoryPressure(pressureLevelText, pressureText);
   const swapUsedGib = Number(swapText.match(/used = ([\d.]+)M/)?.[1] ?? 0) / 1024;
+  const swapTotalGib = Number(swapText.match(/total = ([\d.]+)M/)?.[1] ?? 0) / 1024;
   const disk = statfsSync(HOME);
   const diskFreeGib = (disk.bavail * disk.bsize) / GIB;
   const largestDiskUsers =
@@ -241,8 +249,10 @@ async function collectSnapshot(memcapLogOffset: number, guardLogOffset: number) 
         freePercent: Number.isNaN(freePercent) ? undefined : freePercent,
         pressureLevel,
         swapUsedGib: Number(swapUsedGib.toFixed(2)),
+        swapTotalGib: Number(swapTotalGib.toFixed(2)),
       },
       cpu,
+      systemDaemons,
       diskFreeGib: Number(diskFreeGib.toFixed(1)),
       largestDiskUsers,
       families: [...families.entries()]
@@ -312,7 +322,7 @@ async function reviewWithCodex(snapshot: Snapshot, openAlerts: Alert[]): Promise
 
   await writeJson(paths.outputSchema, REVIEW_JSON_SCHEMA);
   const { codex } = MAC_WATCHER;
-  await execa(
+  const result = await timedCommand(
     "codex",
     [
       "exec",
@@ -335,6 +345,8 @@ async function reviewWithCodex(snapshot: Snapshot, openAlerts: Alert[]): Promise
     ],
     { input: prompt, timeout: codex.timeoutMs, stdout: "ignore", stderr: "pipe" },
   );
+  if (result.failed)
+    throw new Error(`Codex review failed: ${result.timedOut ? "timed out" : result.stderr}`);
   return reviewSchema.parse(JSON.parse(readFileSync(paths.codexOutput, "utf8")));
 }
 
@@ -371,12 +383,14 @@ async function runOnce(): Promise<void> {
     const observed = thresholdAlerts({
       pressureLevel: snapshot.memory.pressureLevel,
       swapUsedGib: snapshot.memory.swapUsedGib,
+      swapTotalGib: snapshot.memory.swapTotalGib,
       diskFreeGib: snapshot.diskFreeGib,
       largestDiskUsers: snapshot.largestDiskUsers,
       loadAverage15: snapshot.cpu.loadAverage[2],
       cores: snapshot.cpu.cores,
       orphans: snapshot.orphans,
       sustainedCpu: snapshot.cpu.sustained,
+      systemDaemons: snapshot.systemDaemons,
       guardStops: snapshot.cpu.guardStops,
       memcapHealthy: memcapHealthy(snapshot),
       sharedPorts: snapshot.sharedPorts,
@@ -392,9 +406,10 @@ async function runOnce(): Promise<void> {
 
     state.memcapLogOffset = memcapLogOffset;
     state.guardLogOffset = guardLogOffset;
-    state.runs = [...state.runs, { at, alerts: observed.map((alert) => alert.key) }].slice(
-      -MAC_WATCHER.historyLimit,
-    );
+    state.runs = [
+      ...state.runs,
+      { at, alerts: observed.map((alert) => alert.key), systemDaemons: snapshot.systemDaemons },
+    ].slice(-MAC_WATCHER.historyLimit);
     state.lastSuccessAt = at;
     state.lastError = undefined;
   } catch (error) {
@@ -454,6 +469,10 @@ async function prune(
   if (!dryRun) await writeJson(paths.storagePrune, report);
 
   console.log(`[${report.at}] storage: ${summarizePrune(report)}`);
+  if (report.errors.length) process.exitCode = 1;
+  for (const error of report.errors) console.error(`error: ${error}`);
+  for (const entry of report.worktreesArchived)
+    console.log(`  archived worktree ${entry.path} to ${entry.archive}`);
   if (!dryRun) return;
   for (const entry of [...report.deleted, ...report.worktreesRemoved]) {
     console.log(`  remove ${(entry.bytes / 1024 ** 3).toFixed(2)}G ${shortCommand(entry.path)}`);
@@ -478,7 +497,6 @@ async function prune(
       `  keep worktree ${shortCommand(kept.path)} (${kept.reason}, idle ${kept.idleDays}d)`,
     );
   }
-  for (const error of report.errors) console.log(`  error ${error}`);
 }
 
 function readGuardState(): GuardState {

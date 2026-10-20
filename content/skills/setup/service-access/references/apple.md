@@ -2,13 +2,10 @@
 
 ## App Store Connect
 
-- Use the `asc` CLI through $mobile-app-infra, not browser automation or `asc web` sessions. The project's `mobile-release.env` supplies the API key;
-  verify access with `ASC_READ_ONLY=1 asc apps list`.
-- Keep the API key in agent-managed credential storage. Pause when the user must create or download it.
+Use `asc` through $mobile-app-infra, never browser automation or `asc web`. Load the project's `mobile-release.env`; verify with
+`ASC_READ_ONLY=1 asc apps list`. Keep keys in agent-managed storage; pause when the user must create or download one.
 
 ## Sign in with Apple
 
-- Match the integration's service or bundle ID, team and key IDs, redirect URLs, runtime key path, and signing identity. Verify with a non-destructive
-  sign-in.
-- Repair mismatched identifiers, keys, or return URLs in the Apple developer account. Keep private keys in runtime secret storage unless local agent
-  access requires `$SERVICE_CREDENTIALS_HOME/apple-sign-in/`.
+Match service/bundle ID, team/key IDs, redirect URLs, runtime key path, and signing identity; verify with a non-destructive sign-in. Repair mismatches
+in the developer account. Keep keys in runtime secret storage unless local agent access needs `$SERVICE_CREDENTIALS_HOME/apple-sign-in/`.

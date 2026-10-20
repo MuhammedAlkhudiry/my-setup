@@ -1,32 +1,21 @@
 ---
 name: translation
-description: Use before adding or changing user-facing text, editing locale or translation files, writing Arabic copy, or reviewing translations.
+description: Use before writing user-facing copy, editing locale files, or reviewing translations.
 ---
 
-For Arabic copy, also read [Arabic UX copy](references/arabic-ux-copy.md).
+For Arabic, read [Arabic UX copy](references/arabic-ux-copy.md).
 
-## Workflow
+Translate meaning, never words: write each string as a native speaker would say it in that moment, because a word-for-word calque reads as
+a machine. This covers AI prompts and their examples, whose wording models copy.
 
-1. Inspect the product voice, locale files, UI context, placeholders, and plural rules.
-2. Update every affected locale. Keep placeholders, ICU syntax, formatting, and exact values unchanged.
-3. Return improved copy or specific review findings. State anything still unclear.
+Check product voice, UI context, locales, placeholders, and plural rules. Update every affected locale; preserve placeholders, ICU syntax,
+formatting, and exact values. State unresolved context.
 
-## Numerals
-
-Always render Latin digits, including numbers produced by locale formatters.
+Always render Latin digits, including locale-formatted numbers.
 
 ## Review
 
-For a review that spans sessions, save progress with $project-docs as type `tracker`.
+Report each finding with the translation key, current copy, suggestion, issue (`missing`, `literal`, `unnatural`, `tone`, `context`, or
+`placeholder`), and reason. Group repeated patterns and reference them from affected keys.
 
-Report each finding as:
-
-```text
-`translation.key`
-Current: "..."
-Suggested: "..."
-Issue: missing | literal | unnatural | tone | context | placeholder
-Reason: ...
-```
-
-Group repeated patterns once and reference them from affected keys.
+Save reviews spanning sessions through $project-docs as type `tracker`.

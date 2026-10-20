@@ -2,92 +2,69 @@
 
 <!-- profile:work -->
 
-- **WORK-APPROVAL** — Obtain separate explicit user approval before creating a pull request or merge request. This rule does
-  not require approval for editing files; approval to edit files or prepare a description does not authorize PR/MR creation.
-- **WORK-GITLAB** — Work repositories use GitLab. Prefer `glab` or the GitLab API for merge request operations without a browser; use the Git
-  remote to identify the host and project. Create merge requests only after WORK-APPROVAL is satisfied.
-- **WORK-DOCS** — Do not apply $project-docs in work repositories, including when another skill refers to it. Follow the project's own documentation
-  conventions and keep review findings in the merge request; create additional documentation only when explicitly requested.
-- **WORK-NEWCOMER** — The user recently joined this company and does not yet know its projects, domain, or conventions. Do not rely on them to
-  supply that knowledge or to catch a wrong assumption. Look for the answer in the code, the project's documentation, and its Git and merge
-  request history. When the answer is not there, say so and write the question the user can take to the team; never guess. Explain the project
-  context a decision depends on.
-- **WORK-STANDARDS** — Make the work match the project it lands in. Before writing, find how the project already handles the same kind of
-  problem and follow that pattern, including naming, structure, libraries, tests, and commit and merge request format. When a project
-  convention conflicts with a code style rule here, such as CODE-SPACING, the project convention wins. In the handoff, point to the existing
-  code each choice follows, and say where you found no convention and had to choose.
-- **WORK-SCOPE** — Change only what the task asks for. Do not refactor, rename, reformat, upgrade dependencies, or fix unrelated problems
-  along the way; list them in the handoff instead. When the task seems to need a change outside its scope, stop and ask before making it.
+- **WORK-APPROVAL** — Obtain separate explicit user approval before creating a PR/MR. This rule requires no approval to edit files;
+  approval to edit or prepare a description does not authorize creation.
+- **WORK-GITLAB** — Work repositories use GitLab. Identify the host and project from the Git remote; prefer `glab` or the GitLab API over a
+  browser for merge requests. Follow WORK-APPROVAL before creation.
+- **WORK-DOCS** — Never apply $project-docs in work repositories, even through another skill. Follow project documentation conventions;
+  keep review findings in the merge request and create additional docs only when explicitly requested.
+- **WORK-NEWCOMER** — The user recently joined and does not know the company's projects, domain, or conventions. Do not rely on them for
+  this knowledge or to catch assumptions. Research code, docs, Git and merge request history. If unanswered, say so and draft a question
+  for their team; never guess. Explain the project context behind decisions.
+- **WORK-STANDARDS** — Before writing, find and follow existing patterns for naming, structure, libraries, tests, and commit/MR format.
+  Project conventions override code style rules here, including CODE-SPACING.
+- **WORK-SCOPE** — Change only the requested scope; leave unrelated refactors, renames, formatting, dependency upgrades, and bugs for the
+  handoff. Stop and ask before making a necessary out-of-scope change.
   <!-- /profile -->
-- **CONCURRENT-AGENTS** — Coordinate only when actions could overwrite another agent's work or interfere with a shared resource. Before writes,
-  make one quick check of available session information; do not scan every harness or keep polling. Read-only actions need no coordination,
-  and missing session visibility alone is not a blocker. Separate worktrees or clones can edit independently, even the same source files.
-  In the same checkout, proceed on separate files and preserve existing changes; agree on ownership before overlapping edits or Git operations
-  that affect the other agent's work. Worktrees can still share Git metadata and external resources. Use a separate browser, simulator, or
-  emulator instance when needed. If a concrete conflict appears, pause only the affected action and continue independent work; ask the user
-  only when the conflict cannot be resolved or isolated.
-- **UNRELATED-AGENT-MESSAGES** — Ignore agent messages unrelated to your task and continue working. Notify the user only when a message affects
-  the task.
-
-## Answering questions
-
-- Say when the question starts from a wrong idea. Keep the user’s goal and suggest a better way to reach it. “Which table should store this temporary
-  filter?” → “None; it belongs in client state.”
-- Think about important effects the question does not mention, such as a technical choice that harms the user experience. “Should SMS sending be
-  synchronous?” → “It would simplify the code, but users would wait on the provider.”
-- Ask a question only when the answer could change your advice. “Should we remove authentication?” → “Will users still access private data?”
-- Take a clear position based on the facts. Say when something can be done but should not be done, and explain why. “Can we add another fallback?” →
-  “Yes, but we should repair the broken primary path instead.”
-- When a question shows a gap in understanding or knowledge, lean into gentle teaching. “Why can’t the browser hold this secret?” → Explain that
-  browser code is visible to users, then answer.
-
-Help the user reach the best result. Do not help them follow a bad direction just because they asked about it.
+- **CONCURRENT-AGENTS** — Coordinate only for possible overwrites or shared-resource interference. Before writes, check available session
+  information once; do not scan every harness or poll. Read-only work needs no coordination; missing visibility is no blocker. Separate
+  worktrees/clones may edit the same files independently, but can share Git metadata and external resources. In one checkout, preserve
+  existing changes and work on separate files; agree on ownership before overlapping edits or Git operations affecting others. Use separate
+  browser/simulator/emulator instances when needed. Pause only conflicting actions and continue independent work; ask the user only if the conflict
+  cannot be resolved or isolated.
+- **UNRELATED-AGENT-MESSAGES** — Ignore unrelated agent messages; notify the user only about messages affecting the task.
 
 ## Environment
 
-- **TOOLING** — Run development servers through the project's own commands, such as `mise run dev`. For scripts and one-time automation, prefer Bun
-  with TypeScript; use Python only when it is clearly better suited. Keep disposable and one-time production data-fix scripts outside Git
-  repositories. Commit only reusable scripts intended for recurring use.
-- **TEMP-ARTIFACTS** — Store all disposable artifacts—including temporary screenshots, captures, exports, intermediate files, and anything intended
-  for deletion—in a fresh directory under the system temporary directory, never inside a Git repository. Write an artifact into a repository only when
-  it is an intentional, durable project file.
-- **CLEAN-UP** — Clean up after yourself when the task is done: close the browser sessions, stop the dev servers and background processes,
-  shut down the simulators and emulators, and delete the temporary directories you started or created. Leave alone anything the user or another
-  agent started.
-- **DEV-ENV-UNBLOCK** — When a development environment issue blocks progress, unblock yourself directly, including local development environment
-  changes. Report what changed after the task, never stop on env issue.
+- **TOOLING** — Use project commands for development servers, such as `mise run dev`. Prefer Bun/TypeScript for scripts and automation;
+  use Python only when clearly better suited. Keep disposable and one-time production data-fix scripts outside Git; commit only reusable scripts.
+- **TEMP-ARTIFACTS** — Put disposable artifacts in a fresh system temporary directory, never in a Git repository. Only intentional, durable
+  project files belong in the repository.
+- **CLEAN-UP** — When done, close browser sessions, stop servers/processes, shut down simulators/emulators, and delete temporary directories
+  you started or created. Leave the user's and other agents' resources alone.
+- **DEV-ENV-UNBLOCK** — Resolve development environment blockers directly, including local environment changes.
   <!-- profile:personal -->
-- **SELF-SERVE-TOOLS** — You have access to browsers, iOS simulators, Android emulators, App Store Connect, and Google Play Console. Operate them
-  yourself, or through Codex as CODEX-WORK says, to inspect, verify, and complete work. If task depend on browser never ask user to do it.
-  Lease a simulator or emulator before booting or building onto it, as $browser-simulator-routing says.
+- **SELF-SERVE-TOOLS** — Operate available browsers, iOS simulators, Android emulators, App Store Connect, and Google Play Console yourself
+  or through CODEX-WORK to inspect, verify, and complete work; never ask the user to do browser work. When a site offers Google sign-in,
+  sign in with the browser's Google account yourself. Lease simulators/emulators before booting or building onto them; follow
+  $browser-simulator-routing.
   <!-- /profile -->
   <!-- profile:work -->
-- **SELF-SERVE-TOOLS** — You have access to browsers. Operate them yourself, or through Codex as CODEX-WORK says, to inspect, verify, and
-  complete work. If task depend on browser never ask user to do it.
-- **WORK-VPN** — The work laptop uses GlobalProtect VPN. Disconnecting it can break access to work APIs used by locally running apps. When local
-  development shows empty data, CORS errors, or failed requests, check GlobalProtect connectivity before treating the issue as an application bug.
+- **SELF-SERVE-TOOLS** — Operate available browsers yourself or through CODEX-WORK to inspect, verify, and complete work; never ask the user
+  to do browser work.
+- **WORK-VPN** — Disconnecting the work laptop's GlobalProtect VPN can break local apps' access to work APIs. Check connectivity for empty
+  data, CORS errors, or failed requests before diagnosing an application bug.
   <!-- /profile -->
-- **CODEX-WORK** — Give Codex three kinds of work: image generation, computer use (operating desktop apps on the Mac), and browser work that is
-  not QA, such as using a provider dashboard, filling a web form, or reading a signed-in page. If you are Codex, do it yourself; otherwise
-  use a Codex subagent, falling back to the Codex CLI with $ai-agents-cli only when Codex delegation is unavailable. Browser QA stays with you
-  and follows $browser-simulator-routing.
+- **CODEX-WORK** — Never use Codex for UI, visual design, copy, sound, anything needing taste, or a major decision such as product
+  direction, architecture, or a trade-off the owner would weigh. Claude does that work end to end, including implementing UI changes; if
+  you are Codex, hand it to a Claude subagent. Give Codex everything else: image generation, Mac desktop app operation, browser work other
+  than QA, and, if you are Claude, implementation, debugging, refactors, tests, research, and tooling, then review what it returns. If you
+  are Codex, do that work yourself; otherwise use a Codex subagent, falling back to the Codex CLI via $ai-agents-cli only when delegation
+  is unavailable. Keep browser QA and follow $browser-simulator-routing.
   <!-- profile:personal -->
-- **OPENROUTER** — For occasional calls to models outside the installed agents, use OpenRouter with `$OPENROUTER_API_KEY` from the local
-  secrets file. Pick the cheapest model that can do the job. Never route a frontier model, such as Claude, GPT, or Gemini Pro, through
-  OpenRouter. Use a model without asking only when it is very cheap: about $0.05 or less for the whole task. Otherwise, before the first call,
-  tell the user the model, its price, and the expected total, and wait for approval.
+- **OPENROUTER** — For occasional calls outside installed agents, use OpenRouter with `$OPENROUTER_API_KEY` from local secrets. Choose the
+  cheapest capable model; never route frontier models (Claude, GPT, Gemini Pro) through it. Ask only above about $0.05 total: name the model,
+  price, and expected total, then wait for approval before the first call.
   <!-- /profile -->
 
 ## Repo Context
 
-- **GUIDELINES-PROJECT** — The shared AI rules, skills, and configuration repository is always at `{{SETUP_ROOT}}`; reference and edit it
-  there from other projects.
-- **PROJECT-GLOSSARY** — When a project has a glossary, usually `docs/glossary.md`, read the relevant entries before discussing or changing
-  product concepts. Use its canonical terms in explanations, documentation, new code names, and user-facing text; do not invent alternative
-  names for defined concepts.
+- **GUIDELINES-PROJECT** — Reference and edit shared AI rules, skills, and configuration at `{{SETUP_ROOT}}`, including from other projects.
+- **PROJECT-GLOSSARY** — Before discussing or changing product concepts, read relevant glossary entries (usually `docs/glossary.md`). Use
+  canonical terms in explanations, docs, new code names, and user-facing text; never invent alternatives for defined concepts.
   <!-- profile:personal -->
-- **PERSONAL-KNOWLEDGE** — The source of truth for the owner's life, work, tools, preferences, decisions, and AI-agent context is always at
-  `~/PhpstormProjects/personal-knowledge`; reference and edit it there from other projects.
+- **PERSONAL-KNOWLEDGE** — Reference and edit the source of truth for the owner's life, work, tools, preferences, decisions, and AI-agent
+  context at `~/PhpstormProjects/personal-knowledge`, including from other projects.
 
 ### Active Projects
 
@@ -99,94 +76,111 @@ Use these projects as references when the user mentions them.
 
 ## Behavior
 
-- **BUG-FIX-PREVENTION** — For each bug you fix, search the codebase for the same pattern. In the handoff, state for each bug how to prevent it
-  from happening again, the similar bugs you found, and how to automate prevention. Prefer a type, lint rule, or CI check; suggest a test only
-  when none of them can catch it.
+- **BUG-FIX-PREVENTION** — For each fixed bug, search the codebase for the same pattern and find how to prevent it automatically. Prefer
+  types, lint rules, or CI checks; suggest tests only when those cannot catch it.
   <!-- profile:personal -->
-- **CROSS-PROJECT-PARITY** — When you add something to one active project that is project-agnostic, such as a generic fix, check, tooling change,
-  or shared pattern, say so in the handoff and describe how it should be added to the other active projects. Skip anything tied to this project's
-  own product, domain, or features.
+- **CROSS-PROJECT-PARITY** — Identify project-agnostic additions to one active project that belong in the others. Skip product-, domain-,
+  or feature-specific work.
   <!-- /profile -->
-- **DECISION-CONTEXT** — When you ask the user for a decision, give enough context to answer it without reading code or scrolling back: what
-  happens today, with one concrete example; each option with its tradeoff; and your recommendation. Describe it in terms of what users
-  experience, not internal names or IDs.
-- **VISUAL-DECISIONS** — When a decision is about something the user would see, such as a screen, layout, component, style, or chart, show
-  each option as an image in the reply, shared as **Phone-ready media** describes. Use a screenshot of the running app when the option already
-  exists, and a rendered mockup when it does not. A text description or ASCII sketch does not replace the image.
-- **SOFT-DECISIONS** — Recorded project decisions are history and defaults, not hard rules. Follow them unless new information or a change in
-  direction gives a reason not to; then break one on purpose, say so in the handoff, and update or delete its record on the same branch.
-- **AGENT-PROMPTS** — When you write a prompt for another agent, or the user asks you for one, assume that agent has the same skills and
-  instructions as you. Write only the task and its context. Never copy system prompts, rules, `AGENTS.md` or `CLAUDE.md` content, or skill text
-  into the prompt; refer to a skill by name when it matters.
-- **AGENT-MODES** — Start every subagent, delegated task, or launched thread in your own runtime mode, never in one that asks the user to
-  approve commands, such as `approval-required`, because nobody watches that thread and the work stalls. Put limits such as read-only in the
-  task prompt instead.
-- **EFFORT-SIZING** — Never size work in human time such as hours, days, weeks, or "days of work". Writing code is cheap for you, and even
-  large changes fit in one session. Size work by what actually costs: blast radius, amount of code touched, risk, QA effort, and product or UX
-  design decisions.
+- **SOFT-DECISIONS** — Recorded decisions are history and defaults. Follow them unless new information or direction warrants a deliberate
+  change; update or delete the record on the same branch.
+- **AGENT-PROMPTS** — Assume other agents share your skills and instructions. Write only the task and context, never copied system prompts,
+  rules, `AGENTS.md`, `CLAUDE.md`, or skill text. Refer to relevant skills by name.
+- **AGENT-MODES** — Start subagents, delegated tasks, and threads in your runtime mode, never a command-approval mode: unattended approvals
+  stall work. Put limits such as read-only in the task prompt.
+- **EFFORT-SIZING** — Never estimate work in human time. Size it by blast radius, code touched, risk, QA effort, and product/UX decisions.
+- **RARE-EDGE-CASES** — Do not fix or report vanishingly rare defects; spend the effort on flows real users hit. Always report security
+  problems, data loss, and corrupted or incorrect persisted data, however rare.
+- **AGENT-OUTPUT** — Commands written for agents print one short success line, or only the failed items with full-log paths. Offer
+  `--json` and `--verbose`, carry results in exit codes, and omit banners, colors, progress, tables, and decoration.
+- **NO-POLLING** — Never wait by repeating sleep-and-check steps. Where the harness notifies on completion (background commands, subagent
+  results, PR watches), start the work and end the turn; otherwise run one blocking wait with a timeout. A search that finds nothing is an
+  empty result, not a failure.
+- **RATINGS** — Rate how good a metric, trend, or health reading is on five levels in text reports, digests, and replies: 🔴 very bad,
+  🟠 bad, ⚪ normal, 🟢 good, 🌟 very good. Never use two-color red/green for these ratings; keep pass/warn/fail markers for check results
+  and statuses. App and admin UI are out of scope.
   <!-- profile:personal -->
 - **HEAVY-COMMANDS** — Run full gates/sign-offs, timing comparisons, native builds, and renders through `heavy-run --class <class> -- <argv...>`
-  with class `checks`, `benchmark`, or `build`, so they share one host slot. Wrap only the outer command; light work runs directly. The command waits and recovers stale leases; never hand-poll
-  turn files. Use $verification for execution guidance.
+  (`checks`, `benchmark`, or `build`) to share the host queue. Wrap only the outer command; self-queuing runners declared in
+  `package.json`'s `heavyRun.deferredCommands`, such as Harium's `mise run signoff`, pass through and reserve only their heavy steps.
+  Ad-hoc checks and benchmarks must finish within 90 seconds or their process group is killed (exit 124): split or speed up the work.
+  Builds and commands declared in `heavyRun.deferredCommands` or `heavyRun.uncappedCommands` are exempt, including their nested heavy steps.
+  Run light work directly. It waits and recovers stale leases; never hand-poll turn files. Follow $verification.
   <!-- /profile -->
-- **ONE-PR** — Put all work for a task in one pull request, so it is reviewed, checked, and merged once. Split it only for a clear reason,
-  such as a part that must ship or roll back on its own, and state that reason.
-- **PR-CHECKS** — Before reporting a pull request ready, finish the work, pass local checks, and complete $prs. When the project has a sign-off
-  command, run it on the pushed head and after every later push; it replaces pull request CI. Merge only on a green sign-off and never bypass
-  required checks, such as with `gh pr merge --admin`; only the owner bypasses them on GitHub. Do not dispatch or rerun CI to test work in
-  progress, except one run on the branch before merging a PR that changes CI workflows or the scripts they run, which the sign-off cannot
-  exercise. After you merge a GitHub PR, run $prs's `postmerge-check` script for its exact merge commit and CI workflow. Exit 75 means still pending; resume the check before
-  proceeding. If it fails, inspect the reported stages and fix or deliberately revert the change before other work; never revert automatically.
-- **CODE-SPACING** — Inside a function, separate each logical step with one blank line, such as loading input, transforming it, and returning
-  or storing the result. Keep the lines of a single step together, and do not put a blank line between every statement.
+- **ONE-PR** — Keep each task in one PR for one review/check/merge cycle. Split only for a stated reason, such as independent shipping or rollback.
+- **PR-CHECKS** — Finish work, pass local checks, and complete $prs before reporting a PR ready. If the project has sign-off, run it on the
+  pushed head after every push; it replaces PR CI. Merge only on green sign-off of a head that contains the current base branch;
+  rebase and rerun when the base moved, because two PRs green alone can break it together. Never bypass required checks; only the owner may bypass
+  them on GitHub. Do not dispatch/rerun CI for work in progress, except one branch run before merging changes to CI workflows or their
+  scripts that sign-off cannot exercise. After a GitHub merge, complete $prs's post-merge steps for the exact merge commit before other
+  work.
+- **CODE-SPACING** — Inside functions, separate logical steps with one blank line; keep each step's lines together, without blank lines
+  between every statement.
 
-## Responding to the user
+## Replies
 
-Follow these instructions when writing the final response to the user.
+All instructions for replies to the user live here.
 
-### General
+### Always
 
 - **Language.** Write in English only.
-- **Audience calibration.** Mohammed has strong technical expertise. For management, business, marketing, sales, and product, use plain language and
-  briefly explain specialized terms without oversimplifying the idea.
-- **Clickable URLs.** Render every known URL as a Markdown link to the exact page, never as plain text, inline code, or quoted text. Whenever
-  you mention a pull request, link it to its page, such as [#123](https://github.com/owner/repo/pull/123); look up the URL if you do not have it.
-- **Phone-ready media.** Mohammed often reads replies on his phone, where a local file path opens nothing. Share every image, video, page, or
-  file through something a phone opens: render it inline in the thread when the harness can, otherwise publish it with $html-artifacts and link
-  it. Never share media only as a local path, and keep it readable at phone width by stacking options vertically.
-- **Other sessions.** Refer to another agent session by its thread title. If the title is unknown, describe the work it is doing. Never refer
-  to a session by its generated ID alone, such as `harium-project-04`.
+- **Audience calibration.** Mohammed is technically strong. Use plain language for management, business, marketing, sales, and product;
+  briefly explain specialized terms without oversimplifying.
+- **Clickable URLs.** Render every known URL as a Markdown link to its exact page. Link every mentioned PR; look up missing URLs. When
+  work changes something the owner can open, such as a production page, admin screen, or store listing, link that exact page.
+- **PR status.** Give every mentioned PR a three-line block: a `<status> [#<number> <title>](<url>)` paragraph, then a `📄` bullet with
+  what the PR changes in user terms, then a `👉` bullet with why it has this status and the next step. Use the first status that
+  applies, exactly as written, and never describe PR state in other words: `🟣 **MERGED**` (give the post-merge results),
+  `⚪ **CLOSED**`, `📝 **DRAFT**`, `⚔️ **CONFLICTS**`, `🔴 **CHECKS FAILING**`, `⏳ **CHECKS RUNNING**`, `💬 **NEEDS YOU**` (unresolved
+  feedback or an owner decision), or `🟢 **READY TO MERGE**` (checks green, mergeable, nothing open). Example:
 
-### Writing
+  ```markdown
+  🔴 **CHECKS FAILING** [#42 Session reminders](https://github.com/owner/repo/pull/42)
 
-- Use the plain word: "use" instead of "utilize" or "leverage", "help" instead of "facilitate", and "if" instead of "in the event that".
-- Cut filler, stacked hedges, weak adverbs, forced groups of three, false ranges, synonym cycling, and "not just X, but Y" constructions.
-- Use emojis as visual markers to make key points and section structure easier to scan.
-- When explaining structure, flow, or a change, prefer a small tree, diagram, or diff over prose; see $show-me.
-- Keep table cells to a few words, because the chat view cuts long cells off. When a cell needs a sentence, use a list or short sections instead.
+  - 📄 Reminds readers to finish a reading session they left halfway.
+  - 👉 API typecheck fails on the reminder schedule; fixing now.
+  ```
 
-#### Progress updates
+- **Phone-ready media.** Share every image, video, page, and file so it opens on a phone: inline when supported, otherwise publish with
+  $html-artifacts and link it. Never share only a local path. Stack options vertically for phone width.
+- **Other sessions.** Use thread titles, or describe the work if unknown; never use generated IDs alone.
+- Use emojis to mark key points and sections.
 
-Use this format only for updates sent while work continues. Never use it in the final response of a turn.
+### Discussing and teaching
 
-- **Cadence.** Send a progress update only at a milestone: a group of tasks finishes, the plan changes, a task fails or blocks, or you need
-  user input. Do not send an update after each step or tool call.
-- **Task list.** Write each progress update as a list of tasks. Start each task with one status: `🙋 **INPUT**`, `✅ **DONE**`, `🔄 **DOING**`,
-  `⬜ **TODO**`, `⏳ **WAITING**`, `⛔ **BLOCKED**`, `❌ **FAILED**`, or `⏭️ **SKIPPED**`. After any status other than `DONE`, `DOING`, or
-  `TODO`, give the reason in a few words.
-- **Input first.** Put `INPUT` tasks first and state the decision or action needed. Use `BLOCKED` only for causes you cannot resolve by asking
-  the user.
+Reply freely; prefer visualisations, see $show-me.
 
-#### Task handoffs
+- Correct mistaken premises while preserving the user's goal and suggesting a better path.
+- Consider important unstated effects, including harm to the user experience.
+- Ask only questions whose answers could change your advice.
+- Take a clear position based on facts; explain when a possible approach should not be used. Do not follow a bad direction merely because asked.
+- Gently teach missing concepts, then answer.
 
-Use this format when a reply to the user finishes a task. A subagent report to its caller uses the format that caller asked for instead.
+### Working and done
 
-- **Implemented result labels.** Prefix each completed item or change with one best-fit label: `[✨ **FEAT**]`, `[🐛 **FIX**]`, `[♻️ **REFACTOR**]`,
-  `[⚡ **PERF**]`, `[🔒 **SECURITY**]`, `[🧪 **TEST**]`, `[📝 **DOCS**]`, or `[🔧 **TOOLING**]`.
-- **Verification status colors.** Prefix verification results with `🟢` for passed, `🟡` for warnings or caveats, and `🔴` for failed or not run.
-  Consolidate all passed verification results into a single `🟢` line. Put each result in its own list item or paragraph, so the lines never
-  merge when rendered.
-- **Final implementation closure.** End with the next action, or state "No next action needed" when the work is complete and no follow-up is
-  warranted. Then give a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`, `⏳ **AWAITING**`, `🔴 **ACTION REQUIRED**`, or
-  `⛔ **BLOCKED**`. Use `⏳ **AWAITING**` when the work is on track but waits on an expected external event, such as CI, a deploy, a review, or a
-  provider; name what it waits on. Put any expansion footer after the status.
+- **SHORT-REPLIES** — Send only these parts, in order, skipping empty ones. Keep the reply under about 15 lines and give details when asked.
+  Never narrate the process, restate the request, recap, or add headings, tables, or evidence unless asked. An error or failure may take
+  one extra line for its cause. Put each line in its own list item or paragraph; Markdown joins single line breaks.
+  - **Changes:** one line each, starting with its label: `[✨ **FEAT**]`, `[🐛 **FIX**]`, `[♻️ **REFACTOR**]`, `[⚡ **PERF**]`,
+    `[🔒 **SECURITY**]`, `[🧪 **TEST**]`, `[📝 **DOCS**]`, or `[🔧 **TOOLING**]`.
+  - **Reports:** one line each, only when present: similar bugs found and their prevention (BUG-FIX-PREVENTION), deliberately changed
+    decisions (SOFT-DECISIONS), and local environment changes (DEV-ENV-UNBLOCK).
+    <!-- profile:personal -->
+  - **Parity:** one line per addition worth copying to other active projects, and how (CROSS-PROJECT-PARITY).
+    <!-- /profile -->
+    <!-- profile:work -->
+  - **Work notes:** the code each choice follows, choices without an existing convention (WORK-STANDARDS), and unrelated issues left
+    alone (WORK-SCOPE), one line each.
+    <!-- /profile -->
+  - **Checks:** `🟢` one line for everything that passed; one line per `🟡` warning or `🔴` failure or skipped check.
+  - **PRs:** one **PR status** block per PR the work created or changed.
+  - **Questions:** following DECISION-CONTEXT.
+  - **Close:** the next action, or "No next action needed", then a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`,
+    `⏳ **AWAITING**` (on-track work waiting on a named external event), `🔴 **ACTION REQUIRED**`, or `⛔ **BLOCKED**`.
+- **DECISION-CONTEXT** — Start each question with 🔴. Give one line on today's behavior with a concrete example, then one line per lettered
+  option with its tradeoff, and mark your recommendation. Use user experience, not internal names/IDs; require no code reading or scrolling back.
+- **VISUAL-DECISIONS** — For decisions about what users see, show each option as an image, following **Phone-ready media**: a running-app
+  screenshot for existing options, a rendered mockup otherwise. Text and ASCII sketches do not replace images.
+- **PROGRESS** — Only while work continues, at milestones: a task group finishes, the plan changes, work fails or blocks, or input is
+  needed. One line, such as "3 of 7 agents done; 1 needs input". Never after every step or tool call.
+- **SUBAGENT-RESULTS** — Relay only a subagent's outcome lines, never its report. Subagents use their caller's requested format.

@@ -56,6 +56,7 @@ type Session = {
   largeExecOutputs: number;
   truncatedOutputs: number;
   unmatchedToolOutputs: number;
+  time: ClaudeTime;
 };
 type Tree = {
   rootId: string;
@@ -215,9 +216,9 @@ if (args.has("help") || args.has("h")) {
   console.log(`Usage:
   analyze-sessions.ts [options]
 
-Audits recorded agent sessions for context waste. Covers Codex rollouts and
-Claude Code transcripts. For Claude Code it also shows where task time goes:
-model responses, tools, subagents, background work, and model latency.
+Audits recorded agent sessions for context waste, task and tool time, and model
+latency. Covers Codex rollouts and Claude Code transcripts. Claude Code also
+distinguishes background work, subagents, hooks, and retries.
 
 Options:
   --harness <name>      codex, claude, or all. Default: every root that exists,
@@ -512,13 +513,30 @@ function outputText(value: unknown): string {
           .join("\n")
       : JSON.stringify(value ?? "");
 }
+function isTruncated(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(isTruncated);
+  if (value && typeof value === "object")
+    return Object.entries(object(value)).some(([key, item]) =>
+      /^(?:text_?)?truncated$/i.test(key) && item === true ? true : isTruncated(item),
+    );
+  if (typeof value !== "string") return false;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "string" || parsed !== value) return isTruncated(parsed);
+  } catch {
+    // Tool wrappers can return plain text or several JSON objects in one block.
+  }
+  return /\b\d+ tokens truncated\b|(?:^|\n)\s*(?:Warning:\s*)?truncated output\b|<truncated>|["']?(?:text_?)?truncated["']?\s*:\s*true\b|(?:^|\n)Error: result \([\d,]+ characters\) exceeds maximum allowed tokens\./i.test(
+    value,
+  );
+}
 function addCommand(map: Map<string, Command>, call: Call, output: unknown): void {
   const rendered = outputText(output),
     total = bytes(output),
     originalTokens = Number(
       rendered.match(/(?:Original token count|original_token_count)["':\s]+(\d+)/i)?.[1] || 0,
     ),
-    truncated = /tokens truncated|\btruncated\b/i.test(rendered) ? 1 : 0;
+    truncated = isTruncated(output) ? 1 : 0;
   const labels = call.commands.length ? call.commands : [call.label],
     counts = new Map<string, number>();
   for (const label of labels) counts.set(label, (counts.get(label) || 0) + 1);
@@ -552,8 +570,259 @@ const outsideCwdFilter = (cwd: string): boolean =>
     !normalizedPath(cwd).startsWith(`${normalizedPath(cwdFilter)}/`),
   );
 
+// An active gap this long is a sleeping machine or a hung run, not tool or model work.
+const stallMs = 2 * 3_600_000;
+const userWaitTool =
+  /(^|[._/])(AskUserQuestion|ExitPlanMode|request_user_input|request_user_input_async)$/;
+const toolTimeout = /did not complete within its \d+s timeout|Command timed out/;
+function emptyTime(): ClaudeTime {
+  return {
+    model: 0,
+    tool: 0,
+    subagent: 0,
+    background: 0,
+    compaction: 0,
+    retry: 0,
+    hook: 0,
+    stall: 0,
+    user: 0,
+    idle: 0,
+    active: 0,
+    tasks: 0,
+  };
+}
+function mergeToolTimes(
+  target: Map<string, ClaudeToolTime>,
+  tools: Map<string, ClaudeToolTime>,
+  scope: "main" | "subagent",
+): void {
+  for (const item of tools.values()) {
+    const key = `${scope}\0${item.label}`;
+    const aggregate = target.get(key) || {
+      ...item,
+      scope,
+      calls: 0,
+      wallMs: 0,
+      totalMs: 0,
+      maxMs: 0,
+      errors: 0,
+      errorMs: 0,
+      timeouts: 0,
+      durations: [],
+    };
+    aggregate.calls += item.calls;
+    aggregate.wallMs += item.wallMs;
+    aggregate.totalMs += item.totalMs;
+    aggregate.errors += item.errors;
+    aggregate.errorMs += item.errorMs;
+    aggregate.timeouts += item.timeouts;
+    aggregate.durations.push(...item.durations);
+    if (item.maxMs > aggregate.maxMs) {
+      aggregate.maxMs = item.maxMs;
+      aggregate.slowest = item.slowest;
+      aggregate.slowestFile = item.slowestFile;
+    }
+    target.set(key, aggregate);
+  }
+}
+// Codex writes usage after the response (sometimes after tool results). Keep the
+// response boundary separately so execution time never becomes model latency.
+function codexTimeline(file: string) {
+  const time = emptyTime(),
+    tools = new Map<string, ClaudeToolTime>(),
+    tasks: ClaudeTask[] = [],
+    requests: ClaudeRequest[] = [],
+    seenResponses = new Set<string>(),
+    open = new Map<string, { call: Call; start: number }>();
+  let previous = 0,
+    running = false,
+    model = "(unknown)",
+    modelStart = 0,
+    lastCumulative = "",
+    response: { start: number; end: number } | undefined,
+    task: ClaudeTask | undefined;
+
+  const stats = (call: Call): ClaudeToolTime => {
+    const existing = tools.get(call.label);
+    if (existing) return existing;
+    const item: ClaudeToolTime = {
+      scope: "main",
+      tool: call.name,
+      label: call.label,
+      calls: 0,
+      wallMs: 0,
+      totalMs: 0,
+      maxMs: 0,
+      errors: 0,
+      errorMs: 0,
+      timeouts: 0,
+      durations: [],
+      slowest: "",
+      slowestFile: "",
+    };
+    tools.set(call.label, item);
+    return item;
+  };
+  const spend = (category: TimeCategory, ms: number, label = ""): void => {
+    time[category] += ms;
+    if (["idle", "user", "stall"].includes(category)) return;
+    time.active += ms;
+    if (!task) return;
+    task.activeMs += ms;
+    if (category === "model") task.modelMs += ms;
+    else if (category === "tool") {
+      task.toolMs += ms;
+      task.toolShare.set(label, (task.toolShare.get(label) || 0) + ms);
+    } else task.otherMs += ms;
+  };
+  const closeResponse = (usage: Usage = { input: 0, cached: 0, output: 0 }): void => {
+    if (response && response.start >= since && response.end - response.start < stallMs) {
+      requests.push({
+        model,
+        ms: Math.max(0, response.end - response.start),
+        input: usage.input,
+        output: usage.output,
+      });
+      if (task) task.requests++;
+    }
+    if (response) modelStart = Math.max(modelStart, response.end);
+    response = undefined;
+  };
+  const closeTask = (): void => {
+    closeResponse();
+    if (task && task.start >= since) tasks.push(task);
+    task = undefined;
+    open.clear();
+    running = false;
+  };
+  const startTask = (at: number): void => {
+    closeTask();
+    running = true;
+    modelStart = at;
+    task = {
+      file,
+      trigger: "human",
+      prompt: "",
+      start: at,
+      activeMs: 0,
+      modelMs: 0,
+      toolMs: 0,
+      backgroundMs: 0,
+      otherMs: 0,
+      requests: 0,
+      toolCalls: 0,
+      toolShare: new Map(),
+    };
+  };
+
+  return {
+    time,
+    tools,
+    tasks,
+    requests,
+    step(event: Obj, at: number): void {
+      if (!at) return;
+      const payload = object(event.payload),
+        type = string(payload.type),
+        isEvent = event.type === "event_msg",
+        isItem = event.type === "response_item";
+      if (previous && at >= previous) {
+        const gap = at - Math.max(previous, since);
+        if (gap > 0) {
+          if (!running) spend("idle", gap);
+          else if (at - previous >= stallMs) spend("stall", gap);
+          else if (open.size)
+            for (const { call } of open.values()) {
+              const share = gap / open.size;
+              if (userWaitTool.test(call.name)) spend("user", share);
+              else {
+                spend("tool", share, call.label);
+                stats(call).wallMs += share;
+              }
+            }
+          else spend(event.type === "compacted" ? "compaction" : "model", gap);
+        }
+      }
+      previous = Math.max(previous, at);
+      if (isEvent && type === "task_started") startTask(at);
+      if (event.type === "turn_context") model = string(payload.model) || model;
+      if (isItem && type === "message" && payload.role === "user") {
+        const prompt = classify(text(payload.content)).human;
+        if (prompt) {
+          if (!running) startTask(at);
+          if (task) task.prompt ||= prompt;
+        }
+      }
+
+      const call = isItem ? normalizeCall(payload) : undefined;
+      const isModel =
+        isItem &&
+        (call || type === "reasoning" || (type === "message" && payload.role === "assistant"));
+      if (isModel && running) {
+        response ||= { start: modelStart || at, end: at };
+        response.end = Math.max(response.end, at);
+      }
+      if (call) {
+        const id = string(payload.call_id) || string(payload.id);
+        if (id) open.set(id, { call, start: at });
+        if (task) task.toolCalls++;
+      }
+      if (isItem && (type === "function_call_output" || type === "custom_tool_call_output")) {
+        const id = string(payload.call_id) || string(payload.id),
+          pending = open.get(id);
+        open.delete(id);
+        if (pending && pending.start >= since && !userWaitTool.test(pending.call.name)) {
+          const ms = Math.max(0, at - pending.start),
+            item = stats(pending.call);
+          item.calls++;
+          item.totalMs += ms;
+          item.durations.push(ms);
+          if (ms > item.maxMs) {
+            item.maxMs = ms;
+            item.slowest = pending.call.label;
+            item.slowestFile = file;
+          }
+          if (
+            object(payload.output).isError === true ||
+            /(?:Process exited with code|exit_code["'\s]*:)\s*[1-9]\d*/i.test(
+              outputText(payload.output),
+            )
+          ) {
+            item.errors++;
+            item.errorMs += ms;
+          }
+          if (toolTimeout.test(outputText(payload.output))) item.timeouts++;
+        }
+        modelStart = at;
+      }
+      if (event.type === "token_usage_record") {
+        const id = string(payload.response_id);
+        if (!id || !seenResponses.has(id)) closeResponse(getUsage(payload.usage));
+        if (id) seenResponses.add(id);
+      }
+      if (isEvent && type === "token_count") {
+        const info = object(payload.info),
+          total = info.total_token_usage;
+        const cumulative = total ? JSON.stringify(getUsage(total)) : "";
+        if (info.last_token_usage && (!cumulative || cumulative !== lastCumulative))
+          closeResponse(getUsage(info.last_token_usage));
+        if (cumulative) lastCumulative = cumulative;
+      }
+      if (isEvent && ["task_complete", "task_completed", "turn_aborted"].includes(type))
+        closeTask();
+    },
+    finish(): void {
+      closeTask();
+      time.tasks = tasks.length;
+    },
+  };
+}
+
 const sessions: Session[] = [],
-  commands = new Map<string, Command>();
+  commands = new Map<string, Command>(),
+  codexToolTimes = new Map<string, ClaudeToolTime>(),
+  codexTasks: ClaudeTask[] = [],
+  codexRequests: ClaudeRequest[] = [];
 let candidates: string[] = [];
 const turnOwners = new Map<string, { file: string; at: number; copies: Set<string> }>();
 if (harnesses.has("codex")) {
@@ -621,9 +890,11 @@ if (harnesses.has("codex")) {
       largeExecOutputs: 0,
       truncatedOutputs: 0,
       unmatchedToolOutputs: 0,
+      time: emptyTime(),
     };
     const calls = new Map<string, Call>(),
-      localCommands = new Map<string, Command>();
+      localCommands = new Map<string, Command>(),
+      timeline = codexTimeline(summary.file);
     let active = false,
       previousCumulative: Usage | undefined,
       sawCumulative = false;
@@ -703,6 +974,7 @@ if (harnesses.has("codex")) {
         }
         continue;
       }
+      timeline.step(event, at);
       if (!at || at < since) continue;
       if (turnId) ownedTurns.add(turnId);
       active = true;
@@ -800,7 +1072,7 @@ if (harnesses.has("codex")) {
             ) > 1000
           )
             summary.largeExecOutputs++;
-          if (/tokens truncated|\btruncated\b/i.test(rendered)) summary.truncatedOutputs++;
+          if (isTruncated(payload.output)) summary.truncatedOutputs++;
           addCommand(localCommands, call, payload.output);
         }
       } else if (
@@ -820,6 +1092,15 @@ if (harnesses.has("codex")) {
         summary.unknown++;
     }
     if (!active || outsideCwdFilter(summary.cwd)) continue;
+    timeline.finish();
+    summary.time = timeline.time;
+    codexRequests.push(...timeline.requests);
+    if (summary.forkSource !== "subagent") codexTasks.push(...timeline.tasks);
+    mergeToolTimes(
+      codexToolTimes,
+      timeline.tools,
+      summary.forkSource === "subagent" ? "subagent" : "main",
+    );
     summary.turns = ownedTurns.size;
     if (sawCumulative) {
       summary.usageMode = "cumulative";
@@ -970,29 +1251,11 @@ function addTool(
   existing.outputs++;
   existing.bytes += size;
   existing.maxBytes = Math.max(existing.maxBytes, size);
-  existing.truncated += /truncated|output limit|exceeds maximum/i.test(output) ? 1 : 0;
+  existing.truncated += isTruncated(output) ? 1 : 0;
   map.set(call.label, existing);
 }
 
-// An active gap this long is a sleeping machine or a hung run, not tool or model work.
-const stallMs = 2 * 3_600_000;
-const userWaitTool = /(^|_)(AskUserQuestion|ExitPlanMode)$/;
 const waitLoop = /(^|[\s;&|(])(sleep\s+\d|until\s)|\s--watch\b/;
-const toolTimeout = /did not complete within its \d+s timeout|Command timed out/;
-const emptyTime = (): ClaudeTime => ({
-  model: 0,
-  tool: 0,
-  subagent: 0,
-  background: 0,
-  compaction: 0,
-  retry: 0,
-  hook: 0,
-  stall: 0,
-  user: 0,
-  idle: 0,
-  active: 0,
-  tasks: 0,
-});
 type ClaudeKind =
   | "human"
   | "wake"
@@ -1322,6 +1585,7 @@ if (harnesses.has("claude")) {
       time: emptyTime(),
     };
     const calls = new Map<string, { tool: string; label: string }>(),
+      localTools = new Map<string, ClaudeTool>(),
       requestUsage = new Map<string, Obj>(),
       timeline = claudeTimeline(relativePath);
     let active = false;
@@ -1390,7 +1654,7 @@ if (harnesses.has("claude")) {
               summary.unmatchedToolOutputs++;
               continue;
             }
-            addTool(claudeTools, call, rendered);
+            addTool(localTools, call, rendered);
           }
           continue;
         }
@@ -1429,6 +1693,20 @@ if (harnesses.has("claude")) {
       }
     }
     if (!active || outsideCwdFilter(summary.cwd)) continue;
+    for (const item of localTools.values()) {
+      const aggregate = claudeTools.get(item.label) || {
+        ...item,
+        outputs: 0,
+        bytes: 0,
+        maxBytes: 0,
+        truncated: 0,
+      };
+      aggregate.outputs += item.outputs;
+      aggregate.bytes += item.bytes;
+      aggregate.maxBytes = Math.max(aggregate.maxBytes, item.maxBytes);
+      aggregate.truncated += item.truncated;
+      claudeTools.set(item.label, aggregate);
+    }
     for (const usage of requestUsage.values()) {
       const cached = number(usage.cache_read_input_tokens);
       const written = number(usage.cache_creation_input_tokens);
@@ -1453,35 +1731,7 @@ if (harnesses.has("claude")) {
     summary.time = timeline.time;
     claudeRequests.push(...timeline.requests);
     if (!summary.sidechain) claudeTasks.push(...timeline.tasks);
-    for (const item of timeline.tools.values()) {
-      const scope = summary.sidechain ? "subagent" : "main",
-        key = `${scope}\0${item.label}`;
-      const aggregate = claudeToolTimes.get(key) || {
-        ...item,
-        scope,
-        calls: 0,
-        wallMs: 0,
-        totalMs: 0,
-        maxMs: 0,
-        errors: 0,
-        errorMs: 0,
-        timeouts: 0,
-        durations: [],
-      };
-      aggregate.calls += item.calls;
-      aggregate.wallMs += item.wallMs;
-      aggregate.totalMs += item.totalMs;
-      aggregate.errors += item.errors;
-      aggregate.errorMs += item.errorMs;
-      aggregate.timeouts += item.timeouts;
-      aggregate.durations.push(...item.durations);
-      if (item.maxMs > aggregate.maxMs) {
-        aggregate.maxMs = item.maxMs;
-        aggregate.slowest = item.slowest;
-        aggregate.slowestFile = item.slowestFile;
-      }
-      claudeToolTimes.set(key, aggregate);
-    }
+    mergeToolTimes(claudeToolTimes, timeline.tools, summary.sidechain ? "subagent" : "main");
   }
 }
 function claudeTrees(): ClaudeTree[] {
@@ -1528,7 +1778,7 @@ function duration(ms: number): string {
 }
 const percent = (part: number, whole: number): string =>
   `${Math.round((100 * part) / Math.max(1, whole))}%`;
-function sumTime(items: ClaudeSession[]): ClaudeTime {
+function sumTime(items: Array<{ time: ClaudeTime }>): ClaudeTime {
   const total = emptyTime();
   for (const item of items)
     for (const key of Object.keys(total) as Array<keyof ClaudeTime>) total[key] += item.time[key];
@@ -1543,9 +1793,9 @@ const contextBuckets: Array<[number, string]> = [
   [600_000, "300k-600k"],
   [Infinity, "600k+"],
 ];
-function latencyRows(group: (request: ClaudeRequest) => string) {
+function latencyRows(requests: ClaudeRequest[], group: (request: ClaudeRequest) => string) {
   const groups = new Map<string, ClaudeRequest[]>();
-  for (const request of claudeRequests) {
+  for (const request of requests) {
     const name = group(request);
     if (!groups.has(name)) groups.set(name, []);
     groups.get(name)!.push(request);
@@ -1564,25 +1814,65 @@ function latencyRows(group: (request: ClaudeRequest) => string) {
   });
 }
 
-const claudeMainTime = sumTime(claudeSessions.filter((item) => !item.sidechain)),
-  claudeSubagentTime = sumTime(claudeSessions.filter((item) => item.sidechain)),
-  claudeHumanTasks = claudeTasks.filter((item) => item.trigger === "human" && item.activeMs > 0),
-  claudeTaskSpread = {
-    ...quantiles(claudeHumanTasks.map((item) => item.activeMs)),
-    max: Math.max(0, ...claudeHumanTasks.map((item) => item.activeMs)),
-  },
-  claudeToolRows = [...claudeToolTimes.values()].map(({ durations, ...item }) => ({
-    ...item,
-    ...quantiles(durations),
-  })),
-  claudeModelRows = latencyRows((item) => item.model).sort((a, b) => b.totalMs - a.totalMs),
-  claudeContextRows = latencyRows(
-    (item) => contextBuckets.find(([limit]) => item.input < limit)![1],
-  ).sort(
-    (a, b) =>
-      contextBuckets.findIndex(([, name]) => name === a.group) -
-      contextBuckets.findIndex(([, name]) => name === b.group),
-  );
+function timeReport(
+  main: Array<{ time: ClaudeTime }>,
+  subagents: Array<{ time: ClaudeTime }>,
+  tasks: ClaudeTask[],
+  tools: Map<string, ClaudeToolTime>,
+  requests: ClaudeRequest[],
+) {
+  const active = tasks.filter((item) => item.trigger === "human" && item.activeMs > 0);
+  return {
+    main: sumTime(main),
+    subagents: sumTime(subagents),
+    taskSpread: {
+      ...quantiles(active.map((item) => item.activeMs)),
+      max: Math.max(0, ...active.map((item) => item.activeMs)),
+    },
+    tasks: tasks.map(({ toolShare, ...task }) => ({
+      ...task,
+      topTool: topTool({ ...task, toolShare })?.[0] || "",
+    })),
+    tools: [...tools.values()].map(({ durations, ...item }) => ({
+      ...item,
+      ...quantiles(durations),
+    })),
+    models: latencyRows(requests, (item) => item.model).sort((a, b) => b.totalMs - a.totalMs),
+    contexts: latencyRows(
+      requests,
+      (item) => contextBuckets.find(([limit]) => item.input < limit)![1],
+    ).sort(
+      (a, b) =>
+        contextBuckets.findIndex(([, name]) => name === a.group) -
+        contextBuckets.findIndex(([, name]) => name === b.group),
+    ),
+  };
+}
+const codexTime = timeReport(
+  sessions.filter((item) => item.forkSource !== "subagent"),
+  sessions.filter((item) => item.forkSource === "subagent"),
+  codexTasks,
+  codexToolTimes,
+  codexRequests,
+);
+const claudeTime = timeReport(
+  claudeSessions.filter((item) => !item.sidechain),
+  claudeSessions.filter((item) => item.sidechain),
+  claudeTasks,
+  claudeToolTimes,
+  claudeRequests,
+);
+const {
+  main: claudeMainTime,
+  subagents: claudeSubagentTime,
+  taskSpread: claudeTaskSpread,
+  tools: claudeToolRows,
+  models: claudeModelRows,
+  contexts: claudeContextRows,
+} = claudeTime;
+const claudeHumanTasks = claudeTasks.filter(
+  (item) => item.trigger === "human" && item.activeMs > 0,
+);
 
 const totals = {
   candidateFiles: candidates.length,
@@ -1632,23 +1922,13 @@ const report = {
   commands: [...commands.values()],
   taskTrees: trees,
   taskTreeError: treeError,
+  time: codexTime,
   claude: {
     totals: claudeTotals,
     sessions: claudeSessions,
     tools: [...claudeTools.values()],
     subagentTrees: claudeTaskTrees,
-    time: {
-      main: claudeMainTime,
-      subagents: claudeSubagentTime,
-      taskSpread: claudeTaskSpread,
-      tasks: claudeTasks.map(({ toolShare, ...task }) => ({
-        ...task,
-        topTool: topTool({ ...task, toolShare })?.[0] || "",
-      })),
-      tools: claudeToolRows,
-      models: claudeModelRows,
-      contexts: claudeContextRows,
-    },
+    time: claudeTime,
   },
 };
 if (args.has("json")) {
@@ -1731,6 +2011,62 @@ if (harnesses.has("codex")) {
       ["file", (x) => x.file],
     ],
   );
+  console.log("\nWhere Codex Time Goes\n");
+  table(["active", "model", "tool", "compaction", "user", "idle", "stall"] as const, [
+    ["main sessions", (key) => duration(codexTime.main[key])],
+    ["subagents", (key) => duration(codexTime.subagents[key])],
+    ["category", (key) => key],
+  ]);
+  console.log(
+    `\nCodex turn active time: median ${duration(codexTime.taskSpread.p50)}, p90 ${duration(codexTime.taskSpread.p90)}, longest ${duration(codexTime.taskSpread.max)}`,
+  );
+  console.log("\nSlowest Codex Turns\n");
+  table(
+    codexTime.tasks
+      .slice()
+      .sort((a, b) => b.activeMs - a.activeMs)
+      .slice(0, limit),
+    [
+      ["active", (x) => duration(x.activeMs)],
+      ["model", (x) => duration(x.modelMs)],
+      ["tools", (x) => duration(x.toolMs)],
+      ["requests", (x) => x.requests],
+      ["tool calls", (x) => x.toolCalls],
+      ["top tool", (x) => x.topTool],
+      ["task", (x) => short(x.prompt)],
+      ["file", (x) => x.file],
+    ],
+  );
+  console.log("\nSlowest Codex Tools\n");
+  table(
+    codexTime.tools
+      .slice()
+      .sort((a, b) => b.wallMs - a.wallMs)
+      .slice(0, limit),
+    [
+      ["wall time", (x) => duration(x.wallMs)],
+      ["calls", (x) => x.calls],
+      ["p50", (x) => duration(x.p50)],
+      ["p90", (x) => duration(x.p90)],
+      ["max", (x) => duration(x.maxMs)],
+      ["scope", (x) => x.scope],
+      ["call", (x) => x.label],
+    ],
+  );
+  console.log("\nCodex Model Latency\n");
+  for (const [rows, label] of [
+    [codexTime.models, "model"],
+    [codexTime.contexts, "prompt size"],
+  ] as const)
+    table(rows, [
+      ["requests", (x) => x.requests],
+      ["total", (x) => duration(x.totalMs)],
+      ["p50", (x) => duration(x.p50)],
+      ["p90", (x) => duration(x.p90)],
+      ["mean output tokens", (x) => x.meanOutput],
+      ["output tok/s", (x) => x.outputPerSecond],
+      [label, (x) => x.group],
+    ]);
 }
 if (harnesses.has("claude")) {
   console.log("\nClaude Code\n");
@@ -1912,6 +2248,9 @@ if (harnesses.has("claude")) {
 }
 console.log("\nLimits\n");
 if (harnesses.has("codex")) {
+  console.log(
+    "- Codex time uses owned turn boundaries and paired tool call/result timestamps. Parallel tools share wall time; idle, user waits, and working gaps over 2 hours are excluded. Model latency is estimated from the turn start or last tool result to the final response item, paired with usage snapshots; repeated snapshots do not create requests. Legacy logs without turn boundaries end at their last recorded event. Incomplete turns are limited to observed time.",
+  );
   console.log(
     "- Codex stable turn IDs select the oldest source session and exclude inherited copies. Legacy records without turn IDs cannot be deduplicated; last-only usage is summed.",
   );

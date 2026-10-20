@@ -1,75 +1,54 @@
 ---
 name: remote-agent-host
-description: Use when setting up a Mac as an always-on remote machine whose T3 Code environment is reached from other Macs and the phone over Tailscale.
+description: Use to set up an always-on Mac for remote T3 Code access over Tailscale.
 ---
 
-The owner has already installed this setup and T3 Code on the Mac and signed in to the agents. Run each check, fix what you can, and give the owner
-the exact command or click for anything that needs `sudo`, a system popup, or a sign-in. Wait for the owner to confirm before you continue.
+Assume the setup, T3 Code, and agent sign-ins are installed. Fix failed checks; give the owner exact commands/clicks for `sudo`, system popups, or
+sign-in, and wait for confirmation before dependent work.
 
-## 1. Preconditions
+## Preconditions
 
-- `doctor` passes the required tools.
-- `sudo profiles show -type enrollment` shows no company enrollment. If it does, stop: the owner must ask the former owner to release the Mac
-  from Apple Business Manager.
-- `gh auth status` is signed in.
+- `doctor` passes; `gh auth status` is signed in.
+- `sudo profiles show -type enrollment` shows no company enrollment. Otherwise stop until the former owner releases the Mac from Apple Business Manager.
 
-## 2. Tailscale
+## Tailscale
 
-- Use the standalone app from tailscale.com, not Homebrew or the App Store. It updates itself and installs the `tailscale` CLI.
-- The owner approves the network extension and signs in with the same account as the other devices.
-- `tailscale status --json` shows `Self.Online` true and a non-empty `CertDomains`. If `CertDomains` is empty, the owner turns on MagicDNS and
-  HTTPS Certificates on the Tailscale admin DNS page.
+- Use the standalone [Tailscale app](https://tailscale.com/download/mac), not Homebrew or the App Store.
+- The owner approves the network extension and signs in with the other devices' account.
+- Require `Self.Online: true` and non-empty `CertDomains` in `tailscale status --json`. For empty `CertDomains`, enable MagicDNS and HTTPS Certificates
+  on the [admin DNS page](https://login.tailscale.com/admin/dns).
 
-## 3. Identity
+## Identity
 
-Give the Mac a short, distinct name, such as `agent-mac-1`. T3 shows the computer name and Tailscale uses the hostname, so set both:
+Choose a short, distinct name. Set `ComputerName`, `LocalHostName`, and `HostName` with `sudo scutil --set`, and Tailscale's name with
+`tailscale set --hostname`. T3 displays the computer name; Tailscale uses the hostname.
 
-```sh
-sudo scutil --set ComputerName agent-mac-1
-sudo scutil --set LocalHostName agent-mac-1
-sudo scutil --set HostName agent-mac-1
-tailscale set --hostname=agent-mac-1
-```
-
-## 4. Always reachable
-
-A sleeping or restarting Mac drops every remote session.
+## Availability
 
 ```sh
 sudo pmset -c sleep 0
 sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates -bool false
 ```
 
-The owner turns on Screen Sharing and Remote Login in System Settings → General → Sharing. They serve as a fallback when an agent is stuck on a GUI
-prompt or T3 is down. The Mac stays plugged in with the lid open.
+Keep the Mac plugged in with its lid open. Enable Screen Sharing and Remote Login in System Settings → General → Sharing as fallbacks for GUI prompts
+or T3 outages.
 
-## 5. T3 over Tailscale
+## T3 access
 
-- Keep T3's Network access setting off. Tailscale Serve reaches the server on `127.0.0.1:3773`.
-- Make pairing codes with the CLI version that matches the installed app, read from `CFBundleShortVersionString` in
+- Keep T3's Network access off; Tailscale Serve reaches `127.0.0.1:3773`.
+- Match the CLI version to the app's `CFBundleShortVersionString` in
   `/Applications/T3 Code*.app/Contents/Info.plist`:
 
   ```sh
-  npx -y t3@<app-version> pair --tailscale --label "<client>" --ttl 30m
+  t3 pair --tailscale --label "<client>" --ttl 30m
   ```
 
-  This also maps `https://<host>.<tailnet>.ts.net` to T3. The mapping persists across restarts.
+  The HTTPS mapping persists across restarts. Check `tailscale serve status` and HTTP 200 from `https://<host>.<tailnet>.ts.net`.
 
-- Check `tailscale serve status` and that the HTTPS address returns 200.
-
-## 6. Pair clients
-
-Make one code per client. Each code works once.
-
-| Client                  | Where to enter it                                                                              |
-| ----------------------- | ---------------------------------------------------------------------------------------------- |
-| Main Mac T3 desktop app | Settings → Connections → add environment, paste the pairing URL                                |
-| T3 iPhone app           | Settings → Environments → Add environment, host `https://<host>.<tailnet>.ts.net` and the code |
-
-The phone camera opens a pairing QR code in Safari, not in the app. Give the phone the host and code.
+- Make one single-use code per client. On Mac: Settings → Connections → add environment, paste the pairing URL. On iPhone: Settings → Environments
+  → Add environment, enter the HTTPS host and code. Camera-scanned QR codes open Safari, so give the phone the host and code.
 
 ## Done when
 
-- The main Mac and the phone both list this environment and can open a thread on it.
-- `tailscale ping <name>` from the main Mac gets a reply.
-- The devices note in $personal-knowledge lists this Mac by its new name as a remote agent machine.
+- Both clients list the environment and open a thread on it; `tailscale ping <name>` from the main Mac replies.
+- The $personal-knowledge devices note records the Mac's new name and remote-agent role.

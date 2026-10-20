@@ -1,15 +1,14 @@
 # Store CLIs
 
-Use `asc` for App Store Connect and `gpc` for Google Play. EAS stays the build and submission path. Read live help before each unfamiliar command:
-`asc search "<task>"`, `asc <command> --help`, and `gpc <command> --help`. Use $asc-cli-usage, $asc-release-flow, $asc-submission-health,
-$asc-testflight-orchestration, and $asc-metadata-sync for `asc` workflow detail; the rules below take precedence over them.
+Use `asc` for App Store Connect, `gpc` for Google Play, and EAS for builds and submissions. Use $asc-cli-usage for command discovery and live help
+for flags. The policies here override remote ASC skills.
 
 ## Credentials
 
-- Load the project's release environment file, usually `$SERVICE_CREDENTIALS_HOME/environments/<project>/mobile-release.env`, with
-  `set -a; source <file>; set +a` in the same shell command as the CLI call.
-- The file exports `ASC_KEY_ID`, `ASC_ISSUER_ID`, and `ASC_PRIVATE_KEY_PATH` for `asc`, and `GPC_SERVICE_ACCOUNT` for `gpc`. Do not create
-  `asc auth login` or `gpc auth login` profiles; each project keeps its own Google Play service account.
+- Load and export the project's release environment in the same shell as the CLI call, usually from
+  `$SERVICE_CREDENTIALS_HOME/environments/<project>/mobile-release.env`.
+- Use `ASC_KEY_ID`, `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY_PATH`, and `GPC_SERVICE_ACCOUNT`. Never create `asc auth login` or `gpc auth login`
+  profiles; keep a separate Google Play service account per project.
 - Use $service-access when the file, key, or store permission is missing.
 
 ## Identifiers
@@ -21,5 +20,7 @@ $asc-testflight-orchestration, and $asc-metadata-sync for `asc` workflow detail;
 ## Safety
 
 - Prefix read-only `asc` calls with `ASC_READ_ONLY=1`; it refuses every mutating request.
-- Preview a mutation with `--dry-run` before running it with `--confirm` (`asc`) or `--yes` (`gpc`).
+- Preview mutations with `--dry-run` before applying with `--confirm` (`asc`) or `--yes` (`gpc`); use each flag only where live help supports it.
 - Never use `asc web` commands. They drive an Apple Account web session, which counts as browser automation of App Store Connect.
+- Routine store work is API/CLI-only. Browser automation is allowed only for an API-unsupported declaration form when the owner asks for that
+  change. Other API-unsupported account, policy, legal, payment, and review tasks are manual blockers requiring fresh user intent.

@@ -1,42 +1,34 @@
 ---
 name: product-health
-description: Use to check a live product's health or investigate anomalies in errors, jobs, data, performance, or cost.
+description: Use to check live product health or investigate operational anomalies.
 ---
-
-## Workflow
-
-1. Establish the scope and comparison window from `docs/product-setup.md`, recent git history, project documentation, and available health sources.
-2. Deliver the ranked health report.
 
 ## Evaluation
 
-- Report missing or stale `docs/product-setup.md` context as an observability gap.
-- Compare the current window with both the previous window and usual baseline. Treat recent commits as investigation leads, not proof.
-- Assess only relevant product journeys, jobs, data integrity, performance, observability, AI usage, and cost or capacity.
+- Establish scope and comparison window from `docs/product-setup.md`, project docs, recent git history, and health sources. Report missing/stale
+  setup context as an observability gap.
+- Compare the current window with the previous window and usual baseline. Commits are investigation leads, not proof.
+- Assess relevant journeys, jobs, data integrity, performance, observability, AI usage, cost, and capacity.
 - Prefer structured CLI or API output over dashboards.
-- Investigate each material signal until its cause, impact, baseline change, and confidence are supportable or the missing evidence is explicit.
+- Investigate material signals until cause, impact, baseline change, and confidence are supported, or name missing evidence.
 
 ## Source routing
 
-Use `docs/product-setup.md` to identify the relevant sources and access routes.
+Identify sources and access routes from `docs/product-setup.md`.
 
 - **Sentry:** Use $sentry-cli.
-- **PostHog:** Use $cli-tools for PostHog source access, $querying-posthog-data before writing any HogQL query, and $investigate-metric for material
-  metric changes.
-- **Queues, schedulers, and servers:** Follow `docs/product-setup.md`. Use $cli-tools for Laravel Forge or SSH as applicable. Measure live backlog, job
-  age, retries, failures, execution, service health, and capacity.
-- **Caches, databases, managed services, and full-text search:** Use $service-access or SSH. For DigitalOcean managed databases, use `doctl` and read
-  the narrowest relevant live help before acting.
+- **PostHog:** Use $cli-tools for access, $querying-posthog-data before writing HogQL, and $investigate-metric for material metric changes.
+- **Queues, schedulers, servers:** Follow setup docs; use $cli-tools for Laravel Forge or SSH as applicable. Measure live backlog, job age, retries,
+  failures, execution, service health, and capacity.
+- **Caches, databases, managed services, full-text search:** Use $service-access or SSH. For DigitalOcean managed databases, use `doctl` and relevant
+  live help before acting.
 
 ## Sentry cleanup
 
-- Resolve an issue during the report only after evidence confirms it is fixed, inactive, superseded, or known noise.
-- Record every resolved issue with a green status emoji and explain why resolution was safe.
+Resolve issues only with evidence they are fixed, inactive, superseded, or known noise. Record each with a green status emoji and why resolution was safe.
 
 ## Report contract
 
-- Lead with findings and analysis, then place pure statistics in a table.
-- When action items exist, end with a ranked **Action items** section as the final substantive section.
-- Prefix every statistics table row with exactly one interpretation marker: 🟢 for healthy or improved, 🟡 for warning or uncertainty, and 🔴 for
-  failure or regression.
-- Rank findings by the number of affected users and impact on critical flows.
+- Lead with findings ranked by affected users and impact on critical flows, then tabulate statistics.
+- Prefix each statistics row with exactly one RATINGS marker.
+- If actions exist, make ranked **Action items** the final substantive section.

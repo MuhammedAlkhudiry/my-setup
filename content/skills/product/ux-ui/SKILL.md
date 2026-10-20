@@ -1,53 +1,48 @@
 ---
 name: ux-ui
-description: Use before building or changing what users see, such as a screen, layout, component, or style, when reviewing a design, or when the user asks for visual options to compare.
+description: Use before UI changes, design reviews, or visual option comparisons.
 ---
 
 ## Design workflow
 
-- Inspect the user's goal, complete journey, platform conventions, design system, realistic content, and relevant states.
-- Follow the established design system, theme, and visual character. Add components, tokens, or patterns for authorized work when they preserve those
-  conventions.
-- Favor calm, rich, professional, distinctive minimalism: clear hierarchy, balanced spacing, restrained color, and subtle depth.
-- Never add eyebrow labels, the small text above a heading, or pill badges and chips. Let the heading and layout carry the hierarchy.
-- Never pair a pale accent fill with a flat border, icon, or text in the same color, such as a yellow-tinted row with a yellow edge or an icon
-  in a yellow circle; it reads as a stock web notice. Use the design system's tinted surface, or a neutral one, and let one element carry the
-  accent. When an icon stands for something with its own art, such as an avatar or emblem, show that art.
-- Make the next useful action clear at each stage of the journey. For example, offer resource creation in an empty state and contextual editing in a
-  resource list.
+- Inspect the goal, complete journey, platform conventions, design system, realistic content, and states.
+- Follow the established system, theme, and visual character, including when adding components, tokens, or patterns for authorized work.
+- Favor distinctive minimalism: clear hierarchy, balanced spacing, restrained color, and subtle depth.
+- Never add eyebrow labels (small text above headings) or invent decorative pill badges/chips. Established design-system components, including
+  approved `Chip` components, take precedence over the pill restriction. Use headings and layout for hierarchy.
+- Never pair pale accent fills with flat borders, icons, or text in the same color. Use a design-system tinted surface or a neutral surface;
+  let one element carry the accent. Show original art for avatars, emblems, and similar subjects.
+- Make the next useful action clear, such as creation in empty states or contextual editing in lists.
 
 ## Requested options
 
-- By default, create five substantially different options plus several more labeled **Wild**. Use the wild options to explore beyond the brief's
-  design constraints and avoid settling for minor variations of the current approach.
-- Present options in a new HTML preview or visualization built with $html-artifacts by default. If the user requests options inside the app or website, present them there. In
-  either format, include an option switcher.
-- Loop animated previews when repetition helps compare the options.
-- Always let the user pick several options at once, on the options page and when asking in chat.
-- When the user selects one option without requesting implementation, acknowledge the selection and ask whether to integrate it.
-- When the user selects several options or parts of different options, treat them as the chosen direction: combine the selected elements and
-  generate new options from them.
-- Keep an options page focused on the options. Under each option, write two plain sentences: what the person would see, and why to pick it.
-  Keep short labels for secondary detail only. When options belong to a feature proposal, summarize them in the proposal's options section and link the full options page.
-- When the user asks for changes, create a new HTML file instead of editing the previous one.
+- Default to five substantially different options plus several **Wild** options beyond the brief's design constraints.
+- Use a new HTML preview or visualization with $html-artifacts, unless options were requested in the app/site. Include an option switcher
+  and allow multiple selections both on the page and in chat. Loop animations when useful for comparison.
+- For a single selection without an implementation request, acknowledge it and ask whether to integrate. For multiple selections or selected
+  parts, combine them into new options.
+- Keep the page focused on options. Give each two plain sentences: what users see and why to pick it. Use short labels only for secondary detail.
+  For feature proposals, summarize options in the proposal and link the full page.
+- For requested revisions, create a new HTML file; preserve the previous one.
+
+## Building a picked option
+
+- The picked mockup is the spec. Before coding, map each element it shows to the existing component that will draw it; agree any substitute
+  pattern, layout, or dropped element with the user first. Never fall back to a generic screen pattern because it is quicker.
+- Before reporting, put running-app screenshots beside the picked mockup, screen by screen, fix every difference not agreed, and show the
+  user that comparison.
 
 ## Design checks
 
-After each design revision, inspect the rendered result and address each applicable item below. In the final response, summarize completed checks with
-a green verification emoji. Identify any checks that could not be completed.
+After each revision, inspect the rendered result and correct:
 
-- Correct inconsistent spacing, gaps, padding, and margins.
-- Check text contrast against each background and correct poor contrast.
-- Clarify hierarchy and group related information and controls. Break up dense, undifferentiated content.
-- Separate distinct areas with sections or containers where useful, without excessive nesting or visual boundaries.
-- Refine visual appeal with purposeful icons, restrained color, and subtle, smooth microanimations. Keep these touches proportionate.
-- Check every UI element against the design system and correct inconsistencies.
-- Check layout and text sizing with $verification.
-- Check loading, error, and recovery states. Make progress clear and provide a useful retry or recovery action when a flow fails.
-- Keep button and label text readable; allow wrapping or layout changes at larger text sizes.
+- Inconsistent spacing, contrast, or design-system use.
+- Weak hierarchy, dense content, or poorly grouped controls; separate areas without excessive nesting or boundaries.
+- Missing loading/progress feedback or useful error and recovery states.
+- Layout and text sizing problems using $verification; keep buttons and labels readable through wrapping or reflow.
+
+Use purposeful icons, restrained color, and proportionate visual detail.
 
 ## Animation
 
-- Include subtle micro-animations by default where they support the interaction. Keep them unobtrusive.
-- Avoid distracting bounce, exaggerated motion, and flashy effects.
-- Follow existing animation tokens.
+Use subtle, smooth microanimations where they support interaction, following existing tokens. Avoid distracting bounce, exaggerated motion, and flashy effects.

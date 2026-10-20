@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import type { QueueState } from "./device-queue";
 import {
   groupIsAlive,
@@ -8,6 +9,33 @@ import {
 
 export type HeavyClass = "checks" | "benchmark" | "build";
 
+export type MemoryPressure = "normal" | "warning" | "critical" | "unknown";
+
+export function parseMemoryPressure(level: string, report = ""): MemoryPressure {
+  const known = ({ "1": "normal", "2": "warning", "4": "critical" } as const)[
+    level.trim() as "1" | "2" | "4"
+  ];
+  if (known) return known;
+  const state = report
+    .match(
+      /(?:memory pressure(?: level| state)?|system-wide memory pressure)\s*[:=]\s*(normal|warn(?:ing)?|critical)\b/i,
+    )?.[1]
+    ?.toLowerCase();
+  return state === "warn" ? "warning" : ((state as MemoryPressure | undefined) ?? "unknown");
+}
+
+/** Bounded probes run outside the queue lock; unavailable metrics never stall admission. */
+export function readMemoryPressure(): MemoryPressure {
+  if (process.platform !== "darwin") return "unknown";
+  const probe = (command: string, args: string[]) =>
+    spawnSync(command, args, { encoding: "utf8", timeout: 1000 }).stdout ?? "";
+  const level = probe("/usr/sbin/sysctl", ["-n", "kern.memorystatus_vm_pressure_level"]);
+  const known = parseMemoryPressure(level);
+  return known === "unknown"
+    ? parseMemoryPressure(level, probe("/usr/bin/memory_pressure", []))
+    : known;
+}
+
 export interface HostJob {
   reservationId: string;
   sequence: number;
@@ -16,6 +44,8 @@ export interface HostJob {
   requester?: string;
   class: HeavyClass;
   argv: string[];
+  /** Tracked for load admission and process cleanup, without consuming a capacity slot. */
+  reservationMode?: "express";
   queuedAt: number;
   acquiredAt: number | null;
   holder: ProcessIdentity;

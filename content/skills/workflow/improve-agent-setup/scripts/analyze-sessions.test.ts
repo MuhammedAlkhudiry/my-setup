@@ -254,6 +254,7 @@ test("deduplicates inherited Codex turns before a child sorted ahead of its pare
       user_instructions: "rules",
     }),
     usage("2026-09-01T00:00:03Z", 100, 100),
+    at("2026-09-01T00:00:04Z", "event_msg", { type: "task_complete", turn_id: "parent-turn" }),
   ];
   const { root, stateDb } = fixture([]);
   writeFileSync(
@@ -275,6 +276,7 @@ test("deduplicates inherited Codex turns before a child sorted ahead of its pare
       started("child-turn", "2026-09-01T00:01:01Z"),
       usage("2026-09-01T00:01:02Z", 50, 150),
       usage("2026-09-01T00:01:03Z", 50, 150),
+      at("2026-09-01T00:01:04Z", "event_msg", { type: "task_complete", turn_id: "child-turn" }),
     ]
       .map((event) => JSON.stringify(event))
       .join("\n"),
@@ -297,6 +299,8 @@ test("deduplicates inherited Codex turns before a child sorted ahead of its pare
     turns: 1,
     totalInput: 100,
   });
+  expect(report.time.main).toMatchObject({ active: 6000, tasks: 2 });
+  expect(report.time.tasks.map((task: any) => task.activeMs)).toEqual([3000, 3000]);
 });
 
 test("aggregates descendant context by root task tree", () => {
@@ -692,4 +696,201 @@ test("an unknown harness fails clearly", () => {
   const result = runClaude(root, "--harness", "wat");
   expect(result.exitCode).toBe(2);
   expect(result.stderr.toString()).toContain("--harness must be codex, claude, or all");
+});
+
+test("filters Claude tool totals with their sessions, including descendant directories", () => {
+  const files = Object.fromEntries(
+    ["/projects/example", "/projects/example/child", "/projects/example-other"].map((cwd, i) => [
+      `project-${i}/main.jsonl`,
+      [
+        assistant(
+          "2026-09-01T00:00:01Z",
+          `msg-${i}`,
+          {},
+          [{ type: "tool_use", id: "call", name: "Bash", input: { command: `command-${i}` } }],
+          { cwd },
+        ),
+        {
+          type: "user",
+          timestamp: "2026-09-01T00:00:02Z",
+          cwd,
+          message: { content: [{ type: "tool_result", tool_use_id: "call", content: "result" }] },
+        },
+      ],
+    ]),
+  );
+  const { root } = claudeFixture(files);
+  const report = JSON.parse(
+    runClaude(root, "--since", "2026-09-01", "--cwd", "/projects/example/").stdout.toString(),
+  );
+  expect(report.claude.totals).toMatchObject({ sessions: 2, toolOutputs: 2, toolOutputBytes: 12 });
+  expect(report.claude.tools.map((tool: any) => tool.label).sort()).toEqual([
+    "Bash command-0",
+    "Bash command-1",
+  ]);
+  expect(report.claude.tools.reduce((sum: number, tool: any) => sum + tool.bytes, 0)).toBe(12);
+});
+
+test("counts affirmative truncation markers without matching false flags or ordinary prose", () => {
+  const outputs = [
+    '{"textTruncated":false,"truncated":false}',
+    '"textTruncated": false',
+    "The truncated detection needs a fix",
+    "output limit is configured; value exceeds maximum in a test",
+    '{"textTruncated":true}',
+    '{"truncated":true}',
+    "Warning: truncated output (original token count: 2000)",
+    "…123 tokens truncated…",
+    "<truncated>remaining output omitted</truncated>",
+    "Error: result (96,709 characters) exceeds maximum allowed tokens. Output has been saved to /tmp/result.txt",
+  ];
+  const codex = fixture([
+    meta(),
+    ...outputs.flatMap((output, i) => [
+      at("2026-09-01T00:00:01Z", "response_item", {
+        type: "function_call",
+        call_id: `${i}`,
+        name: "exec_command",
+        arguments: JSON.stringify({ cmd: `case-${i}` }),
+      }),
+      at("2026-09-01T00:00:02Z", "response_item", {
+        type: "function_call_output",
+        call_id: `${i}`,
+        output,
+      }),
+    ]),
+  ]);
+  const report = JSON.parse(
+    run(codex.root, codex.stateDb, "--since", "2026-09-01").stdout.toString(),
+  );
+  expect(report.sessions[0].truncatedOutputs).toBe(6);
+  expect(report.commands.map((command: any) => command.truncated)).toEqual([
+    0, 0, 0, 0, 1, 1, 1, 1, 1, 1,
+  ]);
+
+  const claude = claudeFixture({
+    "example/main.jsonl": [
+      assistant(
+        "2026-09-01T00:00:01Z",
+        "msg",
+        {},
+        outputs.map((_, i) => ({
+          type: "tool_use",
+          id: `${i}`,
+          name: "Bash",
+          input: { command: `case-${i}` },
+        })),
+      ),
+      {
+        type: "user",
+        timestamp: "2026-09-01T00:00:02Z",
+        message: {
+          content: outputs.map((content, i) => ({
+            type: "tool_result",
+            tool_use_id: `${i}`,
+            content,
+          })),
+        },
+      },
+    ],
+  });
+  expect(
+    JSON.parse(runClaude(claude.root, "--since", "2026-09-01").stdout.toString()).claude.tools.map(
+      (tool: any) => tool.truncated,
+    ),
+  ).toEqual([0, 0, 0, 0, 1, 1, 1, 1, 1, 1]);
+});
+
+test("times Codex turns, parallel tools, and model responses without idle or repeated usage", () => {
+  const ts = (seconds: number) => new Date(Date.parse("2026-09-01") + seconds * 1000).toISOString();
+  const event = (seconds: number, type: string, payload: unknown) => at(ts(seconds), type, payload);
+  const call = (id: string) => ({
+    type: "function_call",
+    call_id: id,
+    name: "exec_command",
+    arguments: JSON.stringify({ cmd: id }),
+  });
+  const output = (id: string) => ({ type: "function_call_output", call_id: id, output: "done" });
+  const { root, stateDb } = fixture([
+    meta(),
+    event(0, "event_msg", { type: "task_started", turn_id: "first" }),
+    event(0, "turn_context", { turn_id: "first", model: "gpt-6.1-sol" }),
+    event(0, "response_item", { type: "message", role: "user", content: "Fix the build" }),
+    event(10, "response_item", call("test")),
+    event(10, "response_item", call("check")),
+    event(10, "token_usage_record", {
+      response_id: "r1",
+      usage: { input_tokens: 100, output_tokens: 10 },
+    }),
+    event(30, "response_item", output("test")),
+    usage(ts(30), 100, 100),
+    event(50, "response_item", output("check")),
+    usage(ts(50), 100, 100),
+    event(60, "response_item", {
+      type: "message",
+      role: "assistant",
+      phase: "final",
+      content: [{ type: "output_text", text: "Done" }],
+    }),
+    event(60, "token_usage_record", {
+      response_id: "r2",
+      usage: { input_tokens: 200, output_tokens: 20 },
+    }),
+    usage(ts(60), 200, 300),
+    event(60, "event_msg", { type: "task_complete", turn_id: "first" }),
+    event(1000, "event_msg", { type: "task_started", turn_id: "second" }),
+    event(1000, "turn_context", { turn_id: "second", model: "gpt-6.1-sol" }),
+    event(1000, "response_item", { type: "message", role: "user", content: "Next" }),
+    event(1005, "response_item", {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "Working" }],
+    }),
+    usage(ts(1005), 200, 300),
+    event(1010, "response_item", {
+      type: "message",
+      role: "assistant",
+      content: [{ type: "output_text", text: "Stopped" }],
+    }),
+    usage(ts(1010), 300, 600),
+    usage(ts(1010), 300, 600),
+    event(1015, "response_item", {
+      type: "message",
+      role: "assistant",
+      phase: "final",
+      content: [{ type: "output_text", text: "Done" }],
+    }),
+    usage(ts(1015), 400, 1000),
+    event(1015, "event_msg", { type: "turn_aborted", turn_id: "second" }),
+  ]);
+  const report = JSON.parse(run(root, stateDb, "--since", "2026-09-01").stdout.toString());
+  expect(report.sessions[0].time).toMatchObject({
+    model: 35_000,
+    tool: 40_000,
+    idle: 940_000,
+    active: 75_000,
+    tasks: 2,
+  });
+  expect(report.time.tasks).toMatchObject([
+    { prompt: "Fix the build", activeMs: 60_000, toolCalls: 2 },
+    { prompt: "Next", activeMs: 15_000 },
+  ]);
+  expect(report.time.tools.find((tool: any) => tool.label === "test")).toMatchObject({
+    calls: 1,
+    wallMs: 10_000,
+    p50: 20_000,
+  });
+  expect(report.time.tools.find((tool: any) => tool.label === "check")).toMatchObject({
+    calls: 1,
+    wallMs: 30_000,
+    p50: 40_000,
+  });
+  expect(report.time.models).toMatchObject([
+    { group: "gpt-6.1-sol", requests: 4, totalMs: 35_000, p50: 10_000 },
+  ]);
+  expect(report.time.contexts).toMatchObject([{ group: "under 50k", requests: 4 }]);
+
+  const window = JSON.parse(run(root, stateDb, "--since", ts(20)).stdout.toString());
+  expect(window.time.main).toMatchObject({ model: 25_000, tool: 30_000, active: 55_000 });
+  expect(window.time.models[0]).toMatchObject({ requests: 3, totalMs: 25_000 });
 });

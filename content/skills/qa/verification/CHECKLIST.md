@@ -1,12 +1,12 @@
 # Verification Checklist
 
-`docs/runbooks/checklist.md` is a short command list of about 30 lines:
+Keep `docs/runbooks/checklist.md` to about 30 lines of confirmed project commands:
 
 ```text
 # Before reporting: the areas this branch changed, in parallel
 heavy-run --class checks -- mise run check
 
-# After the final push to a pull request: what its CI would run, then a green signoff status on GitHub
+# After the final PR push: CI-equivalent checks and a GitHub signoff status
 heavy-run --class checks -- mise run signoff
 
 # Before a release: every area
@@ -19,23 +19,21 @@ cd app && bunx jest <path>
 mise run api:check
 ```
 
-- Replace every example with commands confirmed from the project and installed tool help.
-- Reserve full heavy runs with `heavy-run` at the outer command only; individual test files and light checks run directly. See $verification.
-- Use `#` comments for group labels and conditions. Put explanations in the task runner's descriptions, not in the checklist.
-- Give the project one gate command that runs the checks for the areas the branch changed, in parallel, and fixes formatting.
-- Give it one full command that runs every area and everything CI runs.
-- Give each test runner an iterate command that runs only the tests the change affects, through the runner's impact analysis where it has
-  one, such as Pest `--tia` or Jest `--findRelatedTests`.
-- Keep pull request CI to the checks for the changed areas. Keep end-to-end journeys, mutation testing, coverage, and paid evals out of it.
-- When pull requests use local sign-off instead of CI, give the project a sign-off command. It refuses uncommitted or unpushed work, runs
-  everything pull request CI would for the changed areas, and posts a green or red `signoff` commit status. Keep cloud CI on the main
-  branch, where it catches what the developer machine cannot, such as case-sensitive file names on Linux.
-- Let the gate and the sign-off skip a check that already passed on identical code, installed dependencies, and CI mode, and give them a
-  flag that reruns everything. Generators that other checks read run whenever anything else runs. The full command always runs everything.
-- Make every command safe to run from several worktrees at once: derive test database names, ports, and caches from the worktree, so
-  parallel runs never drop or reuse each other's data.
-- Include every required verification category, not only tests and lint. Include builds only when the project treats them as part of its gate.
-- Keep paid evals, coverage reports, profilers, and release-only steps out of the checklist.
+- Replace examples using project configuration and installed help. Use `#` comments for groups/conditions; put explanations in task descriptions.
+- Wrap heavy commands at the outer level; opted-in cooperating runners reserve each heavy step. Run individual test files and light checks
+  directly. Deferred runners and their heavy steps are uncapped; declare other gate prefixes in `heavyRun.uncappedCommands` for the same exemption.
+  Ad-hoc checks/benchmarks must finish within 90 seconds: split or speed them up. Builds are exempt. See $verification.
+  Benchmarks share the host with other jobs; timings can be noisy, so compare repeated runs or medians.
+- Provide one gate for changed areas, running independent checks in parallel and fixing formatting; one full command for all areas and CI checks;
+  and an iterate command per test runner, using impact analysis when available, such as Pest `--tia` or Jest `--findRelatedTests`.
+- Limit PR CI to changed areas. Exclude end-to-end journeys, mutation testing, coverage, and paid evals.
+- When local sign-off replaces PR CI, its command must refuse uncommitted/unpushed work, run CI-equivalent checks for changed areas, and post a
+  green/red `signoff` commit status. Retain main-branch cloud CI for platform differences, such as Linux filename case sensitivity.
+- Gate/sign-off may reuse results only for identical code, installed dependencies, and CI mode; provide a force-rerun flag. Run generators consumed
+  by checks whenever anything else runs. The full command never skips checks.
+- Isolate test databases, ports, and caches per worktree so concurrent commands cannot reuse or drop each other's data.
+- Include every required verification category; include builds only when part of the project's gate.
+- Exclude paid evals, coverage reports, profilers, and release-only steps from the checklist.
 
 ## Stage budgets
 

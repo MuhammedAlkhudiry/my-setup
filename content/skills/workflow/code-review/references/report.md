@@ -1,22 +1,17 @@
 # Report
 
-## HTML report
+## Delivery
 
-When there are findings, deliver a minimal page built with $html-artifacts; otherwise reply normally.
+Deliver the review in the reply; never save it to a file. With findings, show a minimal $html-artifacts page inline above the reply when the
+host can render one; otherwise reply in Markdown. State scope and verification limits in every report.
 
-Also save every review as Markdown in one place: `~/Documents/code-reviews/<project>/<YYYY-MM-DD>-<topic>.md`. Include the reviewed scope, the
-verification limits, each area's result, and every finding in the copied finding format below, plus its evidence. Link the file beside the
-inline preview or separate page link.
-
-- State the reviewed scope and verification limits. Group findings by review area, order them by severity, and mark areas with no findings `Clear`.
-  Distinguish unreviewed or inapplicable areas from those checked and clear.
-- Give each finding the fields below. Badge its action apart from its severity.
-- Explain each finding with what clarifies it: side-by-side current/proposed behavior or code, highlighted diffs, expandable evidence, or
-  diagrams. Label proposed code as a suggestion.
-- Give each finding a labeled notes field and a **Should fix** checkbox, checked for **Fix** only. Selection means inclusion, not resolution.
-  Provide **Select all**, **Clear selection**, and **Copy selected** controls with a selected count. Disable copying when nothing is selected.
-- Copy selected findings as Markdown in the format below, including entered notes. Offer selectable text if clipboard access fails. Retain notes and
-  selections when collapsing sections. Show storage failures without blocking use.
+- Group by review area, then severity. Mark checked areas without findings `Clear`; distinguish unreviewed and inapplicable areas.
+- Use the fields below, badging action separately from severity. Explain with comparisons, diffs, evidence, or diagrams as needed;
+  label proposed code as a suggestion.
+- Add labeled notes and a **Should fix** checkbox per finding, checked only for **Fix**. Selection means inclusion, not resolution.
+  Provide **Select all**, **Clear selection**, **Copy selected**, and a selected count; disable copying with no selection.
+- Copy selected findings and entered notes as Markdown below; offer selectable text if clipboard access fails. Preserve notes/selections when collapsing
+  sections; show storage failures without blocking use.
 
 ## Copied finding format
 
@@ -29,12 +24,12 @@ inline preview or separate page link.
 
 Action:
 
-- **Fix:** clearly wrong; one correct fix that keeps agreed behavior and scope.
-- **Decide:** needs the user's call: competing fixes, a behavior or scope change, or a preference.
+- **Fix:** clearly wrong, with one correct fix preserving agreed behavior and scope.
+- **Decide:** competing fixes, behavior/scope changes, or preferences needing the user's call.
 
 Severity:
 
-- **Blocker:** must not ship; it is incorrect, unsafe, or loses data.
-- **Major:** works today but will cause failures, rework, or a bad user experience.
-- **Minor:** worth fixing now, with contained cost.
-- **Nit:** optional preference; state it once and move on.
+- **Blocker:** must not ship: incorrect, unsafe, or loses data.
+- **Major:** works today but will cause failures, rework, or bad user experience.
+- **Minor:** worth fixing now at contained cost.
+- **Nit:** optional preference; state once.

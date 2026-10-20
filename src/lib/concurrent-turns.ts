@@ -1,7 +1,7 @@
 import type { ConcurrentCapacity, ConcurrentJob } from "./concurrent-capacity";
 import type { HostJob } from "./host-capacity";
 
-export const CURRENT_HEAVY_CLIENT = "concurrent-v3" as const;
+export const CURRENT_HEAVY_CLIENT = "concurrent-v4" as const;
 const requester = (job: HostJob) => job.requester ?? job.reservationId;
 
 function rotate(host: ConcurrentCapacity, eligible: ConcurrentJob[]): void {
@@ -47,8 +47,8 @@ export function prepareConcurrentTurns(
   }
 
   rotate(host, host.waiting);
-  let priority =
-    host.backfill && host.waiting.find((job) => job.reservationId === host.backfill!.reservationId);
+  const saved = host.backfill;
+  let priority = saved && host.waiting.find((job) => job.reservationId === saved.reservationId);
   if (!priority || heads.get(requester(priority)) !== priority) {
     delete host.backfill;
     priority = host.waiting.find((job) => requester(job) === host.requesters[0]);
@@ -61,19 +61,12 @@ export function prepareConcurrentTurns(
     return { next: priority, yieldLegacy: false };
 
   host.backfill ??= { reservationId: priority.reservationId, anchors: [...activeIds] };
-  // A checks/build head always has one slot reserved for its own polling.
-  // A benchmark cannot run before the original active jobs finish anyway:
-  // refill only while one of those fixed anchors lives, then drain completely.
-  // New arrivals never extend the anchor set, so the older turn cannot starve.
+  // Keep one slot available for an older head's own polling.
   const free =
-    priority.class === "benchmark"
-      ? stillRunning(host.backfill.anchors)
-        ? host.capacity - host.active.length
-        : 0
-      : host.capacity - 1 - host.active.length;
+    host.capacity - 1 - host.active.filter((job) => job.reservationMode !== "express").length;
   const backfill = host.requesters
     .map((id) => heads.get(id)!)
-    .filter((job) => requester(job) !== requester(priority!) && job.class !== "benchmark")
+    .filter((job) => requester(job) !== requester(priority!))
     .slice(0, Math.max(0, free));
   const front = [...backfill.map(requester), requester(priority)];
   host.requesters = [...front, ...host.requesters.filter((id) => !front.includes(id))];

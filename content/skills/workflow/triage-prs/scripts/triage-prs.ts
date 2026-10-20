@@ -54,10 +54,47 @@ export interface Assessment {
 }
 
 interface Check {
-  conclusion?: string;
-  state?: string;
-  status?: string;
+  conclusion?: string | null;
+  state?: string | null;
+  status?: string | null;
 }
+
+type CheckState =
+  | "SUCCESS"
+  | "NEUTRAL"
+  | "SKIPPED"
+  | "FAILURE"
+  | "ERROR"
+  | "TIMED_OUT"
+  | "CANCELLED"
+  | "STARTUP_FAILURE"
+  | "ACTION_REQUIRED"
+  | "STALE"
+  | "PENDING"
+  | "QUEUED"
+  | "IN_PROGRESS"
+  | "EXPECTED"
+  | "REQUESTED"
+  | "WAITING";
+
+const CHECK_STATES: Record<CheckState, Exclude<Assessment["ci"], "none">> = {
+  SUCCESS: "success",
+  NEUTRAL: "success",
+  SKIPPED: "success",
+  FAILURE: "failure",
+  ERROR: "failure",
+  TIMED_OUT: "failure",
+  CANCELLED: "failure",
+  STARTUP_FAILURE: "failure",
+  ACTION_REQUIRED: "failure",
+  STALE: "failure",
+  PENDING: "pending",
+  QUEUED: "pending",
+  IN_PROGRESS: "pending",
+  EXPECTED: "pending",
+  REQUESTED: "pending",
+  WAITING: "pending",
+};
 
 export function isCodePath(path: string): boolean {
   return !NON_CODE_PATTERNS.some((pattern) => pattern.test(path));
@@ -119,17 +156,20 @@ export function ciFromChecks(checks: Check[]): Assessment["ci"] {
     return "none";
   }
 
-  const results = checks.map((check) => (check.conclusion || check.state || "").toUpperCase());
+  const results = checks.map((check) => {
+    const state = (check.conclusion || check.state || "").toUpperCase();
 
-  if (
-    results.some((result) =>
-      ["FAILURE", "ERROR", "TIMED_OUT", "CANCELLED", "STARTUP_FAILURE"].includes(result),
-    )
-  ) {
+    return Object.hasOwn(CHECK_STATES, state) ? CHECK_STATES[state as CheckState] : "pending";
+  });
+
+  if (results.includes("failure")) {
     return "failure";
   }
 
-  if (checks.some((check) => check.status && check.status.toUpperCase() !== "COMPLETED")) {
+  if (
+    results.includes("pending") ||
+    checks.some((check) => check.status && check.status.toUpperCase() !== "COMPLETED")
+  ) {
     return "pending";
   }
 

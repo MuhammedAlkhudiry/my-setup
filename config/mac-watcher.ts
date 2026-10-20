@@ -33,8 +33,12 @@ export const MAC_WATCHER = {
   },
   /** Crossing any of these opens an alert. */
   thresholds: {
-    /** macOS keeps swap long after pressure passes, so only heavy swap counts. */
-    maxSwapUsedGib: 12,
+    /** Allocated swap near full matters only alongside elevated memory pressure. */
+    maxSwapUsedRatio: 0.9,
+    /** Physical footprint including compressed memory when available; otherwise ps RSS. */
+    maxFseventsdMemoryGib: 2,
+    maxSystemDaemonMemoryGib: 4,
+    /** Pruning/diagnostic floor; alerts use criticalDiskFreeGib. */
     minDiskFreeGib: 20,
     criticalDiskFreeGib: 10,
     /** Processes whose parent died, matching agent tooling, older than this, count as leaks. */
@@ -55,8 +59,6 @@ export const MAC_WATCHER = {
     /** Any process averaging this CPU over its life for this long is reported to the watcher, never stopped. */
     sustainedPercent: 80,
     sustainedMinMinutes: 30,
-    /** A 15-minute load average above cores times this opens an alert. */
-    maxLoadPerCore: 1,
   },
   /**
    * Disk cleanup that runs before every snapshot with fixed rules and no AI. Paths are relative to home. Archived files
@@ -65,13 +67,34 @@ export const MAC_WATCHER = {
   storage: {
     archiveVolume: "/Volumes/DevSSD",
     archiveRoot: "/Volumes/DevSSD/archive",
+    /** Below this internal free space, closed sessions and browser cache files expire sooner. */
+    lowSpace: {
+      freeGiB: 30,
+      archiveFiles: [{ path: ".codex/sessions", days: 1, to: "codex-sessions" }],
+      /** Only cache folders, never whole browser profiles, cookies, or login data. Paths may contain globs. */
+      browserCaches: {
+        days: 3,
+        paths: [
+          "Library/Caches/Google/Chrome/*/{Cache,Code Cache,GPUCache}",
+          "Library/Application Support/Google/Chrome/{Default,Profile *}/{Cache,Code Cache,GPUCache,DawnGraphiteCache,DawnWebGPUCache}",
+          "Library/Application Support/Google/Chrome/GPUPersistentCache/GPUCache",
+          "Library/Application Support/{t3code,t3code-v2}/Partitions/t3code-preview-*/{Cache,Code Cache,GPUCache,DawnGraphiteCache,DawnWebGPUCache}",
+          ".t3/userdata/server-browser/profiles/*/{Default,Profile *}/{Cache,Code Cache,GPUCache,DawnGraphiteCache,DawnWebGPUCache}",
+        ],
+      },
+    },
     /**
      * Each direct child older than `days` is deleted; `match` limits which children count. Xcode records the project
      * each DerivedData folder builds; a folder whose project is gone, such as a removed worktree's or a cleared native
      * build's, goes once untouched for `projectGoneHours`, because agents leave 3 to 4 GB behind per worktree build.
      */
     deleteChildren: [
-      { path: "Library/Developer/Xcode/DerivedData", days: 14, match: /-[a-z]{28}$/, projectGoneHours: 1 },
+      {
+        path: "Library/Developer/Xcode/DerivedData",
+        days: 14,
+        match: /-[a-z]{28}$/,
+        projectGoneHours: 1,
+      },
     ],
     /**
      * Leftovers that agent runs drop in `/private/tmp` and the per-user temp folder, such as demo renders, QA copies, and
@@ -82,6 +105,12 @@ export const MAC_WATCHER = {
     temp: {
       days: 2,
       skip: /^(com\.apple\.|tmux-|boost_interprocess$|TemporaryItems$)|\.(sock|lock|pid)$/,
+      /** Named disposable tool output expires sooner, but activity anywhere inside it restarts the clock. */
+      toolCaches: {
+        days: 1,
+        match:
+          /^(jest[_-]|mago(?:[-_.]|$)|instruments(?:[-_.]|$)|metro-cache(?:[-_.]|$)|node-compile-cache(?:[-_.]|$)|playwright-transform-cache(?:[-_.]|$)|react-doctor-cache(?:[-_.]|$)|rector_cached_files(?:[-_.]|$)|bunx-\d+-jest@)|\.trace$/i,
+      },
     },
     /**
      * iOS simulators and Android emulators. Agents create one for most device tasks, and each keeps its installed apps and
@@ -102,39 +131,40 @@ export const MAC_WATCHER = {
      */
     codex: { threadIdleDays: 14, keepReleases: 2 },
     /**
-     * Linked worktrees of active projects are removed once clean, unlocked, unused, and idle; their branches stay, so no
-     * commit is lost. An exact finished PR head goes after `landed` idle days and the four-hour PR/commit/file grace period;
-     * ancestry alone never proves work finished. Detached heads stay.
-     * Unlanded branches without an open PR count as abandoned after `abandoned` idle days. A running T3 thread protects its
-     * checkout; an unarchived thread that is not running protects only unlanded work, since T3 recreates a landed checkout
-     * from its branch if the thread resumes. A worktree under four hours old stays while any thread in its project is busy,
+     * Linked worktrees of active projects and my-setup are removed once unlocked, unused, and idle. Finished PR branches
+     * go after `landed` idle days and the four-hour PR/commit/file grace period, even with unpublished changes, only after
+     * a verified patch, untracked-file copy, and self-contained commit bundle reach the mounted archive SSD. Branches stay.
+     * Clean detached heads go after 24 hours without git or file activity; ancestry alone never proves branch work finished.
+     * Unlanded branches without an open PR expire after `thread` idle days when bound to a settled or idle T3 thread,
+     * or `abandoned` idle days without a bound thread. Git activity or a changed file restarts the idle window. A running
+     * T3 thread protects its checkout; T3 recreates a removed checkout from its kept branch if the thread resumes.
+     * A worktree under four hours old stays while any thread in its project is busy,
      * since it may not be bound to its thread yet. Only agent-managed folders under ~/.t3/worktrees or a project root count. Registered worktrees also protect their parent temporary directory from ordinary temp pruning.
      */
-    worktreeIdleDays: { landed: 0, abandoned: 7 },
+    worktreeIdleDays: { landed: 0, abandoned: 7, thread: 3 },
     agentWorktreeDirs: ["/.claude/worktrees/", "/.codex/worktrees/", "/.t3/worktrees/"],
     /**
-     * Native build output in agent worktrees that stay, such as for an open PR or uncommitted work: 2 to 12 GB each,
-     * written fresh per worktree because the builds record the worktree's own path. It goes once nothing runs in the
-     * worktree, git saw no activity there, and no file in the output changed for `idleHours`; the next device build
-     * regenerates it. Only folders git ignores count, so no source file is touched. `ignored` matches what git lists,
-     * relative to the worktree: generated native projects, such as Expo's `ios/` and `android/`, and native build
-     * folders. Git lists an ignored dependency folder as a whole, so each one matching `dependencies.dir` is searched for
-     * native modules' build folders matching `dependencies.builds`.
+     * Installed packages and build output in every kept agent worktree, including open PRs and uncommitted work, go after
+     * `idleHours` without an open file, a running bound T3 thread, git activity, or any changed file in the checkout.
+     * Resuming work reinstalls dependencies and regenerates builds. Only git-ignored folders matching `ignored` or
+     * `dependencies.dir` count; any tracked descendant protects its whole folder. Generated native projects, build output,
+     * node_modules, and vendor are cleared together. Tracked files are never deleted.
      */
     nativeBuilds: {
-      idleHours: 6,
-      ignored: /(^|\/)(android|ios)\/$|\/(android|ios)\/(build|\.cxx|\.gradle|Pods)\/$/,
-      dependencies: { dir: /(^|\/)node_modules\/$/, builds: ["*/android/build", "*/android/.cxx"] },
+      idleHours: 24,
+      ignored:
+        /(^|\/)(android|ios|build|dist|\.next|\.nuxt|\.output|\.turbo|\.expo)\/$|\/(android|ios)\/(\.cxx|\.gradle|Pods)\/$/,
+      dependencies: { dir: /(^|\/)(node_modules|vendor)\/$/ },
     },
     /**
-     * Local MySQL test databases go once the checkout that built them is gone. Each active project's suite records its
-     * checkout's path in a `testing_checkout` table. An active project's database without one goes once untouched this
-     * long, because the suite rebuilds a missing database. Parallel workers' copies (`<name>_test_<n>`) follow theirs.
+     * Local MySQL test databases go once their recorded checkout is gone. Active projects' families also go once idle
+     * this long, even while the checkout exists: their suites rebuild missing databases. Parallel copies follow theirs.
+     * File mtimes survive server restarts; live connections and test runners protect databases from being dropped in use.
      */
     testDatabases: {
       match: /(^|_)testing(_|$)/,
       markerTable: "testing_checkout",
-      unmarkedDays: 14,
+      idleDays: 3,
       mysqlArgs: ["-h", "127.0.0.1", "-u", "root"],
     },
   },
