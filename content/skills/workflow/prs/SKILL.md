@@ -8,6 +8,9 @@ description: Use when preparing, describing, or marking a pull request ready for
 Follow WORK-GITLAB and WORK-APPROVAL. Creating a PR/MR requires user approval; editing files and fixing checklist findings do not.
 Codex review approval does not authorize creation.
 
+For ticket work, put the ticket key in the branch name, within the project's branch convention, and in the title, and link the ticket in
+the description.
+
 <!-- /profile -->
 
 ## Checklist
@@ -49,7 +52,16 @@ For queued CI during a confirmed Ubicloud incident, read [runner outage recovery
 
 <!-- /profile -->
 
-## Sections
+## Title and description
+
+Use the template below only in the owner's own personal projects. In work repositories and other people's repositories, follow that
+repository's own template and the title and description style of its recent merged PRs; when it has neither, keep the description to the
+ticket link and a few plain sentences. Either way, keep checklist results, review details, risks, and approval questions in the reply,
+outside the PR description.
+
+<!-- profile:personal -->
+
+### Template
 
 Start **What changes for users** with a concrete example: who notices, before/after behavior, and why it matters. Use glossary terms;
 omit internal file, class, and function names. Scale detail to the change, with short paragraphs or a list of distinct behaviors.
@@ -57,18 +69,6 @@ Describe only what users can notice; leave the mechanism to the diff.
 
 When users notice nothing, as in refactors, tooling, tests, and developer or agent docs, write
 [**What changes for maintainers**](references/maintainer-section.md) instead. When a change has both, write both, users first.
-
-<!-- profile:work -->
-
-Include only these two sections, in order:
-
-1. **What changes for users**, or for maintainers.
-2. **Demo:** link an edited demo showing the change; see [demo media](references/demo-media.md). State plainly when a demo is unavailable.
-
-Keep checklist results, review details, risks, and approval questions in the reply, outside the PR description.
-
-<!-- /profile -->
-<!-- profile:personal -->
 
 Write these sections in order; omit any with nothing to say:
 
@@ -79,10 +79,10 @@ Write these sections in order; omit any with nothing to say:
 4. **Performance:** only for performance work. Give before and after numbers from the same method and data, with trade-offs.
 5. **Checklist.**
 
-<!-- /profile -->
-
 **Title:** the best-fit handoff label, unbolded, then what the user, or for maintainer-only changes the maintainer, notices:
 `[✨ FEAT] Rate finished sessions`, `[♻️ REFACTOR] Screens no longer refresh requests themselves`.
 
 Use `✨ What changes for users`, `🔧 What changes for maintainers`, and `🎬 Demo` as headings. For other sections, use
 🙋 Needs you / risks, ⚡ Performance, and ✅ Checklist.
+
+<!-- /profile -->

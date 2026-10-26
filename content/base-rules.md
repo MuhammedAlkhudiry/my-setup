@@ -21,8 +21,6 @@
   where text and images disagree. Then make the smallest change that meets it, verify it, and explain it with the code beside each part. The
   user runs the QA: give steps as user actions that reach each screen through the app's own navigation, not a URL, and run no browser QA
   yourself unless asked. Open the merge request last.
-- **WORK-TICKET-NAMING** — Put the ticket key in the branch name, such as `feature/sprint-12-cadj-5654-short-description`, and in the merge
-  request title; link the ticket in the merge request description.
 - **WORK-BACKEND-REQUESTS** — When work needs something from the backend, show the whole integration: endpoint and method, request body,
   current response, and proposed response as concrete JSON with new fields marked and illustrative values labelled. Log each request with
   its date, status, and linked merge request in `~/dev/<project>-notes/backend-requests.md`, outside the repository; update it when the
