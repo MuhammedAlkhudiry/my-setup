@@ -10,11 +10,23 @@
   keep review findings in the merge request and create additional docs only when explicitly requested.
 - **WORK-NEWCOMER** — The user recently joined and does not know the company's projects, domain, or conventions. Do not rely on them for
   this knowledge or to catch assumptions. Research code, docs, Git and merge request history. If unanswered, say so and draft a question
-  for their team; never guess. Explain the project context behind decisions.
+  for their team; never guess. Explain the project context behind decisions. Explain each domain term in everyday words the first time it
+  appears, with one concrete example, simply but without talking down. As an exception to English-only replies, use the Arabic term when it
+  makes a concept clearer, such as الهلال الأحمر for the Saudi Red Crescent.
 - **WORK-STANDARDS** — Before writing, find and follow existing patterns for naming, structure, libraries, tests, and commit/MR format.
   Project conventions override code style rules here, including CODE-SPACING.
 - **WORK-SCOPE** — Change only the requested scope; leave unrelated refactors, renames, formatting, dependency upgrades, and bugs for the
   handoff. Stop and ask before making a necessary out-of-scope change.
+- **WORK-TICKET-FLOW** — Per ticket: read it and its attachments, explain it, and agree on its meaning with the user before coding, especially
+  where text and images disagree. Then make the smallest change that meets it, verify it, and explain it with the code beside each part. The
+  user runs the QA: give steps as user actions that reach each screen through the app's own navigation, not a URL, and run no browser QA
+  yourself unless asked. Open the merge request last.
+- **WORK-TICKET-NAMING** — Put the ticket key in the branch name, such as `feature/sprint-12-cadj-5654-short-description`, and in the merge
+  request title; link the ticket in the merge request description.
+- **WORK-BACKEND-REQUESTS** — When work needs something from the backend, show the whole integration: endpoint and method, request body,
+  current response, and proposed response as concrete JSON with new fields marked and illustrative values labelled. Log each request with
+  its date, status, and linked merge request in `~/dev/<project>-notes/backend-requests.md`, outside the repository; update it when the
+  backend answers or ships.
   <!-- /profile -->
 - **CONCURRENT-AGENTS** — Coordinate only for possible overwrites or shared-resource interference. Before writes, check available session
   information once; do not scan every harness or poll. Read-only work needs no coordination; missing visibility is no blocker. Separate
@@ -33,6 +45,8 @@
 - **CLEAN-UP** — When done, close browser sessions, stop servers/processes, shut down simulators/emulators, and delete temporary directories
   you started or created. Leave the user's and other agents' resources alone.
 - **DEV-ENV-UNBLOCK** — Resolve development environment blockers directly, including local environment changes.
+- **BROWSER-TAB-REUSE** — In a browser shared with the user, such as Claude in Chrome, keep using the tab you control and navigate it per
+  page; open a new tab only when you have none, and keep it until the task is done.
   <!-- profile:personal -->
 - **SELF-SERVE-TOOLS** — Operate available browsers, iOS simulators, Android emulators, App Store Connect, and Google Play Console yourself
   or through CODEX-WORK to inspect, verify, and complete work; never ask the user to do browser work. When a site offers Google sign-in,
