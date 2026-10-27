@@ -125,7 +125,12 @@ const REMOTE_SKILLS_STATE_PATH = join(STATE_HOME, "my-setup/remote-skills.json")
 const USER_ZSHRC_HEADER = "# Managed shell config lives in my-setup.";
 const USER_ZSHRC_IMPORT =
   '[ -f "$HOME/.config/zsh-sync/custom.zsh" ] && source "$HOME/.config/zsh-sync/custom.zsh"';
-const HERD_PHP_EXPORT = /^export HERD_PHP_\d+_INI_SCAN_DIR=/;
+// Lines tool installers append to .zshrc that shell/zsh-custom.zsh already provides: Herd's PHP exports and
+// the completion loader `bun upgrade` re-adds.
+const KNOWN_TOOL_ZSHRC_LINES = [
+  /^export HERD_PHP_\d+_INI_SCAN_DIR=/,
+  /^\[ -s "[^"]*\/\.bun\/_bun" \] && source "[^"]*\/\.bun\/_bun"$/,
+];
 const ACTIVE_PROJECTS_PLACEHOLDER = "{{ACTIVE_PROJECTS}}";
 const SETUP_ROOT_PLACEHOLDER = "{{SETUP_ROOT}}";
 
@@ -245,13 +250,13 @@ function removeManagedMcpServers(configToml: string, managedServerNames: Set<str
   return cleanedLines.join("\n").trimEnd();
 }
 
-/** Herd writes a PHP configuration export into .zshrc whenever it updates; the managed shell config covers them. */
-export function onlyHerdAdditions(codeLines: string[]): boolean {
+/** True when .zshrc holds only the managed import plus lines tool updaters re-add, which the managed shell config covers. */
+export function onlyKnownToolAdditions(codeLines: string[]): boolean {
   const extras = codeLines.filter((line) => line !== USER_ZSHRC_IMPORT);
   return (
     codeLines.includes(USER_ZSHRC_IMPORT) &&
     extras.length > 0 &&
-    extras.every((line) => HERD_PHP_EXPORT.test(line))
+    extras.every((line) => KNOWN_TOOL_ZSHRC_LINES.some((pattern) => pattern.test(line)))
   );
 }
 
@@ -275,11 +280,9 @@ async function assertThinUserZshrc(): Promise<void> {
     return;
   }
 
-  if (onlyHerdAdditions(codeLines)) {
+  if (onlyKnownToolAdditions(codeLines)) {
     await writeFile(SHARED_PATHS.zshrc, `${USER_ZSHRC_HEADER}\n${USER_ZSHRC_IMPORT}\n`);
-    print.success(
-      "Removed the PHP exports Herd added to .zshrc; shell/zsh-custom.zsh sets them for every version",
-    );
+    print.success("Removed the Herd or Bun lines added to .zshrc; shell/zsh-custom.zsh already provides them");
     return;
   }
 

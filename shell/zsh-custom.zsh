@@ -56,9 +56,6 @@ export PATH="$HOME/.kimi-code/bin:$PATH"
 export PATH="$PATH:$HOME/.composer/vendor/bin"
 fpath=("$HOME/.local/share/zsh/site-functions" $fpath)
 
-# Bun's installer adds this to ~/.zshrc; keep its completion loader in the managed shell config.
-[ -s "$HOME/.bun/_bun" ] && source "$HOME/.bun/_bun"
-
 # --- Laravel/Herd ------------------------------------------------------------
 # Short aliases for the expected Laravel workflow: PHP and Artisan run through
 # Herd, while host package-manager commands stay on the host.

@@ -110,3 +110,14 @@ export async function sendTelegramMessage(text: string): Promise<void> {
     link_preview_options: { is_disabled: true },
   });
 }
+
+export async function reactToTelegramMessage(messageId: string, emoji = "👍"): Promise<void> {
+  if (!/^\d+$/.test(messageId)) throw new Error("Message id must be a positive integer");
+  const { owner_chat_id } = credentials();
+
+  await telegramApi("setMessageReaction", {
+    chat_id: owner_chat_id,
+    message_id: Number(messageId),
+    reaction: [{ type: "emoji", emoji }],
+  });
+}

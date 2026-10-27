@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
 
 import { DEVICE_PROFILES } from "../../config/devices";
-import { onlyHerdAdditions, renderBaseRules, syncManagedSkillsAsync } from "./install";
+import { onlyKnownToolAdditions, renderBaseRules, syncManagedSkillsAsync } from "./install";
 
 const personal = DEVICE_PROFILES.personal;
 
@@ -174,12 +174,17 @@ test("skill reinstall replaces stale files, preserves custom skills, and omits s
   });
 });
 
-test("install drops only the PHP exports Herd adds to .zshrc", () => {
+test("install drops only the Herd and Bun lines tools add to .zshrc", () => {
   const importLine = '[ -f "$HOME/.config/zsh-sync/custom.zsh" ] && source "$HOME/.config/zsh-sync/custom.zsh"';
   const herd = 'export HERD_PHP_85_INI_SCAN_DIR="/Users/x/Library/Application Support/Herd/config/php/85"';
 
-  expect(onlyHerdAdditions([importLine, herd])).toBe(true);
-  expect(onlyHerdAdditions([importLine, herd, "alias ll='ls -l'"])).toBe(false);
-  expect(onlyHerdAdditions([herd])).toBe(false);
-  expect(onlyHerdAdditions([importLine])).toBe(false);
+  expect(onlyKnownToolAdditions([importLine, herd])).toBe(true);
+  expect(onlyKnownToolAdditions([importLine, herd, "alias ll='ls -l'"])).toBe(false);
+  expect(onlyKnownToolAdditions([herd])).toBe(false);
+  expect(onlyKnownToolAdditions([importLine])).toBe(false);
+
+  const bun = '[ -s "/Users/x/.bun/_bun" ] && source "/Users/x/.bun/_bun"';
+  expect(onlyKnownToolAdditions([importLine, bun, importLine])).toBe(true);
+  expect(onlyKnownToolAdditions([importLine, bun, herd])).toBe(true);
+  expect(onlyKnownToolAdditions([importLine, bun, 'source "/tmp/evil"'])).toBe(false);
 });

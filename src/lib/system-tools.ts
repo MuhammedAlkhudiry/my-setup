@@ -186,6 +186,7 @@ export const SYSTEM_TOOL_GROUPS = [
         },
         update: {
           commands: ["bun upgrade"],
+          note: "When bun resolves to /opt/homebrew/bin/bun, run brew upgrade bun instead.",
         },
       },
       {
@@ -341,6 +342,7 @@ export const SYSTEM_TOOL_GROUPS = [
         },
         update: {
           commands: ["brew upgrade --cask codex"],
+          note: "When codex resolves to ~/.local/bin/codex (the standalone install), run codex update instead.",
         },
       },
       {

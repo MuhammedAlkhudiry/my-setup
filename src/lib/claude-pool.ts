@@ -250,6 +250,8 @@ async function writeClaudePoolSettings(paths: PoolPaths, baseUrl: string, client
       ANTHROPIC_BASE_URL: baseUrl,
       ANTHROPIC_AUTH_TOKEN: clientKey,
       ANTHROPIC_API_KEY: "",
+      // T3's background agents run through this config: wait out 429 and 529 responses instead of failing the turn.
+      CLAUDE_CODE_RETRY_WATCHDOG: "1",
     },
   };
   await privateFile(paths.claudeSettings, `${JSON.stringify(settings, null, 2)}\n`);

@@ -120,8 +120,9 @@ Use these projects as references when the user mentions them.
   completion (background commands, subagent results, PR watches), start the work and end the turn; otherwise block once with
   `wait-for <file|port|pid|url|cmd> <target>`, including for CI. A search that finds nothing is an empty result, not a failure.
 - **RATINGS** — Rate how good a metric, trend, or health reading is on five levels in text reports, digests, and replies: 🔴 very bad,
-  🟠 bad, ⚪ normal, 🟢 good, 🌟 very good. Never use two-color red/green for these ratings; keep pass/warn/fail markers for check results
-  and statuses. App and admin UI are out of scope.
+  🟠 bad, ⚪ normal, 🟢 good, 🌟 very good. State the reference the rating judges against, such as a target, limit, or usual level ("$150
+  of the $250 target", "SAR 4.78 against the SAR 5 stop line"); a bare number leaves the reader to guess why it rates as it does. Never use
+  two-color red/green for these ratings; keep pass/warn/fail markers for check results and statuses. App and admin UI are out of scope.
   <!-- profile:personal -->
 - **HEAVY-COMMANDS** — Run full gates/sign-offs, timing comparisons, native builds, and renders through `heavy-run --class <class> -- <argv...>`
   (`checks`, `benchmark`, or `build`) to share the host queue. Wrap only the outer command; self-queuing runners declared in
@@ -188,6 +189,13 @@ All instructions for replies to the user live here.
 - **Phone-ready media.** Share every image, video, page, and file so it opens on a phone: inline when supported, otherwise publish with
   $html-artifacts and link it. Never share only a local path. Stack options vertically for phone width.
 - **Other sessions.** Use thread titles, or describe the work if unknown; never use generated IDs alone.
+- **BEFORE-AFTER** — When reporting, explaining, proposing, or recapping a change, show before → after (value, behavior, or state) rather
+  than only the present, such as "SAR 150 → 75/day". A change means little without its starting point, and the arrow shows its size
+  without the reader recalling the old state. Show only a before you know; skip it when nothing existed before or the question is only
+  about current state.
+- **SO-WHAT** — Follow a fact the reader must act on or interpret with what it means for them, such as "Meta can overspend 75% in a day,
+  so Oct 26 cost SAR 228". A bare fact leaves the conclusion, and any mistake in drawing it, to the reader. Skip it when the meaning is
+  obvious.
 - Use emojis to mark key points and sections.
 
 ### Discussing and teaching

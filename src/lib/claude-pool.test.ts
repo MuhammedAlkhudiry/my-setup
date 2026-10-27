@@ -71,7 +71,11 @@ test("Claude Pool settings keep user keys and refresh the proxy credentials", as
     const settings = JSON.parse(readFileSync(paths.claudeSettings, "utf8"));
     expect(settings.autoMemoryEnabled).toBe(false);
     expect(settings.hooks).toEqual({ Stop: [] });
-    expect(settings.env).toMatchObject({ POOL_ONLY: "1", ANTHROPIC_API_KEY: "" });
+    expect(settings.env).toMatchObject({
+      POOL_ONLY: "1",
+      ANTHROPIC_API_KEY: "",
+      CLAUDE_CODE_RETRY_WATCHDOG: "1",
+    });
     expect(settings.env.ANTHROPIC_BASE_URL).toStartWith("http://127.0.0.1:");
     expect(settings.env.ANTHROPIC_AUTH_TOKEN).toBe(readFileSync(paths.clientKey, "utf8").trim());
   } finally {

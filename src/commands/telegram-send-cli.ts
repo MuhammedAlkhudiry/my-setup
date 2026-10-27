@@ -4,6 +4,7 @@ import { cac } from "cac";
 import { agentOutput } from "../lib/agent-output";
 import {
   checkTelegramWebhook,
+  reactToTelegramMessage,
   sendTelegramMessage,
   telegramApi,
   validateRelayUrl,
@@ -19,6 +20,12 @@ cli
     if (process.stdin.isTTY) throw new Error("Pipe the message into telegram-send");
     await sendTelegramMessage(await Bun.stdin.text());
     console.log("telegram-send: sent");
+  });
+cli
+  .command("react <messageId> [emoji]", "React to one of the owner's messages (default 👍) instead of replying")
+  .action(async (messageId: string, emoji?: string) => {
+    await reactToTelegramMessage(messageId, emoji);
+    console.log("telegram-send: reacted");
   });
 cli
   .command(
