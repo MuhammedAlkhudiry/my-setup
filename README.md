@@ -44,5 +44,7 @@ The [pool dashboard](http://127.0.0.1:8317/management.html) uses the key in `~/.
 
 ## Remote Agent Mac
 
-Install Homebrew and T3 Code Nightly, clone this repo, select the `personal` profile, and run `mise run install`. Complete the Claude Pool setup
-above and sign in to Codex and `gh`. Then use $remote-agent-host to configure Tailscale, sleep, and pairing with the main Mac and phone.
+A spare Mac runs agents that the main Mac starts and watches over Tailscale. It uses the main Mac's pool for Claude and Codex instead of its
+own sign-ins, so the main Mac must stay awake. Ask an agent on the main Mac to follow the `remote-agent-host` skill. It sets up the spare Mac over SSH
+and asks you only for the steps that need you there: Tailscale sign-in, Remote Login, one setup command, sign-in approvals, and any setting
+that asks for your password.

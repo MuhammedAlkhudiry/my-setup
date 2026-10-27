@@ -1,54 +1,35 @@
 ---
 name: remote-agent-host
-description: Use to set up an always-on Mac for remote T3 Code access over Tailscale.
+description: Use to set up a spare Mac that agents run on remotely, or to move work onto one.
 ---
 
-Assume the setup, T3 Code, and agent sign-ins are installed. Fix failed checks; give the owner exact commands/clicks for `sudo`, system popups, or
-sign-in, and wait for confirmation before dependent work.
+The main Mac's agent sets up the spare Mac over SSH. The owner only does what needs their hands or password: sign-ins, system prompts, and
+settings that ask for the Mac password. Batch those into one short list with exact clicks. Commands and pitfalls are in
+[details](references/details.md).
 
-## Preconditions
+## Steps
 
-- `doctor` passes; `gh auth status` is signed in.
-- `sudo profiles show -type enrollment` shows no company enrollment. Otherwise stop until the former owner releases the Mac from Apple Business Manager.
-
-## Tailscale
-
-- Use the standalone [Tailscale app](https://tailscale.com/download/mac), not Homebrew or the App Store.
-- The owner approves the network extension and signs in with the other devices' account.
-- Require `Self.Online: true` and non-empty `CertDomains` in `tailscale status --json`. For empty `CertDomains`, enable MagicDNS and HTTPS Certificates
-  on the [admin DNS page](https://login.tailscale.com/admin/dns).
-
-## Identity
-
-Choose a short, distinct name. Set `ComputerName`, `LocalHostName`, and `HostName` with `sudo scutil --set`, and Tailscale's name with
-`tailscale set --hostname`. T3 displays the computer name; Tailscale uses the hostname.
-
-## Availability
-
-```sh
-sudo pmset -c sleep 0
-sudo defaults write /Library/Preferences/com.apple.SoftwareUpdate AutomaticallyInstallMacOSUpdates -bool false
-```
-
-Keep the Mac plugged in with its lid open. Enable Screen Sharing and Remote Login in System Settings → General → Sharing as fallbacks for GUI prompts
-or T3 outages.
-
-## T3 access
-
-- Keep T3's Network access off; Tailscale Serve reaches `127.0.0.1:3773`.
-- Match the CLI version to the app's `CFBundleShortVersionString` in
-  `/Applications/T3 Code*.app/Contents/Info.plist`:
-
-  ```sh
-  t3 pair --tailscale --label "<client>" --ttl 30m
-  ```
-
-  The HTTPS mapping persists across restarts. Check `tailscale serve status` and HTTP 200 from `https://<host>.<tailnet>.ts.net`.
-
-- Make one single-use code per client. On Mac: Settings → Connections → add environment, paste the pairing URL. On iPhone: Settings → Environments
-  → Add environment, enter the HTTPS host and code. Camera-scanned QR codes open Safari, so give the phone the host and code.
+1. **Owner first steps:** install the standalone [Tailscale app](https://tailscale.com/download/mac) and sign in with the other devices'
+   account; turn on Remote Login and Screen Sharing; run one setup command for the main Mac's SSH key, key-only SSH, and, if approved,
+   passwordless `sudo`. Copy and paste doesn't work between Macs, so serve the command over the tailnet.
+2. **Identity:** a short, distinct name through `scutil` and `tailscale set --hostname`. Restart T3 and redo Tailscale Serve afterwards.
+3. **Never offline:** no sleep at all, no automatic macOS updates, and Tailscale and T3 starting at login. To come back after a power
+   cut without anyone there, it needs FileVault off and automatic login. Ask the owner first, because the disk then holds readable
+   project secrets.
+4. **Tools and projects:** match the main Mac's Homebrew packages and agent CLIs, install this setup with the `personal` profile, and
+   clear `doctor` failures. Skip what its role doesn't need. Clone and prepare its projects.
+5. **Accounts:** Claude and Codex go through the main Mac's pool (`claudePoolUrl` in `device.json`), so the main Mac must stay awake.
+   Other services, such as `gh` and `cf`, sign in on the spare Mac itself; never copy a sign-in that renews itself.
+6. **T3:** pair the main Mac's app with it through a single-use link minted over SSH, and the phone separately: apps connect to each Mac
+   directly. Add the Claude Pool provider and the projects.
+7. **Setup sync:** list the Mac under `"mirrors"` in the main Mac's `device.json`, so every install there copies this setup to it.
+8. **Talking between Macs:** the main Mac drives threads there with `t3 thread` over SSH. Agents there reach the main Mac only through a
+   message-only key that posts to the Housekeeper.
+9. **Moving work:** push the old thread's unpushed work right before the move, copy notes kept outside the repo, retire the old thread,
+   and start the new one with a self-contained brief.
 
 ## Done when
 
-- Both clients list the environment and open a thread on it; `tailscale ping <name>` from the main Mac replies.
-- The $personal-knowledge devices note records the Mac's new name and remote-agent role.
+- The spare Mac shows in the main Mac's T3 and runs a thread; `tailscale ping <name>` replies; `doctor` has no unexpected failures;
+  Claude and Codex answer through the pool.
+- The $personal-knowledge devices note records its name, role, and owner decisions such as FileVault.

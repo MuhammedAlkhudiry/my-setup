@@ -1,5 +1,5 @@
 Review this developer Mac's resource snapshot and open threshold alerts on demand. Diagnose causes and name fixes at the source.
-Do not run commands or kill processes; use only the supplied data.
+This review is read-only: do not run commands, change files, or kill processes; use only the supplied data.
 
 memcap cleans leaked and idle processes every minute. After a parent exits, the CPU guard stops leftover agent tooling that stays above 80% CPU
 for 10 minutes. Scheduled passes prune disk and raise threshold alerts.

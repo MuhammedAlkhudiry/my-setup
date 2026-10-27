@@ -195,6 +195,8 @@ export interface HeavyOptions {
   readPressure?: () => MemoryPressure;
   /** Only for explicitly opted-in runners that reserve each heavy step. */
   deferred?: boolean;
+  /** Explicit cap for a non-deferred gate or build; ordinary checks cannot exceed their 90-second cap. */
+  runtimeLimitSeconds?: number;
   /** Timer dependency for deterministic deadline tests; the production deadline is fixed. */
   scheduleRuntimeDeadline?: (expire: () => void, milliseconds: number) => () => void;
 }
@@ -213,7 +215,7 @@ export interface HeavyReceipt {
   childExitCode: number | null;
   childSignal: string | null;
   exitCode: 0 | 1 | 75 | 124;
-  runtimeLimitSeconds: 90 | null;
+  runtimeLimitSeconds: number | null;
   elapsedSeconds: number;
   resourceBudget: { resource: "host-capacity"; capacity: number };
   reservationMode: "eager" | "deferred" | "express";
@@ -354,6 +356,17 @@ export async function runHeavyCommand(
     options.class === "build" ||
     uncappedHeavyCommand(options.argv) ||
     process.env.HEAVY_RUN_UNCAPPED === "1";
+  const requestedLimit = options.runtimeLimitSeconds;
+  if (
+    requestedLimit !== undefined &&
+    (!Number.isFinite(requestedLimit) || requestedLimit <= 0 || requestedLimit > 3600)
+  )
+    throw new Error("Runtime limit must be between 1 and 3600 seconds");
+  if (requestedLimit !== undefined && !uncapped && requestedLimit > 90)
+    throw new Error("Ad-hoc checks and benchmarks cannot exceed 90 seconds");
+  if (requestedLimit !== undefined && options.deferred)
+    throw new Error("Deferred runners must cap their own heavy steps");
+  const runtimeLimitSeconds = requestedLimit ?? (uncapped ? null : HEAVY_RUNTIME_LIMIT_MS / 1000);
   const directory = options.directory ?? queueDirectory();
   const legacyLockPath = options.legacyLockPath ?? LEGACY_HEAVY_LOCK;
   const holder = (await processSnapshot()).find((row) => row.pid === process.pid);
@@ -526,7 +539,7 @@ export async function runHeavyCommand(
             }),
       );
       startedAt = Date.now();
-      if (!uncapped) {
+      if (runtimeLimitSeconds !== null) {
         const schedule =
           options.scheduleRuntimeDeadline ??
           ((expire, milliseconds) => {
@@ -540,7 +553,7 @@ export async function runHeavyCommand(
           } catch (failure) {
             if ((failure as NodeJS.ErrnoException).code !== "ESRCH") throw failure;
           }
-        }, HEAVY_RUNTIME_LIMIT_MS);
+        }, runtimeLimitSeconds * 1000);
       }
       if (cancelled()) await terminate();
       await workerExited;
@@ -553,7 +566,7 @@ export async function runHeavyCommand(
       if (runtimeExpired) {
         status = "timed-out";
         childSignal = "SIGKILL";
-        error = `${options.argv.join(" ")} ran over 90s (${((Date.now() - startedAt) / 1000).toFixed(1)}s elapsed) — make it faster`;
+        error = `${options.argv.join(" ")} ran over ${runtimeLimitSeconds}s (${((Date.now() - startedAt) / 1000).toFixed(1)}s elapsed) — make it faster`;
       }
       if (!workerResult && !cancelled())
         error ??= "Heavy command process group exited without a child result";
@@ -619,7 +632,7 @@ export async function runHeavyCommand(
     childExitCode,
     childSignal,
     exitCode: runtimeExpired ? 124 : expired ? 75 : success ? 0 : 1,
-    runtimeLimitSeconds: uncapped ? null : 90,
+    runtimeLimitSeconds,
     elapsedSeconds: startedAt === undefined ? 0 : (Date.now() - startedAt) / 1000,
     resourceBudget: { resource: "host-capacity", capacity: scheduler.capacity },
     reservationMode,

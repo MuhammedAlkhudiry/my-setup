@@ -12,9 +12,9 @@ A check runner can skip the outer reservation and reserve only its heavy steps, 
   child never started.
 
 Ad-hoc `checks` and `benchmark` commands must finish within 90 seconds; split or speed up slower work. At the deadline the entire process group
-is killed with SIGKILL; exit 124 and status `timed-out` distinguish this from queue timeout (75). JSON reports `runtimeLimitSeconds` (90 or null),
-`elapsedSeconds`, and an error naming the command and saying "make it faster". Builds and declared sign-off/gates are uncapped. There is no
-per-job override; the default queue wait remains 540 seconds.
+is killed with SIGKILL; exit 124 and status `timed-out` distinguish this from queue timeout (75). JSON reports `runtimeLimitSeconds`,
+`elapsedSeconds`, and an error naming the command and saying "make it faster". Builds and declared non-deferred gates are uncapped by default;
+pass `--runtime-limit 120` to bound a full gate. Deferred runners cap their own steps. The default queue wait remains 540 seconds.
 
 `checks`, `build`, and `benchmark` share ten slots (`HEAVY_CAPACITY`). Benchmark timings can be noisy; compare repeated runs or medians. Requesters take turns on admission,
 with FIFO within each requester. High CPU/RAM use alone needs no extra throttling: new jobs wait only for critical memory pressure or

@@ -4,7 +4,8 @@ import { homedir, tmpdir } from "node:os";
 import { basename, dirname, join, relative, resolve } from "node:path";
 
 import { S3Client } from "bun";
-import { execa } from "execa";
+
+import { runCf } from "../lib/cf-auth";
 
 // Cloudflare setup this command relies on: the R2 bucket has a lifecycle rule that deletes
 // objects after RETENTION_DAYS, and SHARE_HOST is its custom domain behind Cloudflare Access.
@@ -197,24 +198,19 @@ export async function withRetry<T>(
 async function uploadFile(prefix: string, file: ArtifactFile): Promise<void> {
   const contentType = Bun.file(file.path).type || "application/octet-stream";
   const put = () =>
-    execa(
-      "cf",
-      [
-        "r2",
-        "objects",
-        "put",
-        `${prefix}/${file.key}`,
-        "--bucket-name",
-        SHARE_BUCKET,
-        "--file",
-        file.path,
-        "--content-type",
-        contentType,
-        "--quiet",
-      ],
-      // A neutral cwd keeps a project's Cloudflare config from redirecting the upload.
-      { cwd: tmpdir() },
-    );
+    runCf([
+      "r2",
+      "objects",
+      "put",
+      `${prefix}/${file.key}`,
+      "--bucket-name",
+      SHARE_BUCKET,
+      "--file",
+      file.path,
+      "--content-type",
+      contentType,
+      "--quiet",
+    ]);
 
   await withRetry(put, UPLOAD_ATTEMPTS).catch((error: { stderr?: string; message: string }) => {
     throw new Error(
@@ -236,22 +232,18 @@ async function upload(prefix: string, files: ArtifactFile[]): Promise<void> {
 async function listKeys(prefix: string): Promise<string[]> {
   const keys: string[] = [];
   for (let startAfter: string | undefined; ; ) {
-    const { stdout } = await execa(
-      "cf",
-      [
-        "r2",
-        "objects",
-        "list",
-        "--bucket-name",
-        SHARE_BUCKET,
-        "--prefix",
-        `${prefix}/`,
-        "--per-page",
-        "1000",
-        ...(startAfter ? ["--start-after", startAfter] : []),
-      ],
-      { cwd: tmpdir() },
-    );
+    const { stdout } = await runCf([
+      "r2",
+      "objects",
+      "list",
+      "--bucket-name",
+      SHARE_BUCKET,
+      "--prefix",
+      `${prefix}/`,
+      "--per-page",
+      "1000",
+      ...(startAfter ? ["--start-after", startAfter] : []),
+    ]);
     const page = (JSON.parse(stdout) as { key: string }[]).map((object) => object.key);
     keys.push(...page);
     if (page.length < 1000) return keys;
@@ -270,38 +262,30 @@ export function staleKeys(existing: string[], prefix: string, published: Artifac
 
 async function deleteKeys(keys: string[]): Promise<void> {
   for (let start = 0; start < keys.length; start += 1000) {
-    await execa(
-      "cf",
-      [
-        "r2",
-        "objects",
-        "bulk-delete",
-        "--bucket-name",
-        SHARE_BUCKET,
-        "--force",
-        "--body",
-        JSON.stringify(keys.slice(start, start + 1000)),
-      ],
-      { cwd: tmpdir() },
-    );
+    await runCf([
+      "r2",
+      "objects",
+      "bulk-delete",
+      "--bucket-name",
+      SHARE_BUCKET,
+      "--force",
+      "--body",
+      JSON.stringify(keys.slice(start, start + 1000)),
+    ]);
   }
 }
 
 /** A stable URL serves new bytes under old paths, so the edge must forget the old ones. */
 async function purgeCache(prefix: string): Promise<void> {
-  await execa(
-    "cf",
-    [
-      "cache",
-      "purge",
-      "--zone",
-      SHARE_ZONE,
-      "--force",
-      "--body",
-      JSON.stringify({ prefixes: [`${SHARE_HOST}/${prefix}/`] }),
-    ],
-    { cwd: tmpdir() },
-  );
+  await runCf([
+    "cache",
+    "purge",
+    "--zone",
+    SHARE_ZONE,
+    "--force",
+    "--body",
+    JSON.stringify({ prefixes: [`${SHARE_HOST}/${prefix}/`] }),
+  ]);
 }
 
 function formatBytes(bytes: number): string {
@@ -379,25 +363,21 @@ function parentAccessKeyId(): string {
  */
 async function createFeedbackEndpoint(prefix: string, parentKeyId: string): Promise<ArtifactFile> {
   const key = `${prefix}/${FEEDBACK_KEY}`;
-  const { stdout } = await execa(
-    "cf",
-    [
-      "r2",
-      "temporary-credentials",
-      "create",
-      "--bucket",
-      SHARE_BUCKET,
-      "--parent-access-key-id",
-      parentKeyId,
-      "--permission",
-      "object-read-write",
-      "--objects",
-      key,
-      "--ttl-seconds",
-      String(FEEDBACK_TTL_SECONDS),
-    ],
-    { cwd: tmpdir() },
-  );
+  const { stdout } = await runCf([
+    "r2",
+    "temporary-credentials",
+    "create",
+    "--bucket",
+    SHARE_BUCKET,
+    "--parent-access-key-id",
+    parentKeyId,
+    "--permission",
+    "object-read-write",
+    "--objects",
+    key,
+    "--ttl-seconds",
+    String(FEEDBACK_TTL_SECONDS),
+  ]);
 
   const client = new S3Client({
     ...parseTemporaryCredentials(stdout),
@@ -500,10 +480,9 @@ export async function readFeedback(ref?: string): Promise<void> {
     );
   }
 
-  const result = await execa(
-    "cf",
+  const result = await runCf(
     ["r2", "objects", "get", `${prefix}/${FEEDBACK_KEY}`, "--bucket-name", SHARE_BUCKET],
-    { cwd: tmpdir(), reject: false },
+    { reject: false },
   );
   if (result.exitCode !== 0) {
     if (/does not exist|10007/.test(result.stderr)) {

@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { MAC_WATCHER } from "../../config/mac-watcher";
+import { emptyQueueState } from "./device-queue";
 
 import {
   type CodexThreadFacts,
@@ -28,8 +29,10 @@ import {
   codexReleasesToDelete,
   codexThreadsToDelete,
   decideWorktree,
+  dependencyPruneLeasesIdle,
   devicesToDelete,
   isInUse,
+  openPathsFromLsof,
   idleNativeBuilds,
   nativeBuildCandidates,
   olderThan,
@@ -47,6 +50,36 @@ import {
 const DAY = 24 * 60 * 60 * 1000;
 const now = Date.parse("2026-10-02T12:00:00Z");
 const idleDays = { landed: 1, abandoned: 7, thread: 3 };
+
+test("only leases that name no checkout block dependency pruning everywhere", () => {
+  const queue = emptyQueueState();
+  expect(dependencyPruneLeasesIdle(queue)).toBe(true);
+
+  queue.leases.sim = { id: "sim", agentPid: 4242 } as never;
+  expect(dependencyPruneLeasesIdle(queue)).toBe(true);
+
+  queue.leases.sim = { id: "sim", agentPid: 0 } as never;
+  expect(dependencyPruneLeasesIdle(queue)).toBe(false);
+  delete queue.leases.sim;
+
+  queue.host.active = { reservationId: "build" } as never;
+  expect(dependencyPruneLeasesIdle(queue)).toBe(false);
+});
+
+test("Electron's cached archives in installed packages do not pin a checkout", () => {
+  const open = openPathsFromLsof(
+    [
+      "p64407",
+      "n/w/a/harium-desktop/node_modules/electron/dist/Electron.app/Contents/Resources/default_app.asar",
+      "n/w/b/app.asar",
+      "fcwd",
+      "n/w/c",
+    ].join("\n"),
+  );
+  expect(isInUse("/w/a", open)).toBe(false);
+  expect(isInUse("/w/b", open)).toBe(true);
+  expect(isInUse("/w/c", open)).toBe(true);
+});
 
 async function withStorageFixture(
   run: (fixture: {
@@ -252,14 +285,28 @@ test("a path counts as in use when anything inside it is open, but not a sibling
   expect(isInUse(join("/repo", "wt-other"), open)).toBe(true);
 });
 
-test("a clean worktree goes a day after a finished PR; ancestry alone keeps fresh work", () => {
+test("a clean worktree goes a day after a finished PR or a quiet day wholly on the default branch", () => {
   const remove = (facts: Partial<WorktreeFacts>) =>
     decideWorktree({ ...landed, ...facts }, now, idleDays);
+  const onMain = { pr: undefined, mergedIntoBase: true, threads: ["Settled thread"] };
 
   expect(remove({ lastActivityMs: now - 2 * DAY })).toEqual({ remove: true, archive: true });
-  expect(remove({ pr: undefined, mergedIntoBase: true, lastActivityMs: now - 2 * DAY })).toEqual({
+  expect(remove({ ...onMain, lastActivityMs: now - 2 * DAY })).toEqual({ remove: true });
+  expect(remove({ ...onMain, lastActivityMs: now - DAY / 2 })).toEqual({
     remove: false,
-    reason: "default-branch ancestry alone does not prove finished work",
+    reason: "branch on default branch active within 24 hours",
+  });
+  expect(remove({ ...onMain, filesChangedWithinDay: true })).toEqual({
+    remove: false,
+    reason: "branch on default branch active within 24 hours",
+  });
+  expect(remove({ ...onMain, dirty: true })).toEqual({
+    remove: false,
+    reason: "uncommitted changes",
+  });
+  expect(remove({ ...onMain, pr: { state: "OPEN", headRefOid: "abc" } })).toEqual({
+    remove: false,
+    reason: "PR open",
   });
   expect(remove({ pr: { state: "CLOSED", headRefOid: "abc" } })).toEqual({
     remove: true,
@@ -580,11 +627,20 @@ test("simulators and emulators go once stopped and unused for a day, except the 
     device("Harium Feed Labels", { mtimeMs: now - DAY / 2 }),
     device("Awraq Main"),
     device("Harium_Main", { kind: "emulator" }),
+    // Every device-pool member stays, not only the main ones.
+    device("Harium Small"),
+    device("Harium RTL"),
+    device("Awraq Main 2"),
+    device("Harium Main Copy"),
   ];
 
   const deleted = devicesToDelete(devices, { ...MAC_WATCHER.storage.devices, now });
 
-  expect(deleted.map((entry) => entry.name)).toEqual(["Harium Voice Try", "Harium_E2E"]);
+  expect(deleted.map((entry) => entry.name)).toEqual([
+    "Harium Voice Try",
+    "Harium_E2E",
+    "Harium Main Copy",
+  ]);
 });
 
 test("cleanup candidates include ignored builds and packages, never folders containing tracked files", () => {
@@ -619,14 +675,14 @@ test("cleanup candidates include ignored builds and packages, never folders cont
   expect(dependencyDirs).toEqual(["harium-app/node_modules/", "harium/vendor/", "node_modules/"]);
 });
 
-test("kept dirty or open-PR checkouts clear packages only after every file has been idle for 24 hours", async () => {
+test("kept dirty or open-PR checkouts clear generated folders only after 60 idle minutes", async () => {
   const root = await mkdtemp(join(tmpdir(), "storage-prune-test-"));
   const git = async (...args: string[]) => {
     const result = await Bun.$`git -C ${root} ${args}`.quiet();
     expect(result.exitCode).toBe(0);
   };
   const time = Date.now();
-  const old = new Date(time - DAY - 1000);
+  const old = new Date(time - 60 * 60_000 - 1000);
 
   try {
     await git("init", "--quiet");
@@ -646,7 +702,11 @@ test("kept dirty or open-PR checkouts clear packages only after every file has b
     expect((await idleNativeBuilds(root, time)).sort()).toEqual(
       [join(root, "node_modules"), join(root, "dist")].sort(),
     );
-    await utimes(join(root, "source.ts"), new Date(time - DAY + 1000), new Date(time - DAY + 1000));
+    await utimes(
+      join(root, "source.ts"),
+      new Date(time - 60 * 60_000 + 1000),
+      new Date(time - 60 * 60_000 + 1000),
+    );
     expect(await idleNativeBuilds(root, time)).toEqual([]);
     await utimes(join(root, "source.ts"), old, old);
     await utimes(join(root, "node_modules/installed.js"), new Date(time), new Date(time));

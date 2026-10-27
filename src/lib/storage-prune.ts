@@ -20,6 +20,7 @@ import { z } from "zod";
 
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
 import { MAC_WATCHER } from "../../config/mac-watcher";
+import { readQueueState } from "./queue-store";
 import { timedCommand } from "./timed-command";
 import {
   cleanupBoundThreads,
@@ -146,10 +147,12 @@ export function decideWorktree(
     return idle < 1 || facts.filesChangedWithinDay
       ? { remove: false, reason: "detached HEAD active within 24 hours" }
       : { remove: true };
-  if (facts.mergedIntoBase)
-    return { remove: false, reason: "default-branch ancestry alone does not prove finished work" };
-
   if (facts.pr?.state === "OPEN") return { remove: false, reason: "PR open" };
+  // Clean and wholly on the default branch, like a clean detached head: nothing main lacks, and the branch stays.
+  if (facts.mergedIntoBase)
+    return idle < 1 || facts.filesChangedWithinDay
+      ? { remove: false, reason: "branch on default branch active within 24 hours" }
+      : { remove: true };
   if (facts.filesChangedWithinIdleWindow)
     return { remove: false, reason: "files changed within idle window" };
   if (facts.threads?.length) {
@@ -432,17 +435,29 @@ async function run(
   });
 }
 
+/**
+ * Electron apps such as T3 cache every `.asar` archive their file scans touch and never close it, so an archive inside
+ * installed packages pins nothing; work in that checkout still shows as a process cwd or another open file.
+ */
+const CACHED_ARCHIVE = /\/node_modules\/.+\.asar$/;
+
+export function openPathsFromLsof(output: string): Set<string> {
+  return new Set(
+    output
+      .split("\n")
+      .filter((line) => line.startsWith("n/"))
+      .map((line) => line.slice(1))
+      .filter((path) => !CACHED_ARCHIVE.test(path)),
+  );
+}
+
 /** Every visible process's open paths, including working directories; undefined when lsof fails. */
-async function listOpenPaths(): Promise<Set<string> | undefined> {
+export async function listOpenPaths(): Promise<Set<string> | undefined> {
   const result = await run("lsof", ["-nP", "-w", "-Fn"], {
     timeout: 120_000,
   });
   if (!result.stdout) return undefined;
-  const paths = result.stdout
-    .split("\n")
-    .filter((line) => line.startsWith("n/"))
-    .map((line) => line.slice(1));
-  return new Set(paths);
+  return openPathsFromLsof(result.stdout);
 }
 
 async function sizeBytes(path: string): Promise<number> {
@@ -1195,8 +1210,9 @@ async function worktreeFacts(
       undefined,
       abandonedIdleDays * DAY_MS,
     ),
-    filesChangedWithinDay: !worktree.branch
-      ? await cleanupFilesChangedRecently(worktree.path, now, undefined, DAY_MS)
+    filesChangedWithinDay:
+      !worktree.branch || merged.exitCode === 0
+        ? await cleanupFilesChangedRecently(worktree.path, now, undefined, DAY_MS)
       : undefined,
   };
 }
@@ -1401,6 +1417,17 @@ export async function idleNativeBuilds(worktree: string, now: number): Promise<s
     .map((path) => join(worktree, path).replace(/\/$/, ""));
 }
 
+/**
+ * A device lease's agent and a heavy run's command keep their checkout open as a working directory, so the open-path
+ * check protects exactly the checkout they use. Fail closed only when a lease holder is unknown or a legacy host run
+ * is active, since neither names a checkout. Merge candidates live in the queue's own clone, never in these checkouts.
+ */
+export function dependencyPruneLeasesIdle(queue = readQueueState()): boolean {
+  return (
+    Object.values(queue.leases).every((lease) => lease.agentPid > 0) && queue.host.active === null
+  );
+}
+
 // =============================================================================
 // Run
 // =============================================================================
@@ -1456,6 +1483,29 @@ export async function pruneStorage(options: {
     report.skipped.push("lsof failed, so nothing was touched");
     return report;
   }
+
+  const clearIdleBuilds = async (checkout: string) => {
+    if (!dependencyPruneLeasesIdle() || isInUse(checkout, openPaths)) return;
+    const builds = await idleNativeBuilds(checkout, now);
+    if (builds.length === 0) return;
+    if (!dryRun) {
+      const freshOpen = await listOpenPaths();
+      if (!freshOpen || isInUse(checkout, freshOpen) || !dependencyPruneLeasesIdle()) return;
+      if (
+        await cleanupFilesChangedRecently(
+          checkout,
+          Date.now(),
+          undefined,
+          rules.nativeBuilds.idleHours * HOUR_MS,
+        )
+      )
+        return;
+    }
+    const bytes = await totalSizeBytes(builds);
+    if (!dryRun) for (const path of builds) await rm(path, { recursive: true, force: true });
+    report.nativeBuildsCleared.push({ path: checkout, bytes });
+    report.freedBytes += bytes;
+  };
 
   let freeBytes: number | undefined;
   await attempt("internal free space", async () => {
@@ -1720,13 +1770,7 @@ export async function pruneStorage(options: {
               now - facts.lastActivityMs < rules.nativeBuilds.idleHours * HOUR_MS
             )
               return;
-            const builds = await idleNativeBuilds(worktree.path, now);
-            if (builds.length === 0) return;
-            const buildBytes = await totalSizeBytes(builds);
-            if (!dryRun)
-              for (const path of builds) await rm(path, { recursive: true, force: true });
-            report.nativeBuildsCleared.push({ path: worktree.path, bytes: buildBytes });
-            report.freedBytes += buildBytes;
+            await clearIdleBuilds(worktree.path);
             return;
           }
           if (decision.archive && !archiveMounted(home)) {
@@ -1823,6 +1867,23 @@ export async function pruneStorage(options: {
       }
     });
   }
+
+  await attempt("temporary checkout dependencies", async () => {
+    for (const parent of ["/private/tmp", await userTempDir()].filter((path): path is string =>
+      Boolean(path),
+    )) {
+      if (!existsSync(parent)) continue;
+      for (const entry of await readdir(parent, { withFileTypes: true })) {
+        if (!entry.isDirectory()) continue;
+        const checkout = join(parent, entry.name);
+        if (!existsSync(join(checkout, ".git"))) continue;
+        const root = await run("git", ["-C", checkout, "rev-parse", "--show-toplevel"]);
+        if (root.exitCode !== 0 || realpathSync(root.stdout.trim()) !== realpathSync(checkout))
+          continue;
+        await clearIdleBuilds(checkout);
+      }
+    }
+  });
 
   await attempt("test databases", async () => {
     const result = await pruneTestDatabases({ home, now: options.now, dryRun });

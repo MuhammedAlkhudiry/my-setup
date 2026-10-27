@@ -17,6 +17,7 @@ Use $workshop to challenge one idea.
 4. Ask in the reply text, never with a question tool, because some hosts collapse the text around it. Ask up to three independent questions
    together; ask dependent questions one at a time. Number each question and letter its options so the user can answer like "1A 2C". For
    decisions, offer short, distinct options with trade-offs and a recommendation; give examples beside the question they help answer.
+   When re-asking an open question, restate it in full with its context, options and trade-offs, never as a shorthand reference.
 5. Follow up on answers and assumptions that could change the outcome at the chosen depth. Explain why they matter; leave harmless unknowns alone.
 6. Finish when every important topic required by the chosen depth is resolved, assumed, or deferred. Summarize the decisions, assumptions, open
    issues, and next step. With $project-docs, record decisions that already rule out a change and save the summary as type `interview`, status

@@ -7,6 +7,8 @@ description: Use before UI changes, design reviews, or visual option comparisons
 
 - Inspect the goal, complete journey, platform conventions, design system, realistic content, and states.
 - Follow the established system, theme, and visual character, including when adding components, tokens, or patterns for authorized work.
+- Draw every piece of app UI in an HTML page with the project's mockup kit when one exists, including flow diagrams and case lists. Never use
+  hand-drawn stand-ins.
 - Favor distinctive minimalism: clear hierarchy, balanced spacing, restrained color, and subtle depth.
 - Never add eyebrow labels (small text above headings) or invent decorative pill badges/chips. Established design-system components, including
   approved `Chip` components, take precedence over the pill restriction. Use headings and layout for hierarchy.

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { deferredHeavyCommand, heavyStatus, runHeavyCommand } from "../lib/heavy-run-concurrent";
 import type { HeavyClass } from "../lib/host-capacity";
 
-const help = `Usage: heavy-run [--class checks|benchmark|build] [--wait <seconds>] [--owner <title>] [--json] [--verbose] -- <argv...>
+const help = `Usage: heavy-run [--class checks|benchmark|build] [--wait <seconds>] [--runtime-limit <seconds>] [--owner <title>] [--json] [--verbose] -- <argv...>
        heavy-run status [--json] [--verbose]
 
 Up to ten checks/build/benchmark jobs share the host. Benchmark timings can be noisy; compare repeated runs or medians. Class defaults to checks;
@@ -16,8 +16,9 @@ wait defaults to 540 seconds. New jobs wait only for critical memory pressure or
 Exit codes: 0 child succeeded, 1 failed/cancelled, 2 invalid input, 75 wait timeout, 124 runtime cap exceeded.
 Checks and benchmarks are killed as a process group after 90 seconds: make it faster.
 Builds and package.json heavyRun.deferredCommands or heavyRun.uncappedCommands (argv-prefix arrays) are exempt;
-nested steps inherit HEAVY_RUN_UNCAPPED=1. There is no per-job cap override.
-JSON includes runtimeLimitSeconds (90 or null), elapsedSeconds, status timed-out
+nested steps inherit HEAVY_RUN_UNCAPPED=1. --runtime-limit caps non-deferred full gates/builds;
+ad-hoc checks and benchmarks cannot exceed 90 seconds.
+JSON includes runtimeLimitSeconds, elapsedSeconds, status timed-out
 and exitCode 124 for the runtime cap, plus the child's original exit code and signal. Output is captured in a
 private log; --verbose prints it. Nested reservations are rejected. Projects may
 opt cooperating runners in via package.json heavyRun.deferredCommands, an array
@@ -55,6 +56,7 @@ try {
     if (!Number.isFinite(waitSeconds) || waitSeconds < 0)
       throw new Error("HEAVY_RUN_WAIT_SECONDS must be a finite nonnegative number");
     let owner = process.env.HEAVY_RUN_OWNER || process.env.T3_THREAD_TITLE || `pid ${process.pid}`;
+    let runtimeLimitSeconds: number | undefined;
     const seen = new Set<string>();
 
     for (let i = statusMode ? 1 : 0; i < flags.length; i++) {
@@ -62,7 +64,7 @@ try {
       if (seen.has(flag)) throw new Error(`Repeated option: ${flag}`);
       seen.add(flag);
       if (flag === "--json" || flag === "--verbose") continue;
-      if (!statusMode && ["--class", "--wait", "--owner"].includes(flag)) {
+      if (!statusMode && ["--class", "--wait", "--runtime-limit", "--owner"].includes(flag)) {
         const value = flags[++i];
         if (!value || value.startsWith("--")) throw new Error(`Missing value for ${flag}`);
         if (flag === "--class") {
@@ -73,6 +75,14 @@ try {
           waitSeconds = Number(value);
           if (!Number.isFinite(waitSeconds) || waitSeconds < 0)
             throw new Error("Wait must be a finite nonnegative number of seconds");
+        } else if (flag === "--runtime-limit") {
+          runtimeLimitSeconds = Number(value);
+          if (
+            !Number.isFinite(runtimeLimitSeconds) ||
+            runtimeLimitSeconds <= 0 ||
+            runtimeLimitSeconds > 3600
+          )
+            throw new Error("Runtime limit must be between 1 and 3600 seconds");
         } else {
           if (!value.trim()) throw new Error("Owner must be a nonempty thread title");
           owner = value;
@@ -109,6 +119,7 @@ try {
         owner,
         signal: abort.signal,
         deferred,
+        ...(runtimeLimitSeconds === undefined ? {} : { runtimeLimitSeconds }),
         ...(verbose ? { onOutput: (output: string) => process.stderr.write(output) } : {}),
       });
       if (json) console.log(JSON.stringify(receipt));

@@ -39,3 +39,11 @@
 - **MY-SETUP-CLI** — `my-setup` provides only `install` and help. Use `doctor` for health and `system-tools status` or `system-tools update-plan`
   for external tools.
 - **WORDING-QUALITY** — Preserve user intent; rewrite rough wording clearly in the repo's voice.
+
+## Project Glossaries
+
+- **GLOSSARIES** — The Housekeeper runs here and discusses the active projects' product concepts (for example, an Awraq Node is a person
+  in a family tree). Their glossaries load live from the canonical clones; Codex and OpenCode read the files at these paths.
+
+@~/PhpstormProjects/awraq-project/docs/glossary.md
+@~/PhpstormProjects/harium-project/docs/glossary.md

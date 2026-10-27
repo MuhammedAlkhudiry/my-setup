@@ -3,6 +3,8 @@
  */
 
 export const CODEX_CONFIG = {
+  // Default for runs that request no effort; delegations ask for more when a task needs it.
+  model_reasoning_effort: "medium",
   agents: {
     max_threads: 15,
   },

@@ -82,6 +82,22 @@ check_tool() {
   fi
 }
 
+# Every Mac runs Herd's PHP: spare Macs get the main Mac's copy through setup sync. Another PHP has another ICU, which
+# changes currency and date formatting, so tests pass on one Mac and fail on another.
+check_herd_php() {
+  local resolved_path
+  resolved_path="$(command -v php 2>/dev/null || true)"
+
+  if [[ "$resolved_path" == "$HOME/Library/Application Support/Herd/bin/"* ]]; then
+    print_ok php "$resolved_path"
+    (( optional_ok++ ))
+    return 0
+  fi
+
+  print_missing optional php "resolves to ${resolved_path:-nothing}, not Herd's PHP; on a spare Mac, rerun install on the main Mac."
+  (( optional_missing++ ))
+}
+
 check_link() {
   local name="$1"
   local destination="$2"
@@ -247,6 +263,7 @@ main() {
   check_tool rtk required "OpenCode shell output compression; install with brew install rtk."
   check_tool phpstorm optional "Used by the synced zsh config as the editor command."
   check_tool herd optional "Used by Laravel aliases in the synced zsh config."
+  check_herd_php
   check_tool forge optional "Manages Laravel Forge servers and sites through the cli-tools skill."
   check_tool cf required "Cloudflare CLI: share-html uploads, deploys, and the whole Cloudflare API through the cli-tools skill."
   check_tool opencode optional "Used by the ai/opencode launcher and OpenCode workflows."
@@ -256,8 +273,11 @@ main() {
   check_tool tailscale optional "Install the standalone app from tailscale.com so the phone and other Macs reach T3 Code."
   check_tool playwright-cli required "Fallback headless browser automation CLI."
   check_tool agent-device required "Default AI-agent mobile and device automation CLI."
-  check_tool simslim required "Install with brew install mobai-app/tap/simslim to slim iOS simulators."
-  check_tool avdslim required "Install from the kdbhalala/avdslim Homebrew tap to slim Android emulators."
+  check_tool simslim required "Install with brew install mobai-app/tap/simslim; device-queue slims pool simulators with it."
+  # Only Macs that run Android emulators need it; spare agent Macs have none.
+  local avdslim_level=optional
+  [[ -d "$HOME/Library/Android/sdk/emulator" ]] && avdslim_level=required
+  check_tool avdslim "$avdslim_level" "Install from the kdbhalala/avdslim Homebrew tap; device-queue slims pool emulators with it."
   check_tool memcap required "Install with brew install alextitov19/memcap/memcap; mise run install manages its config and service."
   check_tool asc required "Install with brew install asc for App Store Connect releases and status."
   check_tool eas required "Install with bun add -g eas-cli for local store builds, EAS Submit, and updates."
@@ -285,8 +305,8 @@ main() {
   check_tool lsof required "Checks open files before worktree-cleanup removes finished work."
   check_tool du required "Measures worktree storage during cleanup; doctor reads cached sizes."
   check_tool find required "Checks file-change grace periods before worktree cleanup or storage pruning."
+  check_tool mergiraf optional "Syntax-aware merge driver the merge queue uses when it merges main into a PR left behind."
   check_gh_extension signoff optional "Install with gh extension install basecamp/gh-signoff; sets up the branch rule that requires the local sign-off status."
-  check_tool glab optional "Used to open GitLab merge requests from the command line."
 
   print_header "My Setup links"
   check_link zsh "$HOME/.config/zsh-sync/custom.zsh" "$MY_SETUP_ROOT/shell/zsh-custom.zsh"
@@ -298,9 +318,12 @@ main() {
   check_link pk "$HOME/bin/pk" "$MY_SETUP_ROOT/shell/pk.zsh"
   check_link share-html "$HOME/bin/share-html" "$MY_SETUP_ROOT/shell/share-html.zsh"
   check_link store-build "$HOME/bin/store-build" "$MY_SETUP_ROOT/shell/store-build.zsh"
+  check_link merge-queue "$HOME/bin/merge-queue" "$MY_SETUP_ROOT/shell/merge-queue.zsh"
   check_link device-queue "$HOME/bin/device-queue" "$MY_SETUP_ROOT/shell/device-queue.zsh"
+  check_link telegram-send "$HOME/bin/telegram-send" "$MY_SETUP_ROOT/shell/telegram-send.zsh"
   check_link heavy-run "$HOME/bin/heavy-run" "$MY_SETUP_ROOT/shell/heavy-run.zsh"
   check_link ci-runner "$HOME/bin/ci-runner" "$MY_SETUP_ROOT/shell/ci-runner.zsh"
+  check_link wait-for "$HOME/bin/wait-for" "$MY_SETUP_ROOT/shell/wait-for.zsh"
   check_link claude-skills "$HOME/.claude_cliproxy/skills" "$HOME/.agents/skills"
 
   print_header "Managed skills"
@@ -308,6 +331,14 @@ main() {
 
   print_header "Local hygiene"
   check_local_hygiene
+  local telegram_output
+  if telegram_output="$(bun "$MY_SETUP_ROOT/src/commands/telegram-send-cli.ts" webhook check 2>&1)"; then
+    print_ok "Telegram ops bot" "$telegram_output"
+    (( required_ok++ ))
+  else
+    print_missing required "Telegram ops bot" "$telegram_output"
+    (( required_missing++ ))
+  fi
 
   print_summary
 

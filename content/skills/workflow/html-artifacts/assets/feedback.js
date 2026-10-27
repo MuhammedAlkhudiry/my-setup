@@ -2,8 +2,9 @@
  * Saves the user's answers on an HTML artifact so the agent can read them back.
  *
  * On a page published with `share-html --writable`, answers autosave to the page's feedback file and the agent reads
- * them with `share-html feedback`. Anywhere else (a local file, an expired link), answers stay in this browser and a
- * Copy button hands the summary over instead.
+ * them with `share-html feedback --json`. Give `[data-feedback]` a `data-notify="WEBHOOK_URL"` attribute, or call
+ * `Feedback.notify(url)`, to show a Send to agent button. It POSTs the current summary as `{note}` to a T3 webhook
+ * schedule. Without a webhook or a writable page, the button copies the summary instead.
  *
  * Two ways to use it, after `<script src="feedback.js"></script>`:
  *
@@ -17,15 +18,20 @@
  *   const saved = await Feedback.init()       For custom pages: returns the last saved state, or null.
  *   Feedback.save(state, markdown)            Call after every change with the full state and the summary to send.
  *
- * The status and the Copy fallback render into `[data-feedback]`, or a corner badge when the page has none.
+ * The status and button render into `[data-feedback]`, or a corner badge when the page has none. The button inherits
+ * the page's text color; `data-fb-state` is `due`, `sending`, `sent`, or `copy` for page-specific styling.
  */
 (() => {
   const STORE = 'feedback:' + location.pathname;
+  const SENT = STORE + ':sent';
   const DEBOUNCE_MS = 800;
   let endpoint = null;
+  let notifyUrl = null;
   let last = null;
   let timer;
   let ui;
+  let sending = false;
+  let writes = Promise.resolve();
 
   async function fetchJson(path) {
     try {
@@ -43,17 +49,29 @@
       host.className = 'fixed bottom-4 end-4 z-20 rounded-lg border border-line bg-surface px-3 py-2 shadow-card';
       document.body.append(host);
     }
-    host.innerHTML = `<span class="flex items-center gap-2">
-      <span data-fb-status class="text-xs text-muted"></span>
-      <button type="button" data-fb-copy class="btn btn-primary" hidden>Copy feedback for AI</button></span>`;
-    ui = { status: host.querySelector('[data-fb-status]'), copy: host.querySelector('[data-fb-copy]') };
-    ui.copy.addEventListener('click', copy);
+    notifyUrl ||= document.querySelector('[data-notify]')?.dataset.notify || null;
+    host.innerHTML = `<span data-fb-status role="status"></span>
+      <button type="button" data-fb-send style="font:inherit;color:inherit;background:transparent;border:1px solid currentColor;border-radius:.5em;padding:.45em .8em;min-height:36px;cursor:pointer"></button>`;
+    ui = { status: host.querySelector('[data-fb-status]'), send: host.querySelector('[data-fb-send]') };
+    ui.send.addEventListener('click', send);
+    paintButton();
   }
 
-  function show(text, tone = 'muted', withCopy = false) {
+  function show(text, tone = 'muted') {
     ui.status.textContent = text;
     ui.status.className = `text-xs text-${tone}`;
-    ui.copy.hidden = !withCopy;
+  }
+
+  function paintButton() {
+    if (!ui) return;
+    if (sending) return;
+    const writable = Boolean(endpoint && notifyUrl);
+    const sent = last && localStorage.getItem(SENT) === last.savedAt;
+    const state = writable ? (sent ? 'sent' : 'due') : 'copy';
+    ui.send.dataset.fbState = state;
+    ui.send.textContent = writable ? (sent ? 'Sent ✓' : 'Send to agent') : 'Copy answers';
+    ui.send.disabled = !last;
+    ui.send.style.opacity = sent || !last ? '.65' : '1';
   }
 
   async function init() {
@@ -67,9 +85,10 @@
     const local = JSON.parse(localStorage.getItem(STORE) || 'null');
     last = [remote, local].filter(Boolean).sort((a, b) => (b.savedAt || '').localeCompare(a.savedAt || ''))[0] || null;
 
-    if (endpoint) show(last ? 'Saved · say "see" in chat' : 'Answers save automatically');
-    else if (expired) show('Saving expired · ask the AI to republish', 'warn', true);
-    else show('', 'muted', true);
+    if (endpoint) show(last ? 'Saved' : 'Answers save automatically');
+    else if (expired) show('Saving expired · ask the AI to republish', 'warn');
+    else show('');
+    paintButton();
 
     return last?.state ?? null;
   }
@@ -77,21 +96,65 @@
   function save(state, markdown) {
     last = { state, markdown, savedAt: new Date().toISOString() };
     localStorage.setItem(STORE, JSON.stringify(last));
+    paintButton();
     if (!endpoint) return;
 
     show('Saving…');
     clearTimeout(timer);
-    timer = setTimeout(push, DEBOUNCE_MS);
+    timer = setTimeout(() => push(), DEBOUNCE_MS);
   }
 
-  async function push() {
-    try {
-      const response = await fetch(endpoint, { method: 'PUT', body: JSON.stringify(last) });
-      if (!response.ok) throw new Error(String(response.status));
-      show('Saved · say "see" in chat', 'ok');
-    } catch {
-      show('Not saved', 'bad', true);
+  function push(snapshot = last) {
+    const write = async () => {
+      try {
+        const response = await fetch(endpoint, { method: 'PUT', body: JSON.stringify(snapshot) });
+        if (!response.ok) throw new Error(String(response.status));
+        show('Saved', 'ok');
+        return true;
+      } catch {
+        show('Not saved', 'bad');
+        return false;
+      }
+    };
+    writes = writes.then(write, write);
+    return writes;
+  }
+
+  function notify(url) {
+    notifyUrl = url || null;
+    paintButton();
+  }
+
+  async function send() {
+    if (!last || sending) return;
+    if (!endpoint || !notifyUrl) return copy();
+
+    clearTimeout(timer);
+    sending = true;
+    ui.send.disabled = true;
+    ui.send.dataset.fbState = 'sending';
+    ui.send.textContent = 'Sending…';
+    const current = last;
+    if (!(await push(current))) {
+      sending = false;
+      paintButton();
+      return;
     }
+
+    try {
+      await fetch(notifyUrl, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify({ note: current.markdown }),
+      });
+      localStorage.setItem(SENT, current.savedAt);
+      show('Sent', 'ok');
+    } catch {
+      show('Could not send', 'bad');
+    }
+    sending = false;
+    paintButton();
   }
 
   async function copy() {
@@ -105,8 +168,8 @@
       document.execCommand('copy');
       area.remove();
     }
-    ui.copy.textContent = 'Copied: paste it in chat';
-    setTimeout(() => (ui.copy.textContent = 'Copy feedback for AI'), 2500);
+    ui.send.textContent = 'Copied: paste in chat';
+    setTimeout(paintButton, 2500);
   }
 
   // Browsers group same-named radios across the whole page, so one pick would clear every other item's pick.
@@ -191,5 +254,5 @@
     document.addEventListener('change', onChange);
   }
 
-  window.Feedback = { init, save, auto };
+  window.Feedback = { init, save, auto, notify };
 })();

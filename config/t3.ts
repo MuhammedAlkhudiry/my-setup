@@ -21,6 +21,7 @@ export const T3_SERVER_SETTINGS = {
   continueThreadsAfterServerUpdate: true,
   autoResumeLimitedThreads: true,
   sidebarAutoSettleAfterDays: 20,
+  sidebarAutoSettleKeepPullRequests: true,
   sidebarAutoSettleOnMerge: false,
 } as const;
 

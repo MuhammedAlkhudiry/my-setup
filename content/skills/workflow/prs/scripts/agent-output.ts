@@ -7,9 +7,22 @@ import {
   readFileSync,
   rmSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+// process.exit drops queued pipe writes past ~64 KB; write synchronously instead.
+function writeAll(fd: number, text: string) {
+  let buffer = Buffer.from(text);
+  while (buffer.length) {
+    try {
+      buffer = buffer.subarray(writeSync(fd, buffer));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "EAGAIN") throw error;
+    }
+  }
+}
 
 interface OutputOptions {
   nativeJson?: boolean;
@@ -27,7 +40,8 @@ export function agentOutput(name: string, options: OutputOptions = {}): void {
   const json =
     argv.includes("--json") ||
     argv.includes("--format=json") ||
-    (argv.includes("--format") && argv[argv.indexOf("--format") + 1] === "json");
+    (argv.includes("--format") &&
+      argv[argv.indexOf("--format") + 1] === "json");
   const verbose = argv.includes("--verbose");
   const help = argv.includes("--help") || argv.includes("-h");
   const args = argv.filter(
@@ -35,7 +49,10 @@ export function agentOutput(name: string, options: OutputOptions = {}): void {
   );
   const parentLog = process.env.MY_SETUP_OUTPUT_LOG_ROOT;
   const directory = mkdtempSync(
-    join(parentLog && existsSync(parentLog) ? parentLog : tmpdir(), `${name}-log-`),
+    join(
+      parentLog && existsSync(parentLog) ? parentLog : tmpdir(),
+      `${name}-log-`,
+    ),
   );
   const stdoutPath = join(directory, "stdout.log");
   const stderrPath = join(directory, "stderr.log");
@@ -65,27 +82,32 @@ export function agentOutput(name: string, options: OutputOptions = {}): void {
   const errors = readFileSync(stderrPath, "utf8");
   const code = result.status ?? 1;
   const success = code === 0;
-  writeFileSync(log, `${output}${errors}${result.error ? `\n${result.error.message}\n` : ""}`, {
-    mode: 0o600,
-  });
+  writeFileSync(
+    log,
+    `${output}${errors}${result.error ? `\n${result.error.message}\n` : ""}`,
+    {
+      mode: 0o600,
+    },
+  );
   rmSync(stdoutPath);
   rmSync(stderrPath);
 
   if (json && options.nativeJson) {
-    process.stdout.write(output);
+    writeAll(1, output);
   } else if (json) {
-    console.log(
-      JSON.stringify({
+    writeAll(
+      1,
+      `${JSON.stringify({
         command: name,
         status: success ? "success" : "failed",
         exitCode: code,
         output: output.trim().split("\n").filter(Boolean),
         ...(success ? {} : { log }),
-      }),
+      })}\n`,
     );
   } else if (verbose || help) {
-    process.stdout.write(output);
-    process.stderr.write(errors);
+    writeAll(1, output);
+    writeAll(2, errors);
   } else if (success) {
     console.log(options.summary?.(output) ?? `${name}: ok`);
   }
@@ -97,12 +119,14 @@ export function agentOutput(name: string, options: OutputOptions = {}): void {
         const receipt = JSON.parse(output);
         failures =
           receipt.failedStages?.map(
-            (stage: { name: string; conclusion: string }) => `${stage.name}: ${stage.conclusion}`,
+            (stage: { name: string; conclusion: string }) =>
+              `${stage.name}: ${stage.conclusion}`,
           ) ?? [];
         if (!failures.length && receipt.error) failures = [receipt.error];
       } catch {
         const lines = errors.trim().split("\n").filter(Boolean);
-        const message = lines.find((line) => /^(?:error:|\w*Error:)/.test(line)) ?? lines[0];
+        const message =
+          lines.find((line) => /^(?:error:|\w*Error:)/.test(line)) ?? lines[0];
         if (message) failures = [message];
       }
     }

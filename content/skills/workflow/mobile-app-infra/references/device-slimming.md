@@ -1,6 +1,7 @@
 # Device Slimming
 
-Slim agent devices. Slim shared devices only after their owner releases them; slimming reboots them. Never slim performance-profiling devices:
+`device-queue` slims every pool device before handing it out, with the flags below. Use this
+reference to set up a device outside the pool or to repair one. Slimming reboots a device; never slim performance-profiling devices, since
 disabled services change measurements.
 
 ## iOS simulators
@@ -25,8 +26,10 @@ Override `avdslim` defaults to preserve app features:
 
 If a symlinked `~/.android/avd` hides AVDs from `avdslim`, set `ANDROID_AVD_HOME` to the real directory.
 
-`-read-only` emulators lose post-boot installs and slimming changes on restart. Check for newer installs and have the owner confirm they can
-reinstall before restarting. Reapply `avdslim on` after each boot.
+Disabled packages live on the data partition, so slimming survives cold boots. The queue cold-boots pool emulators with hardware graphics
+and no snapshots (`-no-snapshot -gpu host`) in about 15 seconds: restoring a quick-boot snapshot with host graphics can hang the emulator, and
+one saved under other graphics settings fails to load. Never `avdslim bake` a pool emulator. `-read-only` emulators lose post-boot installs
+and slimming on restart; reapply `avdslim on` after each boot.
 
 1. Record the emulator's launch flags, then stop it.
 2. Tune the AVD once:

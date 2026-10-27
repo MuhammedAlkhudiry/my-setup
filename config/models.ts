@@ -25,4 +25,10 @@ export const MODELS = {
       alias: "claude-opus-4-5",
     },
   },
+  // Models Raycast AI lists under its "Claude pool" provider, in picker order.
+  raycast: {
+    sonnet: { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },
+    opus: { id: "claude-opus-5-5", name: "Claude Opus 5.5" },
+    haiku: { id: "claude-haiku-5-5", name: "Claude Haiku 5.5" },
+  },
 } as const;

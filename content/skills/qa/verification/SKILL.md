@@ -12,15 +12,15 @@ description: Use before test changes, bug fixes, or code handoff, and to assess 
 
 ## Verify changes
 
-1. While editing, run tests for changed files. Before handoff, run `docs/runbooks/checklist.md`'s gate once and applicable conditional checks.
-   Without a checklist, discover commands from manifests, task runners, configuration, and installed help. Prefer one repo-level command;
-   include builds only when required.
+1. Run narrow changed-file tests and static checks first. Before handoff, run `docs/runbooks/checklist.md`'s gate once and applicable conditional checks.
+   Without a checklist, discover commands from manifests and task runners. Prefer one repo-level command; include builds only when required.
 2. Wrap heavy commands with `heavy-run --class checks -- mise run signoff`, using `benchmark` or `build` where appropriate.
-   Keep independent stages parallel; light checks need no slot. Self-queuing runners declared in `package.json`'s
+   Self-queuing runners declared in `package.json`'s
    `heavyRun.deferredCommands` reserve only their heavy steps. Builds, deferred runners, and `heavyRun.uncappedCommands` inherit no
    runtime cap, including nested steps; other checks/benchmarks die at 90 seconds (exit 124). Split or speed up capped work.
    See [deferred runs](references/heavy-run-deferred.md) for declarations and queue policy. Compare repeated benchmark runs or medians.
-   Background long commands and device/server startups; use notifications, never a foreground polling loop.
+   Cap non-deferred full gates with `--runtime-limit` based on their known duration; wait once or use a completion notification.
+   Background long commands and device/server startups.
 3. Prove visible changes in the running app using $browser-simulator-routing. Use $guide-qa for step-by-step user inspection.
 4. Run the full command before release. Run end-to-end journeys, mutation testing, coverage, packaging, and paid evals when requested;
    ask first for a large or risky check.

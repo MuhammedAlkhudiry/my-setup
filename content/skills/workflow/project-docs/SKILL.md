@@ -10,9 +10,9 @@ Document only what code, tests, and git history cannot show. Give each fact one 
 | Knowledge                            | Home                              | Leaves when                           |
 | ------------------------------------ | --------------------------------- | ------------------------------------- |
 | Rules every session needs            | `AGENTS.md`                       | a lint rule, test, or hook takes over |
-| Why the product works this way       | `docs/decisions/<area>/<slug>.md` | it constrains no change               |
-| Postponed work and follow-ups        | `docs/tech-debt/<slug>.md`        | the work is done                      |
-| Actions a deploy does not perform    | `docs/release/<slug>.md`          | every action is done                  |
+| Why the product works this way       | `docs/decisions/<area>/<slug>.md` | it fails the keep test                |
+| Postponed work and follow-ups        | `docs/tech-debt/<slug>.md`        | it fails the keep test                |
+| Actions a deploy does not perform    | `docs/release/<slug>.md`          | the release is public, steps done     |
 | What the product is, how to reach it | `docs/product-setup.md`           | rewritten as facts change             |
 | Product terms                        | `docs/glossary.md`                | the term is retired                   |
 | How to do a task                     | `docs/runbooks/<task>.md`         | rewritten as the process changes      |
@@ -40,9 +40,15 @@ follow-ups on the same branch, never only in the pull request.
 
 ## Cleanup
 
-1. Read every doc in the repository and in `~/plans/<project>/`.
-2. Verify paths, commands, settings, and behavior against code and live sources. Fix wrong claims and replace duplicates with links.
-3. Check against real sources, then delete completed tech-debt and release entries and decisions that constrain no change.
+Cleanup prunes: an entry stays only when it passes its keep test; git history keeps the rest.
+
+1. Count files in `docs/decisions/`, `docs/tech-debt/`, and `docs/release/`.
+2. Read every doc in the repository and in `~/plans/<project>/`. Verify paths, commands, settings, and behavior against code and live sources;
+   fix wrong claims and replace duplicates with links.
+3. Apply the keep tests for [decisions](references/decisions.md#pruning), [tech debt](references/tech-debt.md#pruning), and
+   [release](references/release.md#pruning). Confirm each deletion against code and live sources; keep what an open pull request or
+   in-flight release still needs.
 4. Extract and archive `done` plans as [plans](references/plans.md) describes.
-5. Move open findings into tech debt, then delete repository reviews, audits, QA runs, and measurement reports; git history keeps them.
-6. Report changes, moves, and unverified claims.
+5. Move open findings into tech debt, then delete repository reviews, audits, QA runs, and measurement reports.
+6. Report the counts before and after for each type, and flag any type that grew since the previous cleanup with the reason. Report
+   changes, moves, merges, and unverified claims.

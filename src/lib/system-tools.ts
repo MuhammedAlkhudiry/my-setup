@@ -1,3 +1,7 @@
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
 import { execa } from "execa";
 
 export type SystemToolLevel = "required" | "optional";
@@ -342,7 +346,7 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "claude",
         level: "optional",
-        why: "Used by Claude Code workflows and as a configured agent target.",
+        why: "Used by Claude Code workflows, mac-watcher review, and as a configured agent target.",
         versionArgs: ["--version"],
         latest: {
           type: "command",
@@ -412,7 +416,7 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "simslim",
         level: "required",
-        why: "Disables unneeded iOS simulator daemons so parallel agent simulators use less memory.",
+        why: "device-queue slims every pool simulator before handing it out, so parallel agent simulators use less CPU and memory.",
         versionArgs: ["--version"],
         latest: {
           type: "homebrew",
@@ -425,8 +429,11 @@ export const SYSTEM_TOOL_GROUPS = [
       },
       {
         name: "avdslim",
-        level: "required",
-        why: "Shrinks Android emulator RAM and disables unneeded packages so parallel agent emulators use less memory.",
+        // Only Macs that run Android emulators need it; spare agent Macs have none.
+        level: existsSync(join(homedir(), "Library/Android/sdk/emulator"))
+          ? "required"
+          : "optional",
+        why: "device-queue slims every pool emulator after boot, so parallel agent emulators use less memory.",
         versionArgs: ["--version"],
         latest: {
           type: "homebrew",
@@ -671,7 +678,7 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "gh",
         level: "optional",
-        why: "Used for GitHub pull requests, CI runner switching, fresh PR evidence in worktree-cleanup, and local sign-off through basecamp/gh-signoff.",
+        why: "Used for GitHub pull requests, the local merge queue, CI runner switching, fresh PR evidence in worktree-cleanup, and local sign-off through basecamp/gh-signoff.",
         versionArgs: ["--version"],
         latest: {
           type: "homebrew",
@@ -682,16 +689,16 @@ export const SYSTEM_TOOL_GROUPS = [
         },
       },
       {
-        name: "glab",
+        name: "mergiraf",
         level: "optional",
-        why: "Used to open GitLab merge requests from the command line.",
+        why: "Syntax-aware merge driver the merge queue uses when it merges main into a PR left behind; without it the queue uses Git's line merge.",
         versionArgs: ["--version"],
         latest: {
           type: "homebrew",
-          formula: "glab",
+          formula: "mergiraf",
         },
         update: {
-          commands: ["brew install glab"],
+          commands: ["brew upgrade mergiraf"],
         },
       },
     ],

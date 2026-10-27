@@ -2,6 +2,7 @@
 // starting any work. If the parent crashes before the handshake, stdin closes.
 import { spawn } from "node:child_process";
 import { writeSync } from "node:fs";
+import { availableParallelism } from "node:os";
 
 import { processSnapshot } from "../lib/process-identity";
 
@@ -19,7 +20,9 @@ send({ ready: true });
 
 const input = await Bun.stdin.text();
 if (!input) process.exit(0);
-const { argv, deferred, uncapped, cliPath, owner, waitSeconds } = JSON.parse(input) as {
+const { argv, deferred, uncapped, cliPath, owner, waitSeconds } = JSON.parse(
+  input,
+) as {
   argv: string[];
   deferred: boolean;
   uncapped: boolean;
@@ -32,6 +35,10 @@ delete env.HEAVY_RUN_DEFERRED;
 delete env.HEAVY_RUN_RESERVATION_ID;
 delete env.HEAVY_RUN_UNCAPPED;
 if (uncapped) env.HEAVY_RUN_UNCAPPED = "1";
+// Concurrent jobs share the cores: cap each job's test workers and parallel stages unless the caller chose.
+const share = String(Math.max(2, Math.floor(availableParallelism() / 4)));
+env.PEST_PROCESSES ??= share;
+env.CHECK_JOBS ??= share;
 if (deferred) {
   env.HEAVY_RUN_DEFERRED = "1";
   env.HEAVY_RUN_CLI = cliPath;
@@ -49,7 +56,9 @@ const result = await new Promise<{
   signal: string | null;
   error?: string;
 }>((resolve) => {
-  child.on("error", (error) => resolve({ exitCode: null, signal: null, error: error.message }));
+  child.on("error", (error) =>
+    resolve({ exitCode: null, signal: null, error: error.message }),
+  );
   child.on("exit", (exitCode, signal) => resolve({ exitCode, signal }));
 });
 
@@ -65,7 +74,10 @@ terminateGroup();
 process.kill(-process.pid, "SIGTERM");
 while (
   (await processSnapshot()).some(
-    (row) => row.pgid === process.pid && row.pid !== process.pid && !row.state.startsWith("Z"),
+    (row) =>
+      row.pgid === process.pid &&
+      row.pid !== process.pid &&
+      !row.state.startsWith("Z"),
   )
 ) {
   await Bun.sleep(25);

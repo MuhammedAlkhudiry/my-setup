@@ -29,6 +29,7 @@ import {
   heavyHistoryPath,
   heavyLoadAdmission,
   HEAVY_LOAD_POLICY,
+  runHeavyCommand,
   deferredHeavyCommand,
   uncappedHeavyCommand,
   withProcessState,
@@ -130,7 +131,7 @@ function fixture(concurrent = false, load = 0) {
       const released = new Promise(resolve => socket.on("end", resolve));
       socket.resume();
       writeFileSync(root+"/${owner}-started", "started");
-      socket.write(${JSON.stringify(`${owner}\n`)});
+      await new Promise((resolve, reject) => socket.write(${JSON.stringify(`${owner}\n`)}, error => error ? reject(error) : resolve()));
       ${gated ? "await released;" : ""}
       socket.destroy();
       process.exit(${exitCode});`;
@@ -145,12 +146,13 @@ function fixture(concurrent = false, load = 0) {
     implementation = selectedModule,
     deadline = false,
     cwd = process.cwd(),
+    runtimeLimitSeconds?: number,
   ) => {
     const script = `import { runHeavyCommand } from ${JSON.stringify(implementation)};
       import { readFileSync } from "node:fs";
       const abort = new AbortController();
       process.on("SIGTERM", ()=>abort.abort());
-      const receipt = await runHeavyCommand(${JSON.stringify({ argv: [process.execPath, "-e", source], class: className, waitSeconds, owner, requester: owner, directory, legacyLockPath, deferred }).slice(0, -1)}, waitForCapacityRetry: async (_timeout, _signal, onWaiting) => { onWaiting?.(); await Bun.sleep(10); }, readPressure: () => "normal", readLoad: () => Number(readFileSync(${JSON.stringify(join(root, "load"))}, "utf8")), signal: abort.signal, ${deadline ? 'scheduleRuntimeDeadline: (expire, milliseconds) => { if(milliseconds !== 90000) throw new Error("Wrong deadline"); process.stdin.once("data", expire); return () => { process.stdin.removeListener("data", expire); process.stdin.pause(); }; },' : ""} onQueued: () => console.log(JSON.stringify({queued: true})) });
+      const receipt = await runHeavyCommand(${JSON.stringify({ argv: [process.execPath, "-e", source], class: className, waitSeconds, owner, requester: owner, directory, legacyLockPath, deferred, ...(runtimeLimitSeconds === undefined ? {} : { runtimeLimitSeconds }) }).slice(0, -1)}, waitForCapacityRetry: async (_timeout, _signal, onWaiting) => { onWaiting?.(); await Bun.sleep(10); }, readPressure: () => "normal", readLoad: () => Number(readFileSync(${JSON.stringify(join(root, "load"))}, "utf8")), signal: abort.signal, ${deadline ? `scheduleRuntimeDeadline: (expire, milliseconds) => { if(milliseconds !== ${(runtimeLimitSeconds ?? 90) * 1000}) throw new Error("Wrong deadline"); process.stdin.once("data", expire); return () => { process.stdin.removeListener("data", expire); process.stdin.pause(); }; },` : ""} onQueued: () => console.log(JSON.stringify({queued: true})) });
       console.log(JSON.stringify(receipt)); process.exitCode = receipt.exitCode;`;
     const processHandle = spawn(process.execPath, ["--no-env-file", "-e", script], {
       cwd,
@@ -429,7 +431,12 @@ test("competing callers run in FIFO order and preserve device leases in the shar
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    expect(history.map((run) => run.owner)).toEqual(["first", "second", "third"]);
+    // Receipts append after release, so completion order can differ from FIFO admission.
+    expect(
+      history
+        .toSorted((a, b) => a.acquiredAt!.localeCompare(b.acquiredAt!))
+        .map((run) => run.owner),
+    ).toEqual(["first", "second", "third"]);
     expect(history.every((run) => run.status === "succeeded" && run.acquiredAt !== null)).toBe(
       true,
     );
@@ -1712,6 +1719,58 @@ test("runtime cap kills the process group with a distinct actionable receipt", a
     ).toEqual([]);
   } finally {
     await f.clean();
+  }
+});
+
+test("an explicit cap also kills an otherwise uncapped full check", async () => {
+  const f = fixture();
+  writeFileSync(
+    join(f.root, "package.json"),
+    JSON.stringify({ heavyRun: { uncappedCommands: [[process.execPath, "-e"]] } }),
+  );
+  try {
+    const run = f.start(
+      "full-check",
+      true,
+      30,
+      0,
+      false,
+      f.command("full-check"),
+      "checks",
+      modulePath,
+      true,
+      f.root,
+      2,
+    );
+    await f.started("full-check");
+    run.processHandle.stdin!.end("expire");
+    expect(await run.result).toMatchObject({
+      status: "timed-out",
+      exitCode: 124,
+      runtimeLimitSeconds: 2,
+      childSignal: "SIGKILL",
+    });
+  } finally {
+    await f.clean();
+  }
+});
+
+test("ad-hoc checks cannot extend the default runtime cap", async () => {
+  const inheritedUncapped = process.env.HEAVY_RUN_UNCAPPED;
+  delete process.env.HEAVY_RUN_UNCAPPED;
+  try {
+    await expect(
+      runHeavyCommand({
+        argv: ["true"],
+        class: "checks",
+        owner: "cap test",
+        waitSeconds: 0,
+        runtimeLimitSeconds: 91,
+      }),
+    ).rejects.toThrow("cannot exceed 90 seconds");
+  } finally {
+    if (inheritedUncapped === undefined) delete process.env.HEAVY_RUN_UNCAPPED;
+    else process.env.HEAVY_RUN_UNCAPPED = inheritedUncapped;
   }
 });
 

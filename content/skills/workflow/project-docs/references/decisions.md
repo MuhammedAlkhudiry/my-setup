@@ -32,4 +32,11 @@ Occurrences are computed, never stored ahead, so they survive edits and timezone
 
 ## Pruning
 
-Apply these rules to every decision file. Before deleting misplaced content, ensure its proper home holds it. Report moves and deletions.
+Keep a decision only when it constrains a plausible future change and someone would likely get that change wrong without it. Delete it when:
+
+- code, tests, lint rules, or comments already make it obvious;
+- a later decision or the current code supersedes it;
+- it is a one-off implementation note, incident story, or dated history;
+- its content belongs in another home from the table above, after that home holds it.
+
+Merge near-duplicates into one file.

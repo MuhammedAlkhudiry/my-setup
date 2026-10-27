@@ -6,7 +6,6 @@ description: Use when preparing, describing, or marking a pull request ready for
 <!-- profile:work -->
 
 Follow WORK-GITLAB and WORK-APPROVAL. Creating a PR/MR requires user approval; editing files and fixing checklist findings do not.
-Codex review approval does not authorize creation.
 
 For ticket work, put the ticket key in the branch name, within the project's branch convention, and in the title, and link the ticket in
 the description.
@@ -18,37 +17,47 @@ the description.
 1. **Simplify:** run $simplify on the diff, then apply $laravel for PHP, $react for React, $verification for tests,
    $translation for user-facing text, and $ux-ui for UI changes.
 2. **Docs:** fix docs made wrong by the change and record its decisions and follow-ups through $project-docs.
-3. **Codex approval:** get a {{models.codex.review.displayName}} (`{{models.codex.review.id}}`) review alongside Docs for medium/large PRs
-   ($triage-prs: app-code lines + 300 per migration ≥ 300), or risky changes involving auth, payments, privacy, deleted data, or a Needs you decision.
-   Prefer a Codex subagent; fall back to the Codex CLI through $ai-agents-cli only when delegation is unavailable.
-   Name the base branch and request high reasoning effort, blockers (bugs, security, data loss, flakes, false greens, broken contracts),
-   follow-ups, or `APPROVED`. Fix blockers and rerun local checks. Request one medium-effort final recheck: confirm the fixes resolve
-   blockers and add none; return `APPROVED` or remaining blockers, without new follow-ups. No third round, even after later pushes;
-   bring remaining blockers to the user. Fix small follow-ups; batch the rest into a later PR or $project-docs.
+3. **Adversarial review, big or risky PRs only:** over about 400 changed lines or 15 files, excluding generated code and lock files, or
+   touching migrations or persisted data, authentication or permissions, payments or purchases, AI prompts, deploys, or security. Run one
+   fresh Claude subagent, never Codex or the author, with $code-review on the diff, briefed with the goal and told to break it. Fix confirmed
+   findings. Recheck with another fresh subagent only after a serious finding: security, data loss, wrong persisted data, or a broken user
+   flow. Skip this step for every other PR.
+
+<!-- profile:work -->
+
+Use the PR watcher for CI completion; without it, make one bounded wait and one CI read, then hand off any still-running checks.
+
+<!-- /profile -->
 
 When open PRs add the same new file, commit it identically in each and say so in each description, so either merge order works.
 
-Report checklist and review results in one line; give the reason if review was skipped.
+Report checklist results in one line.
 
 <!-- profile:personal -->
 
 ## Merging without asking
 
-Merge a PR yourself, without the owner's go, when it changes no app or server behavior: docs, agent instructions, tests and test fixes, CI,
+Enqueue a PR yourself, without the owner's go, when it changes no app or server behavior: docs, agent instructions, tests and test fixes,
 and tooling or scripts. It must have green sign-off on its head, be mergeable, have no unresolved feedback, and need no owner decision, such
 as a new or changed product decision, roadmap, or release step. Ask first for everything else, including refactors of production code.
-Report each such merge with its post-merge result.
+Run `merge-queue add <owner/repo> <pr> --thread <t3ThreadId>`, then end the task. The Housekeeper owns failure relay and post-merge checks.
+A successful enqueue is the handoff; do not merge directly or wait for the worker. The worker verifies each batch with local sign-off,
+merges it, and deploys main with the project's `mise run deploy`. When a sibling lands first, the worker merges main into the PR branch
+itself; it fails the PR, naming the conflicting files, only when that merge still conflicts.
 
 <!-- /profile -->
 
 ## After a GitHub merge
 
-Before other work, run the [post-merge steps](references/post-merge.md) that apply: CI on the exact merge commit, then the deploy,
-migrations, jobs, and Sentry for changes that reach them. Never revert automatically.
+<!-- profile:work -->
 
+Before other work, run the [post-merge steps](references/post-merge.md) that apply to the exact merge commit. Never revert automatically.
+
+<!-- /profile -->
 <!-- profile:personal -->
 
-For queued CI during a confirmed Ubicloud incident, read [runner outage recovery](references/ci-runners.md) before switching or dispatching.
+The Housekeeper runs the [post-merge steps](references/post-merge.md) once per repository batch on its final main SHA: the queue's
+deploy, then migrations, jobs, and Sentry for changes that reach them. Never revert automatically.
 
 <!-- /profile -->
 

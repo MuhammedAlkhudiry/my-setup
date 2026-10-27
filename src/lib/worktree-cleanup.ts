@@ -19,14 +19,14 @@ import { z } from "zod";
 import { ACTIVE_PROJECTS, type ActiveProject } from "../../config/active-projects";
 import { timedCommand } from "./timed-command";
 
-export const WORKTREE_SIZE_WARNING_BYTES = 20 * 1024 ** 3;
 export const WORKTREE_CLEANUP_GRACE_MS = 4 * 60 * 60 * 1000;
 const CLEANUP_REPORT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 const cleanupCacheSchema = z.object({
   completedAt: z.iso.datetime(),
-  t3Worktrees: z.number().int().nonnegative(),
-  t3Bytes: z.number().int().nonnegative(),
+  planId: z.uuid().nullable(),
+  removableWorktrees: z.number().int().nonnegative(),
+  removableBytes: z.number().int().nonnegative(),
   unmeasuredWorktrees: z.number().int().nonnegative(),
   errors: z.number().int().nonnegative(),
 });
@@ -333,19 +333,14 @@ export function cleanupCachePath(home: string): string {
 
 /** A durable, small summary for doctor. Full size measurement happens only in the cleanup command. */
 export async function writeCleanupCache(report: CleanupReport, home = homedir()): Promise<void> {
-  const root = canonicalPath(join(home, ".t3/worktrees"));
-  const trees = report.entries.filter(
-    (entry) =>
-      entry.kind === "worktree" &&
-      !entry.removed &&
-      entry.path &&
-      inside(canonicalPath(entry.path), root),
-  );
   const cache = {
     completedAt: new Date().toISOString(),
-    t3Worktrees: trees.length,
-    t3Bytes: trees.reduce((total, entry) => total + (entry.sizeBytes ?? 0), 0),
-    unmeasuredWorktrees: trees.filter((entry) => entry.sizeBytes === null).length,
+    planId: report.plan?.id ?? null,
+    removableWorktrees: report.summary.removableWorktrees,
+    removableBytes: report.summary.removableBytes,
+    unmeasuredWorktrees: report.entries.filter(
+      (entry) => entry.kind === "worktree" && !entry.removed && entry.sizeBytes === null,
+    ).length,
     errors: report.errors.length,
   };
   const path = cleanupCachePath(home);
@@ -353,12 +348,12 @@ export async function writeCleanupCache(report: CleanupReport, home = homedir())
   await writeFile(path, `${JSON.stringify(cache)}\n`, { mode: 0o600 });
 }
 
-/** Only one bounded local metadata read. Never traverse worktrees or launch a size-measurement process here. */
-export async function cleanupDoctorHint(
-  home: string,
-  registeredWorktrees: number,
-  now = Date.now(),
-): Promise<string | null> {
+/**
+ * Only one bounded local metadata read. Never traverse worktrees or launch a size-measurement process here.
+ * Warns only when the last dry run left something to act on: the watcher already removes idle worktrees every hour,
+ * and worktrees it keeps (open PRs, bound threads) are not doctor's problem however large they are.
+ */
+export async function cleanupDoctorHint(home: string, now = Date.now()): Promise<string | null> {
   let cache: z.infer<typeof cleanupCacheSchema> | null = null;
   try {
     const path = cleanupCachePath(home);
@@ -369,18 +364,14 @@ export async function cleanupDoctorHint(
       );
     }
   } catch {
-    // Missing, expired, interrupted or invalid reports use the cheap count fallback.
+    // Missing, interrupted or invalid reports have nothing to act on.
   }
 
-  if (cache && now - Date.parse(cache.completedAt) < CLEANUP_REPORT_MAX_AGE_MS) {
-    if (cache.errors || cache.unmeasuredWorktrees)
-      return "last worktree-cleanup report was incomplete; rerun worktree-cleanup (dry run)";
-    if (cache.t3Bytes >= WORKTREE_SIZE_WARNING_BYTES)
-      return `last cleanup report measured ${(cache.t3Bytes / 1024 ** 3).toFixed(1)} GiB in registered T3 worktrees (${cache.completedAt}); run worktree-cleanup --json to review a dry-run plan (removal requires --apply <plan>)`;
-    if (registeredWorktrees <= cache.t3Worktrees) return null;
-  }
-  if (registeredWorktrees >= 5)
-    return `${registeredWorktrees} registered T3 worktrees; ${cache ? "cleanup report is stale or worktrees changed" : "no recent size report"}; run worktree-cleanup to measure and review finished work (dry run)`;
+  if (!cache || now - Date.parse(cache.completedAt) >= CLEANUP_REPORT_MAX_AGE_MS) return null;
+  if (cache.errors || cache.unmeasuredWorktrees)
+    return "last worktree-cleanup report was incomplete; rerun worktree-cleanup (dry run)";
+  if (cache.removableWorktrees && cache.planId)
+    return `last worktree-cleanup dry run can remove ${cache.removableWorktrees} finished worktrees (${(cache.removableBytes / 1024 ** 3).toFixed(1)} GiB); review it, then run worktree-cleanup --apply ${cache.planId}`;
 
   return null;
 }

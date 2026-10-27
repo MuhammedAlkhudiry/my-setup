@@ -1,12 +1,16 @@
 #!/usr/bin/env bun
 
 import { agentOutput, parseCli } from "./lib/agent-output";
+import { spawn } from "node:child_process";
+import { appendFileSync, mkdirSync, openSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 
 import { cac } from "cac";
 import { execa } from "execa";
 
 import { install } from "./commands/install";
+import { readSetupMirrors } from "./lib/device";
 
 agentOutput("my-setup", {
   summary: (output) => output.trim().split("\n").at(-1) || "my-setup: ok",
@@ -31,6 +35,31 @@ async function runScript(command: string, args: string[], compact = true): Promi
   throw new Error(`${command} ${args.join(" ")} failed with exit code ${result.exitCode}`);
 }
 
+// Copies this checkout to the spare Macs in the background, one sync at a time, so install stays fast.
+function startSetupMirrors(): void {
+  const hosts = readSetupMirrors(homedir());
+  if (hosts.length === 0) return;
+
+  const logDir = join(homedir(), "Library/Logs");
+  const log = join(logDir, "my-setup-mirror.log");
+  mkdirSync(logDir, { recursive: true });
+  appendFileSync(log, `# ${new Date().toISOString()}\n`);
+  const output = openSync(log, "a");
+  spawn(
+    "lockf",
+    [
+      "-t",
+      "1800",
+      join(logDir, "my-setup-mirror.lock"),
+      "zsh",
+      join(ROOT_DIR, "shell", "mirror-setup.zsh"),
+      ...hosts,
+    ],
+    { detached: true, stdio: ["ignore", output, output] },
+  ).unref();
+  console.log(`my-setup mirror: syncing ${hosts.join(", ")} in the background; log: ${log}`);
+}
+
 const cli = cac("my-setup");
 
 cli
@@ -48,6 +77,7 @@ cli
         options.compact ?? process.env.MY_SETUP_OUTPUT !== "verbose",
       );
     }
+    startSetupMirrors();
     console.log("my-setup install: ok");
   });
 

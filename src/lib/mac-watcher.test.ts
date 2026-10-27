@@ -5,13 +5,16 @@ import { STUCK_RUN_NOTE } from "./cpu-guard";
 import {
   type Alert,
   type AlertInput,
+  type Review,
   isMemcapActionLine,
   macWatcherPaths,
   mergeAlerts,
   parseDaemonFootprints,
   parseListeners,
+  parseReviewOutput,
   pruneAlerts,
   renderMemcapConfig,
+  reviewCommandArgs,
   renderWatcherLaunchAgent,
   sharedPorts,
   thresholdAlerts,
@@ -357,4 +360,32 @@ test("a port two unrelated processes listen on is reported, but a parent's inher
     { port: 6379, processes: ["redis-server (9756)", "redis-server (61280)"] },
   ]);
   expect(keys({ sharedPorts: sharedPorts(listeners, parentOf) })).toContain("shared-ports");
+});
+
+test("review runs Claude unattended with no tools and structured output", () => {
+  const args = reviewCommandArgs();
+  const flag = (name: string) => args[args.indexOf(name) + 1];
+
+  expect(args[0]).toBe("-p");
+  expect(flag("--permission-mode")).toBe("bypassPermissions");
+  expect(flag("--tools")).toBe("");
+  expect(args).toContain("--safe-mode");
+  expect(args).toContain("--no-session-persistence");
+  expect(flag("--model")).toBe(MAC_WATCHER.claude.model);
+  expect(flag("--effort")).toBe(MAC_WATCHER.claude.effort);
+  expect(flag("--output-format")).toBe("json");
+  expect(JSON.parse(flag("--json-schema") ?? "")).toMatchObject({ required: ["runNote", "alerts"] });
+});
+
+test("review output reads the structured diagnosis and surfaces Claude errors", () => {
+  const review: Review = {
+    runNote: "Quiet Mac.",
+    alerts: [{ key: "low-disk", severity: "warning", title: "Low disk", evidence: "8 GiB free", fix: "Prune caches" }],
+  };
+
+  expect(parseReviewOutput(JSON.stringify({ is_error: false, structured_output: review }))).toEqual(review);
+  expect(() =>
+    parseReviewOutput(JSON.stringify({ is_error: true, result: "Not logged in", structured_output: null })),
+  ).toThrow("Claude review failed: Not logged in");
+  expect(() => parseReviewOutput(JSON.stringify({ structured_output: { runNote: "x" } }))).toThrow();
 });

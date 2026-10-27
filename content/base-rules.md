@@ -38,10 +38,12 @@
 
 - **TOOLING** — Use project commands for development servers, such as `mise run dev`. Prefer Bun/TypeScript for scripts and automation;
   use Python only when clearly better suited. Keep disposable and one-time production data-fix scripts outside Git; commit only reusable scripts.
+- **WORKTREES** — In a project with a `worktree` task, create task worktrees only with `mise run worktree <branch>`: it starts from
+  `origin/main` and prepares env links, dependencies, and a fresh test database. Never add a worktree or install by hand; briefs say the same.
 - **TEMP-ARTIFACTS** — Put disposable artifacts in a fresh system temporary directory, never in a Git repository. Only intentional, durable
   project files belong in the repository.
-- **CLEAN-UP** — When done, close browser sessions, stop servers/processes, shut down simulators/emulators, and delete temporary directories
-  you started or created. Leave the user's and other agents' resources alone.
+- **CLEAN-UP** — When done, close browser sessions, stop servers/processes and unqueued devices you started, release device leases so the
+  queue can keep one warm device, and delete temporary directories you created. Leave the user's and other agents' resources alone.
 - **DEV-ENV-UNBLOCK** — Resolve development environment blockers directly, including local environment changes.
 - **BROWSER-TAB-REUSE** — In a browser shared with the user, such as Claude in Chrome, keep using the tab you control and navigate it per
   page; open a new tab only when you have none, and keep it until the task is done.
@@ -57,23 +59,28 @@
 - **WORK-VPN** — Disconnecting the work laptop's GlobalProtect VPN can break local apps' access to work APIs. Check connectivity for empty
   data, CORS errors, or failed requests before diagnosing an application bug.
   <!-- /profile -->
-- **CODEX-WORK** — Never use Codex for UI, visual design, copy, sound, anything needing taste, or a major decision such as product
-  direction, architecture, or a trade-off the owner would weigh. Claude does that work end to end, including implementing UI changes; if
-  you are Codex, hand it to a Claude subagent. Give Codex everything else: image generation, Mac desktop app operation, browser work other
-  than QA, and, if you are Claude, implementation, debugging, refactors, tests, research, and tooling, then review what it returns. If you
-  are Codex, do that work yourself; otherwise use a Codex subagent, falling back to the Codex CLI via $ai-agents-cli only when delegation
-  is unavailable. Keep browser QA and follow $browser-simulator-routing.
+- **CODEX-WORK** — As Claude, use Codex only for image generation and browser work other than QA, and delegate everything else to Claude
+  subagents (native or the T3 `claudeAgent_pool` instance); Claude keeps browser QA; follow $browser-simulator-routing. As Codex, do all
+  work yourself or with Codex subagents; never hand it to Claude.
   <!-- profile:personal -->
 - **OPENROUTER** — For occasional calls outside installed agents, use OpenRouter with `$OPENROUTER_API_KEY` from local secrets. Choose the
-  cheapest capable model; never route frontier models (Claude, GPT, Gemini Pro) through it. Ask only above about $0.05 total: name the model,
+  cheapest capable model; never route frontier models (Claude, GPT, Gemini Pro) through it. Ask only above $1 total per task: name the model,
   price, and expected total, then wait for approval before the first call.
+  <!-- /profile -->
+  <!-- profile:personal -->
+- **DEVICES** — `main-mac`, `small-mac`, and `big-mac` share a private Tailscale network; `scutil --get LocalHostName` says which one you
+  are on. `main-mac` runs the Housekeeper, the Claude and Codex account pool, and the owner's phone connection, so it must stay awake.
+  `small-mac` and `big-mac` are spare agent Macs: they use main-mac's pool, and their `{{SETUP_ROOT}}` is a read-only copy main-mac
+  replaces on every install; never edit it there, and send setup changes to the Housekeeper instead. From them, when blocked and the
+  owner is unreachable, message the Housekeeper with `ssh main-mac-inbox send` and the message on stdin. Call each Mac by its name in
+  replies, docs, and briefs, never "this Mac" or "the other Mac".
   <!-- /profile -->
 
 ## Repo Context
 
 - **GUIDELINES-PROJECT** — Reference and edit shared AI rules, skills, and configuration at `{{SETUP_ROOT}}`, including from other projects.
 - **PROJECT-GLOSSARY** — Before discussing or changing product concepts, read relevant glossary entries (usually `docs/glossary.md`). Use
-  canonical terms in explanations, docs, new code names, and user-facing text; never invent alternatives for defined concepts.
+  canonical terms in replies, explanations, docs, new code names, and user-facing text; never invent alternatives for defined concepts.
   <!-- profile:personal -->
 - **PERSONAL-KNOWLEDGE** — Reference and edit the source of truth for the owner's life, work, tools, preferences, decisions, and AI-agent
   context at `~/PhpstormProjects/personal-knowledge`, including from other projects.
@@ -99,15 +106,19 @@ Use these projects as references when the user mentions them.
 - **AGENT-PROMPTS** — Assume other agents share your skills and instructions. Write only the task and context, never copied system prompts,
   rules, `AGENTS.md`, `CLAUDE.md`, or skill text. Refer to relevant skills by name.
 - **AGENT-MODES** — Start subagents, delegated tasks, and threads in your runtime mode, never a command-approval mode: unattended approvals
-  stall work. Put limits such as read-only in the task prompt.
+  stall work. Put limits such as read-only in the task prompt. Never choose a max reasoning effort.
+
 - **EFFORT-SIZING** — Never estimate work in human time. Size it by blast radius, code touched, risk, QA effort, and product/UX decisions.
 - **RARE-EDGE-CASES** — Do not fix or report vanishingly rare defects; spend the effort on flows real users hit. Always report security
   problems, data loss, and corrupted or incorrect persisted data, however rare.
+- **SPECULATIVE-ROBUSTNESS** — Before adding complexity for speculative or vanishingly unlikely race conditions or security edge cases,
+  explain the concrete failure mode, likelihood, and complexity cost to the owner and get their buy-in. Do not silently expand scope for
+  theoretical robustness.
 - **AGENT-OUTPUT** — Commands written for agents print one short success line, or only the failed items with full-log paths. Offer
   `--json` and `--verbose`, carry results in exit codes, and omit banners, colors, progress, tables, and decoration.
-- **NO-POLLING** — Never wait by repeating sleep-and-check steps. Where the harness notifies on completion (background commands, subagent
-  results, PR watches), start the work and end the turn; otherwise run one blocking wait with a timeout. A search that finds nothing is an
-  empty result, not a failure.
+- **NO-POLLING** — Never wait by repeating sleep-and-check steps. Batch progress messages at milestones. Where the harness notifies on
+  completion (background commands, subagent results, PR watches), start the work and end the turn; otherwise block once with
+  `wait-for <file|port|pid|url|cmd> <target>`, including for CI. A search that finds nothing is an empty result, not a failure.
 - **RATINGS** — Rate how good a metric, trend, or health reading is on five levels in text reports, digests, and replies: 🔴 very bad,
   🟠 bad, ⚪ normal, 🟢 good, 🌟 very good. Never use two-color red/green for these ratings; keep pass/warn/fail markers for check results
   and statuses. App and admin UI are out of scope.
@@ -117,15 +128,28 @@ Use these projects as references when the user mentions them.
   `package.json`'s `heavyRun.deferredCommands`, such as Harium's `mise run signoff`, pass through and reserve only their heavy steps.
   Ad-hoc checks and benchmarks must finish within 90 seconds or their process group is killed (exit 124): split or speed up the work.
   Builds and commands declared in `heavyRun.deferredCommands` or `heavyRun.uncappedCommands` are exempt, including their nested heavy steps.
-  Run light work directly. It waits and recovers stale leases; never hand-poll turn files. Follow $verification.
+  Run narrow changed-file checks first; cap a non-deferred full check with `--runtime-limit <seconds>` and wait once. Run light work directly.
+  It waits and recovers stale leases; never hand-poll turn files. Follow $verification.
   <!-- /profile -->
 - **ONE-PR** — Keep each task in one PR for one review/check/merge cycle. Split only for a stated reason, such as independent shipping or rollback.
-- **PR-CHECKS** — Finish work, pass local checks, and complete $prs before reporting a PR ready. If the project has sign-off, run it on the
-  pushed head after every push; it replaces PR CI. Merge only on green sign-off of a head that contains the current base branch;
-  rebase and rerun when the base moved, because two PRs green alone can break it together. Never bypass required checks; only the owner may bypass
-  them on GitHub. Do not dispatch/rerun CI for work in progress, except one branch run before merging changes to CI workflows or their
-  scripts that sign-off cannot exercise. After a GitHub merge, complete $prs's post-merge steps for the exact merge commit before other
-  work.
+- **PR-CHECKS** — Finish work, pass local checks, and complete $prs before reporting a PR ready. Run project sign-off on the pushed head
+  after every push. Never bypass required checks; only the owner may bypass them on GitHub.
+    <!-- profile:work -->
+  Do not dispatch/rerun CI for work in progress. Merge only on green sign-off of a head containing current base; rebase and rerun when base moves. Complete $prs post-merge steps
+  for the exact merge commit before other work.
+    <!-- /profile -->
+    <!-- profile:personal -->
+  Once approved with green sign-off, run `merge-queue add <owner/repo> <pr> --thread <t3ThreadId>` and end the task. The queue tests the
+  combined head containing current main with local sign-off, merges it, and deploys main; there is no GitHub CI. The Housekeeper owns
+  failure relay and post-merge checks on the batch’s final main SHA.
+    <!-- /profile -->
+  <!-- profile:personal -->
+- **HOUSEKEEPER** — A recurring T3 thread titled "Housekeeper" (role: `{{SETUP_ROOT}}/content/agents/housekeeper.md`) keeps main-mac,
+  agent sessions, and the active projects moving. It relays merge-queue and deploy failures, runs post-merge, Sentry, and health checks,
+  reviews screenshots of owner-requested changes before enqueuing them, relaunches stalled subagents, and owns the owner's status page.
+  Act on its relays and steering as part of your task, and answer its questions briefly. It speaks for the owner only when it quotes an
+  owner decision. Leave its duties and its `~/.local/state/housekeeper/` files to it.
+  <!-- /profile -->
 - **CODE-SPACING** — Inside functions, separate logical steps with one blank line; keep each step's lines together, without blank lines
   between every statement.
 
@@ -140,17 +164,25 @@ All instructions for replies to the user live here.
   briefly explain specialized terms without oversimplifying.
 - **Clickable URLs.** Render every known URL as a Markdown link to its exact page. Link every mentioned PR; look up missing URLs. When
   work changes something the owner can open, such as a production page, admin screen, or store listing, link that exact page.
-- **PR status.** Give every mentioned PR a three-line block: a `<status> [#<number> <title>](<url>)` paragraph, then a `📄` bullet with
-  what the PR changes in user terms, then a `👉` bullet with why it has this status and the next step. Use the first status that
-  applies, exactly as written, and never describe PR state in other words: `🟣 **MERGED**` (give the post-merge results),
-  `⚪ **CLOSED**`, `📝 **DRAFT**`, `⚔️ **CONFLICTS**`, `🔴 **CHECKS FAILING**`, `⏳ **CHECKS RUNNING**`, `💬 **NEEDS YOU**` (unresolved
-  feedback or an owner decision), or `🟢 **READY TO MERGE**` (checks green, mergeable, nothing open). Example:
+- **PR status.** Give a block only to a PR whose state the reply reports: one the work created, changed, merged, or was asked about.
+  A passing mention, such as a plan step ("next I merge #1234") or a reference to earlier work, is an inline link only. A block sits
+  between `---` dividers: a `<status> [#<number> <title>](<url>)` line, a `🧭 Context:`
+  line with what the PR changes in user terms, why it has this status, and the next step, then a `🎯 Confidence:` line rating how safe it is
+  to merge on the five RATINGS levels, with the main reason. Use the first status that applies, exactly as written, and never describe PR
+  state in other words: `🟣 **MERGED**` (give the post-merge results), `⚪ **CLOSED**`, `📝 **DRAFT**`, `⚔️ **CONFLICTS**`,
+  `🔴 **CHECKS FAILING**`, `🚀 **MERGING NOW**` (in the merge queue), `⏳ **CHECKS RUNNING**`, `💬 **NEEDS YOU**` (unresolved feedback
+  or an owner decision), or `🟢 **READY TO MERGE**` (checks green, mergeable, nothing open). Example:
 
   ```markdown
+  ---
+  
   🔴 **CHECKS FAILING** [#42 Session reminders](https://github.com/owner/repo/pull/42)
-
-  - 📄 Reminds readers to finish a reading session they left halfway.
-  - 👉 API typecheck fails on the reminder schedule; fixing now.
+  
+  🧭 Context: Reminds readers to finish a reading session they left halfway. API typecheck fails on the reminder schedule; fixing now.
+  
+  🎯 Confidence: 🟠 bad: the schedule logic changed late and has one test.
+  
+  ---
   ```
 
 - **Phone-ready media.** Share every image, video, page, and file so it opens on a phone: inline when supported, otherwise publish with
@@ -190,7 +222,7 @@ Reply freely; prefer visualisations, see $show-me.
   - **Close:** the next action, or "No next action needed", then a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`,
     `⏳ **AWAITING**` (on-track work waiting on a named external event), `🔴 **ACTION REQUIRED**`, or `⛔ **BLOCKED**`.
 - **DECISION-CONTEXT** — Start each question with 🔴. Give one line on today's behavior with a concrete example, then one line per lettered
-  option with its tradeoff, and mark your recommendation. Use user experience, not internal names/IDs; require no code reading or scrolling back.
+  option with its tradeoff, and mark your recommendation. Require no code reading or scrolling back.
 - **VISUAL-DECISIONS** — For decisions about what users see, show each option as an image, following **Phone-ready media**: a running-app
   screenshot for existing options, a rendered mockup otherwise. Text and ASCII sketches do not replace images.
 - **PROGRESS** — Only while work continues, at milestones: a task group finishes, the plan changes, work fails or blocks, or input is

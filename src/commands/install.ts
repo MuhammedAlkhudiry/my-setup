@@ -36,14 +36,26 @@ import { CODEX_RETIRED_TOP_LEVEL_KEYS } from "../../config/codex";
 import { CREDENTIALS_HOME_ENV, CREDENTIALS_ROOT } from "../../config/credentials";
 import { MCP_SERVERS, RETIRED_MCP_SERVERS } from "../../config/mcp";
 import { createOpencodeCliConfig, mergeOpencodeConfig } from "../../config/opencode";
-import { removeRetiredHooks } from "../../config/hooks";
+import { mergeClaudeHooks, removeRetiredHooks } from "../../config/hooks";
 import { renderCodexRules } from "../../config/permissions";
-import { codexManagedSectionValues, renderCodexMcpServersToml } from "../lib/codex-config";
+import {
+  codexManagedSectionValues,
+  codexManagedTopLevelValues,
+  CODEX_REMOTE_POOL_TOP_LEVEL_KEYS,
+  codexRemotePoolValues,
+  renderCodexMcpServersToml,
+} from "../lib/codex-config";
 import { replaceDirectory, ensureParentDir } from "../lib/fs";
 import { claudePoolPaths, installClaudePool, retireLegacyClaudeFiles } from "../lib/claude-pool";
 import { secureManagedCredentials } from "../lib/credentials";
-import { readDeviceProfile, selectRemoteSkillSources } from "../lib/device";
+import {
+  readDeviceProfile,
+  readRemoteClaudePoolUrl,
+  selectRemoteSkillSources,
+} from "../lib/device";
+import { installMergeQueue } from "../lib/merge-queue-install";
 import { installMacWatcher } from "../lib/mac-watcher";
+import { installRaycastProvider, raycastProvidersPath } from "../lib/raycast";
 import { print } from "../lib/print";
 import { assertCentralizedModels, renderManagedMarkdown } from "../lib/models";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
@@ -128,8 +140,11 @@ const SHARED_BIN_COMMANDS = [
   "html-artifact",
   "store-build",
   "device-queue",
+  "telegram-send",
   "heavy-run",
   "ci-runner",
+  "merge-queue",
+  "wait-for",
 ];
 
 // =============================================================================
@@ -404,7 +419,7 @@ async function mergeClaudeSettingsAsync(
   const merged = {
     ...existing,
     ...managedKeys,
-    hooks: removeRetiredHooks(existing.hooks),
+    hooks: mergeClaudeHooks(existing.hooks, ROOT_DIR),
     permissions: {
       ...(existing.permissions as Record<string, unknown> | undefined),
       allow: permissions.allow,
@@ -448,6 +463,22 @@ function removeTomlTopLevelKey(configToml: string, key: string): string {
   }
 
   lines.splice(keyIndex, 1);
+  return lines.join("\n");
+}
+
+function upsertTomlTopLevelKey(configToml: string, key: string, value: string): string {
+  const lines = configToml.split(/\r?\n/);
+  const firstSectionIndex = lines.findIndex((line) => /^\s*\[/.test(line));
+  const topLevelEnd = firstSectionIndex === -1 ? lines.length : firstSectionIndex;
+  const keyPattern = new RegExp(`^\\s*${key}\\s*=`);
+  const keyIndex = lines.slice(0, topLevelEnd).findIndex((line) => keyPattern.test(line));
+  const nextLine = `${key} = ${value}`;
+
+  if (keyIndex === -1) {
+    lines.unshift(nextLine);
+  } else {
+    lines[keyIndex] = nextLine;
+  }
   return lines.join("\n");
 }
 
@@ -496,11 +527,46 @@ async function mergeCodexConfigAsync(): Promise<void> {
   for (const key of CODEX_RETIRED_TOP_LEVEL_KEYS) {
     merged = removeTomlTopLevelKey(merged, key);
   }
+  for (const [key, value] of codexManagedTopLevelValues()) {
+    merged = upsertTomlTopLevelKey(merged, key, value);
+  }
   for (const [section, key, value] of codexManagedSectionValues()) {
     merged = upsertTomlSectionKey(merged, section, key, value);
   }
-  await writeFile(CODEX_PATHS.config, merged);
+
+  const remotePool = await readRemoteCodexPool();
+  if (remotePool) {
+    const { topLevel, sections } = codexRemotePoolValues(remotePool.url, remotePool.clientKey);
+    for (const [key, value] of topLevel) merged = upsertTomlTopLevelKey(merged, key, value);
+    for (const [section, key, value] of sections) {
+      merged = upsertTomlSectionKey(merged, section, key, value);
+    }
+  } else {
+    for (const key of CODEX_REMOTE_POOL_TOP_LEVEL_KEYS) merged = removeTomlTopLevelKey(merged, key);
+  }
+
+  // The remote pool's client key lands in the config, so keep it private.
+  await writeFile(CODEX_PATHS.config, merged, { mode: 0o600 });
+  await chmod(CODEX_PATHS.config, 0o600);
+  if (remotePool) await signInCodexToRemotePool(remotePool.clientKey);
   print.success("Codex config merged");
+}
+
+async function readRemoteCodexPool(): Promise<{ url: string; clientKey: string } | undefined> {
+  const url = readRemoteClaudePoolUrl(HOME);
+  if (!url) return undefined;
+
+  const clientKey = (await readFile(claudePoolPaths(HOME).clientKey, "utf-8")).trim();
+  return { url, clientKey };
+}
+
+// Codex sends its requests to the pool with the client key as its API key; the pool holds the ChatGPT sign-ins.
+async function signInCodexToRemotePool(clientKey: string): Promise<void> {
+  const status = await execa("codex", ["login", "status"], { reject: false, all: true });
+  if (status.exitCode === 0 && /API key/i.test(status.all ?? "")) return;
+
+  await execa("codex", ["login", "--with-api-key"], { input: clientKey });
+  print.success("Codex signed in to the remote pool");
 }
 
 async function mergeCodexMcpConfigAsync(profile: DeviceProfile): Promise<void> {
@@ -551,6 +617,17 @@ async function installShared(profile: DeviceProfile): Promise<void> {
 
     await installManagedSymlink(sourcePath, destinationPath, `${command} command`);
     await chmod(sourcePath, 0o755);
+  }
+
+  // The owner's Telegram session lives only in the main Mac's Keychain; Macs using a remote pool are spare Macs.
+  if (profile.name === "personal" && !readRemoteClaudePoolUrl(HOME)) {
+    const source = join(ROOT_DIR, "shell", "telegram-me.zsh");
+    await installManagedSymlink(
+      source,
+      join(SHARED_PATHS.binDir, "telegram-me"),
+      "telegram-me command",
+    );
+    await chmod(source, 0o755);
   }
 
   print.info(`Ensuring local command paths are in PATH via ${SHARED_PATHS.zshenv}...`);
@@ -958,8 +1035,10 @@ export async function install(): Promise<DeviceProfile> {
               print.success("Local Claude Pool proxy installed");
             }
           })
-          .then(() => installClaude(profile))
+          .then(() => Promise.all([installClaude(profile), installRaycastPoolProvider()]))
       : installClaude(profile),
+    profile.macWatcher &&
+      installMergeQueue({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }),
     profile.macWatcher &&
       installMacWatcher({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }).then(
         ({ memcapInstalled }) => {
@@ -986,6 +1065,7 @@ export async function install(): Promise<DeviceProfile> {
           }
         },
       ),
+    registerXcodeApps(),
     installT3Settings({ home: HOME }).then((result) => {
       if (!result.installed) {
         print.info("T3 Code is not installed; skipped its settings");
@@ -998,6 +1078,34 @@ export async function install(): Promise<DeviceProfile> {
   ]);
 
   return profile;
+}
+
+export const LSREGISTER =
+  "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister";
+export const XCODE_APP = "/Applications/Xcode.app";
+
+// Xcode 27 replaced Simulator.app with DeviceHub. An Xcode copied onto a spare Mac and never opened leaves DeviceHub unknown to
+// Launch Services, so Expo cannot open a simulator after installing a build.
+async function registerXcodeApps(): Promise<void> {
+  if (!existsSync(join(XCODE_APP, "Contents/Applications/DeviceHub.app"))) return;
+  if ((await execa("open", ["-Ra", "DeviceHub"], { reject: false })).exitCode === 0) return;
+
+  await execa(LSREGISTER, ["-f", "-R", XCODE_APP]);
+  print.success("Registered Xcode's DeviceHub with Launch Services");
+}
+
+// Only the Mac that runs the pool lists it in Raycast; Macs using a remote pool skip it.
+async function installRaycastPoolProvider(): Promise<void> {
+  if (readRemoteClaudePoolUrl(HOME)) return;
+
+  const { installed, changed } = await installRaycastProvider(HOME);
+  if (!installed) {
+    print.info("Raycast is not installed; skipped its Claude pool provider");
+  } else if (changed) {
+    print.success(`Raycast Claude pool provider written to ${raycastProvidersPath(HOME)}`);
+  } else {
+    print.success("Raycast Claude pool provider is current");
+  }
 }
 
 // Returns whether the RTK OpenCode plugin can be installed; a profile that requires RTK fails without it.

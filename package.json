@@ -16,6 +16,7 @@
     "test": "bun src/commands/check-cli.ts test"
   },
   "dependencies": {
+    "@mtcute/bun": "0.32.6",
     "cac": "^7.0.0",
     "execa": "^9.6.1",
     "picocolors": "^1.1.1",

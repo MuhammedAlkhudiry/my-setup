@@ -10,6 +10,8 @@ export function createClaudeManagedSettings(profile: DeviceProfile): {
   permissions: { allow: string[] };
   crossSessionInbound: "accept";
   cleanupPeriodDays: number;
+  effortLevel: "high";
+  modelSettings: Record<string, never>;
 } {
   return {
     permissions: { allow: createClaudePermissionAllowList(profile) },
@@ -17,5 +19,8 @@ export function createClaudeManagedSettings(profile: DeviceProfile): {
     crossSessionInbound: "accept",
     // Transcripts take about 0.6 GB a day; Claude deletes older ones at startup instead of after 30 days.
     cleanupPeriodDays: 14,
+    // Every model runs at high by default; per-model overrides (such as Opus at xhigh) are cleared.
+    effortLevel: "high",
+    modelSettings: {},
   };
 }

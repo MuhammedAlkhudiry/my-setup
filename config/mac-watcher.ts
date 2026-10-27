@@ -1,34 +1,30 @@
-import { MODELS } from "./models";
+import { DEVICE_POOL } from "./device-pool";
 
 /**
  * Mac resource watcher managed by my-setup.
  *
  * memcap does the minute-by-minute memory cleanup with fixed rules, and the CPU guard does the same for leftover agent
  * tooling that burns CPU or sits idle for a day. The watcher runs on a schedule with fixed rules and no AI: it prunes disk, takes a snapshot, and
- * raises threshold alerts that `doctor` shows until the numbers recover. `mac-watcher review` asks Codex to diagnose the
+ * raises threshold alerts that `doctor` shows until the numbers recover. `mac-watcher review` asks Claude to diagnose the
  * current snapshot on demand; it never kills processes or changes stored state.
  */
 export const MAC_WATCHER = {
   label: "com.muhammed.mac-watcher",
   guardLabel: "com.muhammed.mac-watcher-guard",
-  /** Local times the watcher wakes every day; quiet hours keep one overnight run for agents working at night. */
-  schedule: [
-    { hour: 3, minute: 7 },
-    { hour: 9, minute: 7 },
-    { hour: 12, minute: 7 },
-    { hour: 15, minute: 7 },
-    { hour: 18, minute: 7 },
-    { hour: 21, minute: 7 },
-  ],
+  /**
+   * Local times the watcher wakes every day: hourly, so idle worktrees and their installed packages go about an hour
+   * after work stops instead of piling up between sparse runs. launchd skips a wake while the last run is still going.
+   */
+  schedule: Array.from({ length: 24 }, (_, hour) => ({ hour, minute: 7 })),
   /**
    * launchd skips a scheduled run while the last one is still going, so one stuck run cancels every cleanup after it.
    * The guard stops a run still going after this long and raises an alert naming the step it was stuck in.
    */
   runTimeoutMinutes: 60,
   /** Used only by the manual `review` command. */
-  codex: {
-    model: MODELS.codex.review.id,
-    reasoningEffort: "low",
+  claude: {
+    model: "sonnet",
+    effort: "low",
     timeoutMs: 5 * 60 * 1000,
   },
   /** Crossing any of these opens an alert. */
@@ -113,11 +109,13 @@ export const MAC_WATCHER = {
       },
     },
     /**
-     * iOS simulators and Android emulators. Agents create one for most device tasks, and each keeps its installed apps and
-     * data, 1 to 4 GB. One that is not running and was unused for `days` is deleted; agents create a fresh one when they
-     * need it. Names matching `keep`, such as each project's main device, always stay.
+     * iOS simulators and Android emulators, 1 to 4 GB each with installed apps and data. Device-pool members always stay,
+     * since agents lease them warm; any other device not running and unused for `days` is deleted.
      */
-    devices: { days: 1, keep: /(^|[\s_-])main$/i },
+    devices: {
+      days: 1,
+      keep: new RegExp(`^(${DEVICE_POOL.map((member) => RegExp.escape(member.name)).join("|")})$`),
+    },
     /** Files older than `days` move to the same relative path under `archiveRoot/to`. */
     archiveFiles: [
       { path: ".codex/sessions", days: 14, to: "codex/sessions" },
@@ -134,7 +132,8 @@ export const MAC_WATCHER = {
      * Linked worktrees of active projects and my-setup are removed once unlocked, unused, and idle. Finished PR branches
      * go after `landed` idle days and the four-hour PR/commit/file grace period, even with unpublished changes, only after
      * a verified patch, untracked-file copy, and self-contained commit bundle reach the mounted archive SSD. Branches stay.
-     * Clean detached heads go after 24 hours without git or file activity; ancestry alone never proves branch work finished.
+     * Clean detached heads, and clean branches wholly on the default branch without an open PR, go after 24 hours without
+     * git or file activity. The merge queue also removes a merged PR's clean worktree at its merged head right away.
      * Unlanded branches without an open PR expire after `thread` idle days when bound to a settled or idle T3 thread,
      * or `abandoned` idle days without a bound thread. Git activity or a changed file restarts the idle window. A running
      * T3 thread protects its checkout; T3 recreates a removed checkout from its kept branch if the thread resumes.
@@ -144,14 +143,15 @@ export const MAC_WATCHER = {
     worktreeIdleDays: { landed: 0, abandoned: 7, thread: 3 },
     agentWorktreeDirs: ["/.claude/worktrees/", "/.codex/worktrees/", "/.t3/worktrees/"],
     /**
-     * Installed packages and build output in every kept agent worktree, including open PRs and uncommitted work, go after
-     * `idleHours` without an open file, a running bound T3 thread, git activity, or any changed file in the checkout.
+     * Installed packages and build output in idle agent worktrees and temporary checkouts, including open PRs and
+     * uncommitted work, go after `idleHours` without an open file, process cwd, or changed file in the checkout. Device
+     * leases and heavy runs protect their checkout through their process's cwd; a lease with an unknown holder blocks all.
      * Resuming work reinstalls dependencies and regenerates builds. Only git-ignored folders matching `ignored` or
      * `dependencies.dir` count; any tracked descendant protects its whole folder. Generated native projects, build output,
      * node_modules, and vendor are cleared together. Tracked files are never deleted.
      */
     nativeBuilds: {
-      idleHours: 24,
+      idleHours: 1,
       ignored:
         /(^|\/)(android|ios|build|dist|\.next|\.nuxt|\.output|\.turbo|\.expo)\/$|\/(android|ios)\/(\.cxx|\.gradle|Pods)\/$/,
       dependencies: { dir: /(^|\/)(node_modules|vendor)\/$/ },

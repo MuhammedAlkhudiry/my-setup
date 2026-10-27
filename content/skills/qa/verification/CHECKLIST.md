@@ -6,7 +6,7 @@ Keep `docs/runbooks/checklist.md` to about 30 lines of confirmed project command
 # Before reporting: the areas this branch changed, in parallel
 heavy-run --class checks -- mise run check
 
-# After the final PR push: CI-equivalent checks and a GitHub signoff status
+# After the final PR push: changed-area checks and a GitHub signoff status
 heavy-run --class checks -- mise run signoff
 
 # Before a release: every area
@@ -28,7 +28,10 @@ mise run api:check
   and an iterate command per test runner, using impact analysis when available, such as Pest `--tia` or Jest `--findRelatedTests`.
 - Limit PR CI to changed areas. Exclude end-to-end journeys, mutation testing, coverage, and paid evals.
 - When local sign-off replaces PR CI, its command must refuse uncommitted/unpushed work, run CI-equivalent checks for changed areas, and post a
-  green/red `signoff` commit status. Retain main-branch cloud CI for platform differences, such as Linux filename case sensitivity.
+  green/red `signoff` commit status.
+- Sign-off runs only the stages a changed path can affect, including dependents such as generated clients, shared fixtures, and build inputs.
+  Unknown paths, runner scripts, and tool versions select every stage. List the path-to-stage mapping in the checklist. `--full` runs every
+  stage; merge-queue batch verification always passes it.
 - Gate/sign-off may reuse results only for identical code, installed dependencies, and CI mode; provide a force-rerun flag. Run generators consumed
   by checks whenever anything else runs. The full command never skips checks.
 - Isolate test databases, ports, and caches per worktree so concurrent commands cannot reuse or drop each other's data.

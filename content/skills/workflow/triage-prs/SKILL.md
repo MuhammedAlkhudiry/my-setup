@@ -17,7 +17,20 @@ description: Use to triage open pull requests or keep them mergeable.
 
 ## Babysit
 
-After triage, run only when asked to babysit PRs or keep them mergeable. Never merge; the user merges.
+After triage, run only when asked to babysit PRs or keep them mergeable.
+
+<!-- profile:personal -->
+
+For approved PRs with green sign-off, follow $prs: enqueue with `merge-queue add`, then stop. Do not refresh queued PRs solely because
+main moved; the queue tests their combined candidate and merges main into a queued PR that falls behind. Use the steps below for
+conflicts the queue reports by file, or checks before enqueue.
+
+<!-- /profile -->
+<!-- profile:work -->
+
+Never merge; the user merges.
+
+<!-- /profile -->
 
 1. Parents first, check owner holds, review feedback, drafts, and checkout ownership. In a clean PR worktree, run
    `bun <skill-dir>/scripts/pr-refresh.ts <pr-url> --repo <checkout> --expected-head <full-pr-head-sha> --json`;

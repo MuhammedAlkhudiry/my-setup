@@ -17,8 +17,6 @@ export function macWatcherPaths(home: string) {
     state: join(stateDir, "state.json"),
     alerts: join(stateDir, "alerts.json"),
     lastSnapshot: join(stateDir, "last-snapshot.json"),
-    outputSchema: join(stateDir, "codex-output-schema.json"),
-    codexOutput: join(stateDir, "codex-last-output.json"),
     guardState: join(stateDir, "guard.json"),
     guardLog: join(stateDir, "guard.log"),
     storagePrune: join(stateDir, "storage-prune.json"),
@@ -58,7 +56,7 @@ export const reviewSchema = z.object({
 });
 export type Review = z.infer<typeof reviewSchema>;
 
-/** JSON Schema handed to `codex exec --output-schema`; strict mode needs every key required and no extras. */
+/** JSON Schema handed to `claude -p --json-schema`; every key is required and no extras are allowed. */
 export const REVIEW_JSON_SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -82,6 +80,45 @@ export const REVIEW_JSON_SCHEMA = {
     },
   },
 } as const;
+
+/**
+ * Unattended, read-only `claude -p` for `review`: no tools, no user customizations or MCP servers, no saved session,
+ * and the diagnosis returned as structured JSON on stdout. The prompt arrives on stdin.
+ */
+export function reviewCommandArgs(): string[] {
+  const { claude } = MAC_WATCHER;
+  return [
+    "-p",
+    "--permission-mode",
+    "bypassPermissions",
+    "--tools",
+    "",
+    "--safe-mode",
+    "--strict-mcp-config",
+    "--no-session-persistence",
+    "--model",
+    claude.model,
+    "--effort",
+    claude.effort,
+    "--output-format",
+    "json",
+    "--json-schema",
+    JSON.stringify(REVIEW_JSON_SCHEMA),
+  ];
+}
+
+const reviewResultSchema = z.object({
+  is_error: z.boolean().optional(),
+  result: z.string().optional(),
+  structured_output: z.unknown(),
+});
+
+/** Reads the diagnosis out of `claude -p --output-format json`; an error result throws its message. */
+export function parseReviewOutput(stdout: string): Review {
+  const output = reviewResultSchema.parse(JSON.parse(stdout));
+  if (output.is_error) throw new Error(`Claude review failed: ${output.result ?? "unknown error"}`);
+  return reviewSchema.parse(output.structured_output);
+}
 
 const alertSchema = observedAlertSchema.extend({
   status: z.enum(["open", "resolved"]),

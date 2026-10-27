@@ -19,6 +19,7 @@ import { execa } from "execa";
 
 import { CLAUDE_POOL } from "../../config/claude-pool";
 import { MODELS } from "../../config/models";
+import { readRemoteClaudePoolUrl } from "./device";
 
 export function claudePoolPaths(home: string) {
   const proxyDir = join(home, ".cli-proxy-api");
@@ -203,7 +204,9 @@ export function renderClaudePoolLaunchAgent(paths: PoolPaths): string {
   ].join("\n");
 }
 
-type SettingsObject = Record<string, unknown> & { env?: Record<string, unknown> };
+type SettingsObject = Record<string, unknown> & {
+  env?: Record<string, unknown>;
+};
 
 async function readSettingsObject(path: string): Promise<SettingsObject> {
   const content = await readOptional(path);
@@ -237,6 +240,44 @@ export async function retireLegacyClaudeFiles(home: string): Promise<string[]> {
   return removed;
 }
 
+/** Points Claude Code at a pool through the pool directory, the only Claude config; installClaude merges the managed keys into it. */
+async function writeClaudePoolSettings(paths: PoolPaths, baseUrl: string, clientKey: string) {
+  const poolSettings = await readSettingsObject(paths.claudeSettings);
+  const settings: Record<string, unknown> = {
+    ...poolSettings,
+    env: {
+      ...poolSettings.env,
+      ANTHROPIC_BASE_URL: baseUrl,
+      ANTHROPIC_AUTH_TOKEN: clientKey,
+      ANTHROPIC_API_KEY: "",
+    },
+  };
+  await privateFile(paths.claudeSettings, `${JSON.stringify(settings, null, 2)}\n`);
+}
+
+/** Uses another Mac's pool: no local proxy, accounts, or launch agent, only its client key copied to this Mac. */
+async function useRemoteClaudePool(paths: PoolPaths, url: string): Promise<void> {
+  await privateDirectory(dirname(paths.clientKey));
+  await privateDirectory(paths.claudeDir);
+  await assertRegularFile(paths.clientKey);
+  const clientKey = (await readOptional(paths.clientKey))?.trim();
+  if (!clientKey) {
+    throw new Error(
+      `Copy the pool Mac's ${paths.clientKey} to this Mac to use the Claude Pool at ${url}`,
+    );
+  }
+  await chmod(paths.clientKey, 0o600);
+  await writeClaudePoolSettings(paths, url, clientKey);
+
+  const uid = process.getuid?.();
+  if (uid !== undefined) {
+    await execa("launchctl", ["bootout", `gui/${uid}/${CLAUDE_POOL.label}`], {
+      reject: false,
+    });
+  }
+  await rm(paths.launchAgent, { force: true });
+}
+
 export async function prepareClaudePoolFiles(home: string): Promise<{ plistChanged: boolean }> {
   const paths = claudePoolPaths(home);
   await privateDirectory(dirname(paths.config));
@@ -249,19 +290,7 @@ export async function prepareClaudePoolFiles(home: string): Promise<{ plistChang
   const managementKey = await localKey(paths.managementKey);
   const hash = await managementHash(paths.config, managementKey);
   await privateFile(paths.config, renderClaudePoolConfig(paths, clientKey, hash));
-
-  // The pool directory is the only Claude config; installClaude merges the managed keys into these settings.
-  const poolSettings = await readSettingsObject(paths.claudeSettings);
-  const settings: Record<string, unknown> = {
-    ...poolSettings,
-    env: {
-      ...poolSettings.env,
-      ANTHROPIC_BASE_URL: `http://127.0.0.1:${CLAUDE_POOL.port}`,
-      ANTHROPIC_AUTH_TOKEN: clientKey,
-      ANTHROPIC_API_KEY: "",
-    },
-  };
-  await privateFile(paths.claudeSettings, `${JSON.stringify(settings, null, 2)}\n`);
+  await writeClaudePoolSettings(paths, `http://127.0.0.1:${CLAUDE_POOL.port}`, clientKey);
 
   const plistChanged = await privateFile(paths.launchAgent, renderClaudePoolLaunchAgent(paths));
   for (const log of [paths.stdoutLog, paths.stderrLog]) {
@@ -318,13 +347,21 @@ export async function ensureClaudePoolBinary(home: string): Promise<boolean> {
 }
 
 export async function installClaudePool(home: string): Promise<{ restartDeferred: boolean }> {
+  const remoteUrl = readRemoteClaudePoolUrl(home);
+  if (remoteUrl) {
+    await useRemoteClaudePool(claudePoolPaths(home), remoteUrl);
+    return { restartDeferred: false };
+  }
+
   const binaryChanged = await ensureClaudePoolBinary(home);
   const { plistChanged } = await prepareClaudePoolFiles(home);
   const paths = claudePoolPaths(home);
   const uid = process.getuid?.();
   if (uid === undefined) throw new Error("Claude Pool launch agent requires macOS");
   const service = `gui/${uid}/${CLAUDE_POOL.label}`;
-  const current = await execa("launchctl", ["print", service], { reject: false });
+  const current = await execa("launchctl", ["print", service], {
+    reject: false,
+  });
   if (current.exitCode !== 0) {
     await execa("launchctl", ["bootstrap", `gui/${uid}`, paths.launchAgent]);
     return { restartDeferred: false };

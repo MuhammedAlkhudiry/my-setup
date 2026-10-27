@@ -66,3 +66,33 @@ The local CLIProxyAPI pool records each Claude account's limits from Anthropic's
 `GET http://127.0.0.1:8317/v0/management/auth-files` and the bearer key in `~/.cli-proxy-api/management-key`: each file's
 `model_quotas.<model>.signals` holds `Anthropic-Ratelimit-Unified-{5h,7d}-{Utilization,Reset}` and `-Status`, as of `observed_at`. An
 idle account's reading goes stale until its next request.
+
+## Telegram ops bot
+
+Use `telegram-send` with a plain-text message on stdin; it sends one message to the owner. Credentials stay in
+`$SERVICE_CREDENTIALS_HOME/telegram/ops-bot.json` (`token`, `owner_chat_id`). Use `telegram-send webhook check` for a read-only
+health check. It requires the T3 relay host, no delivery errors within 24 hours, and at most five pending updates.
+When T3 regenerates the webhook URL, obtain it from `list_scheduled_tasks` and run `telegram-send webhook set <url>`;
+never print the full URL. Pending updates are preserved. Do not use getUpdates polling while the webhook is active.
+
+<!-- profile:personal -->
+
+## Telegram as the owner
+
+`telegram-me` uses the owner's own Telegram account on the main Mac only; its session stays in that Mac's Keychain. Reading needs no
+approval: `telegram-me chats [--search <text>]` lists id, type, and title, and `telegram-me read <chat> [--limit n]` prints recent
+messages. `<chat>` is an id, an exact title, or `me` for Saved Messages.
+
+Writing to a person or group as the owner needs their yes to the exact recipient and text, every time:
+
+1. Pipe the text into `telegram-me draft <chat>`. It prints the draft id, recipient, and text, and sends the owner a preview through the
+   ops bot.
+2. Show the owner the same recipient and text, and say they approve by replying "yes" to that Telegram preview.
+3. After their reply, run `telegram-me approve <id>`, then `telegram-me send <id>`. Both read the reply from Telegram, so a yes said
+   elsewhere, an edited draft, or an edited preview never sends; draft again instead.
+
+Saved Messages need no approval. Never read the session from the Keychain or send outside `telegram-me`. When the session is missing,
+`telegram-me login` asks for the api_id, api_hash, phone number, login code, and two-step password in native macOS prompts on the main Mac,
+so the owner must be at it; never ask for them in chat.
+
+<!-- /profile -->

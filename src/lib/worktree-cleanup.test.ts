@@ -22,7 +22,6 @@ import {
   parseCleanupOpenFiles,
   parseCleanupWorktrees,
   readCleanupThreads,
-  WORKTREE_SIZE_WARNING_BYTES,
   WORKTREE_CLEANUP_GRACE_MS,
   type CleanupPr,
   type CleanupServices,
@@ -707,28 +706,32 @@ test("NUL-delimited paths preserve whitespace, locked flags and open-file proces
   expect([...deleted.get(join(directory, "deleted-file"))!]).toEqual([789]);
 });
 
-test("doctor uses recent cached sizes and falls back to counts for old, missing or corrupt reports", async () => {
+test("doctor warns only when a recent dry run left removable or unmeasured work", async () => {
   const home = temporary();
   const now = Date.parse("2026-10-13T12:00:00Z");
-  expect(await cleanupDoctorHint(home, 0, now)).toBeNull();
-  expect(await cleanupDoctorHint(home, 6, now)).toContain("6 registered T3 worktrees");
+  expect(await cleanupDoctorHint(home, now)).toBeNull();
   const path = cleanupCachePath(home);
   mkdirSync(join(home, ".local/state/my-setup"), { recursive: true });
   const cache = {
     completedAt: new Date(now).toISOString(),
-    t3Worktrees: 6,
-    t3Bytes: 32 * 1024 ** 3,
+    planId: "1fb786d5-077b-455d-83e5-6f2b617df9f8",
+    removableWorktrees: 2,
+    removableBytes: 3 * 1024 ** 3,
     unmeasuredWorktrees: 0,
     errors: 0,
   };
   writeFileSync(path, JSON.stringify(cache));
 
-  expect(await cleanupDoctorHint(home, 6, now)).toContain("32.0 GiB");
-  expect(await cleanupDoctorHint(home, 6, now + 25 * 60 * 60 * 1000)).toContain("stale");
-  writeFileSync(path, JSON.stringify({ ...cache, t3Bytes: WORKTREE_SIZE_WARNING_BYTES - 1 }));
-  expect(await cleanupDoctorHint(home, 6, now)).toBeNull();
+  expect(await cleanupDoctorHint(home, now)).toContain(
+    "can remove 2 finished worktrees (3.0 GiB); review it, then run worktree-cleanup --apply 1fb786d5",
+  );
+  expect(await cleanupDoctorHint(home, now + 25 * 60 * 60 * 1000)).toBeNull();
+  writeFileSync(path, JSON.stringify({ ...cache, removableWorktrees: 0, removableBytes: 0 }));
+  expect(await cleanupDoctorHint(home, now)).toBeNull();
+  writeFileSync(path, JSON.stringify({ ...cache, errors: 1 }));
+  expect(await cleanupDoctorHint(home, now)).toContain("incomplete");
   writeFileSync(path, "invalid JSON");
-  expect(await cleanupDoctorHint(home, 6, now)).toContain("no recent size report");
+  expect(await cleanupDoctorHint(home, now)).toBeNull();
   writeFileSync(path, "x".repeat(4097));
-  expect(await cleanupDoctorHint(home, 6, now)).toContain("no recent size report");
+  expect(await cleanupDoctorHint(home, now)).toBeNull();
 });

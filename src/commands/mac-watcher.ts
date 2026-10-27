@@ -7,12 +7,12 @@ import { parseMemoryPressure } from "../lib/host-capacity";
  * LaunchAgent; `status`, `resolve`, `prune`, and `review` are for people.
  *
  * Each run frees disk with the fixed storage rules, takes a snapshot, and opens or closes threshold alerts, all without AI.
- * `review` asks Codex for a read-only diagnosis of a fresh snapshot and stores nothing.
+ * `review` asks Claude for a read-only diagnosis of a fresh snapshot and stores nothing.
  */
 
 import { agentOutput } from "../lib/agent-output";
 import { existsSync, readFileSync, statfsSync, writeFileSync } from "node:fs";
-import { appendFile, open, rm } from "node:fs/promises";
+import { appendFile, mkdir, open, rm } from "node:fs/promises";
 import { cpus, loadavg } from "node:os";
 import { join } from "node:path";
 
@@ -36,7 +36,6 @@ import {
 import {
   type Alert,
   type Review,
-  REVIEW_JSON_SCHEMA,
   collectSystemDaemons,
   fileAgeSeconds,
   isLaunchAgentLoaded,
@@ -46,8 +45,9 @@ import {
   parseListeners,
   pruneAlerts,
   readAlerts,
+  parseReviewOutput,
   readState,
-  reviewSchema,
+  reviewCommandArgs,
   sharedPorts,
   thresholdAlerts,
   writeJson,
@@ -293,10 +293,10 @@ function memcapHealthy(snapshot: Snapshot): boolean {
 }
 
 // =============================================================================
-// Codex review
+// Claude review
 // =============================================================================
 
-async function reviewWithCodex(snapshot: Snapshot, openAlerts: Alert[]): Promise<Review> {
+async function reviewWithClaude(snapshot: Snapshot, openAlerts: Alert[]): Promise<Review> {
   const instructions = readFileSync(join(ROOT_DIR, "config/mac-watcher-prompt.md"), "utf8");
   const prompt = [
     instructions,
@@ -320,34 +320,16 @@ async function reviewWithCodex(snapshot: Snapshot, openAlerts: Alert[]): Promise
     JSON.stringify(snapshot, null, 2),
   ].join("\n\n");
 
-  await writeJson(paths.outputSchema, REVIEW_JSON_SCHEMA);
-  const { codex } = MAC_WATCHER;
-  const result = await timedCommand(
-    "codex",
-    [
-      "exec",
-      "--ephemeral",
-      "--skip-git-repo-check",
-      "--ignore-user-config",
-      "--sandbox",
-      "read-only",
-      "--model",
-      codex.model,
-      "--config",
-      `model_reasoning_effort="${codex.reasoningEffort}"`,
-      "--output-schema",
-      paths.outputSchema,
-      "--output-last-message",
-      paths.codexOutput,
-      "--cd",
-      paths.stateDir,
-      "-",
-    ],
-    { input: prompt, timeout: codex.timeoutMs, stdout: "ignore", stderr: "pipe" },
-  );
-  if (result.failed)
-    throw new Error(`Codex review failed: ${result.timedOut ? "timed out" : result.stderr}`);
-  return reviewSchema.parse(JSON.parse(readFileSync(paths.codexOutput, "utf8")));
+  await mkdir(paths.stateDir, { recursive: true });
+  const result = await timedCommand("claude", reviewCommandArgs(), {
+    cwd: paths.stateDir,
+    input: prompt,
+    timeout: MAC_WATCHER.claude.timeoutMs,
+  });
+  if (result.timedOut) throw new Error("Claude review failed: timed out");
+  if (result.failed && !result.stdout.trim())
+    throw new Error(`Claude review failed: ${result.stderr || `exit ${result.exitCode}`}`);
+  return parseReviewOutput(result.stdout);
 }
 
 async function notify(alert: Alert): Promise<void> {
@@ -445,12 +427,12 @@ function readRunStep(pid: number): z.infer<typeof runStepSchema> | undefined {
   }
 }
 
-/** On-demand Codex diagnosis of a fresh snapshot; prints its findings and leaves alerts and offsets untouched. */
+/** On-demand Claude diagnosis of a fresh snapshot; prints its findings and leaves alerts and offsets untouched. */
 async function review(): Promise<void> {
   const state = readState(paths);
   const { snapshot } = await collectSnapshot(state.memcapLogOffset, state.guardLogOffset);
   const open = readAlerts(paths).filter((alert) => alert.status === "open");
-  const result = await reviewWithCodex(snapshot, open);
+  const result = await reviewWithClaude(snapshot, open);
 
   console.log(result.runNote);
   for (const alert of result.alerts) {
