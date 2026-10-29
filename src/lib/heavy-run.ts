@@ -23,6 +23,7 @@ import {
   releaseHostCapacity,
   type HeavyClass,
   type HostJob,
+  readCpuIdle,
   readMemoryPressure,
   type MemoryPressure,
 } from "./host-capacity";
@@ -40,24 +41,56 @@ import { heavyRequester } from "./heavy-requester";
 
 export const LEGACY_HEAVY_LOCK = "/tmp/agents-heavy.lock";
 // Keep the escape interval below the CLI's default nine-minute queue timeout.
-export const HEAVY_LOAD_POLICY = { threshold: cpus().length * 6, maxWaitMs: 5 * 60_000 };
+export const HEAVY_LOAD_POLICY = {
+  threshold: cpus().length * 6,
+  minCpuIdle: 10,
+  maxWaitMs: 5 * 60_000,
+};
+
+const readLoadAverage = () => loadavg()[0]!;
+
+/** Samples CPU idle outside the queue lock, and only when load is high enough to need it. */
+export function heavyCpuIdle(readLoad = readLoadAverage, readIdle = readCpuIdle) {
+  return readLoad() > HEAVY_LOAD_POLICY.threshold ? readIdle() : undefined;
+}
 
 /** Admission only: overdue jobs drain singly while responsiveness is at risk. */
 export function heavyLoadAdmission(
   job: HostJob,
   active: HostJob[],
   now: number,
-  readLoad = () => loadavg()[0]!,
+  readLoad = readLoadAverage,
   readPressure: () => MemoryPressure = readMemoryPressure,
+  readIdle: () => number | undefined = readCpuIdle,
 ) {
   const load = readLoad();
   const memoryPressure = readPressure();
-  const overloaded = memoryPressure === "critical" || load > HEAVY_LOAD_POLICY.threshold;
+  // macOS load also counts processes stuck in I/O or idle wait, so it holds only on a busy CPU.
+  const cpuIdle = load > HEAVY_LOAD_POLICY.threshold ? readIdle() : undefined;
+  const cpuBusy = cpuIdle !== undefined && cpuIdle < HEAVY_LOAD_POLICY.minCpuIdle;
+  const overloaded = memoryPressure === "critical" || cpuBusy;
   const held =
     overloaded && (now - job.queuedAt < HEAVY_LOAD_POLICY.maxWaitMs || active.length > 0);
 
-  return { load, threshold: HEAVY_LOAD_POLICY.threshold, memoryPressure, held };
+  return { load, threshold: HEAVY_LOAD_POLICY.threshold, cpuIdle, memoryPressure, held };
 }
+
+export function describeLoadHold({
+  load,
+  threshold,
+  cpuIdle,
+  memoryPressure,
+}: ReturnType<typeof heavyLoadAdmission>) {
+  return [
+    memoryPressure === "critical" && "critical memory pressure",
+    cpuIdle !== undefined &&
+      cpuIdle < HEAVY_LOAD_POLICY.minCpuIdle &&
+      `load ${load.toFixed(1)} > ${threshold} with ${Math.round(cpuIdle)}% CPU idle`,
+  ]
+    .filter(Boolean)
+    .join("; ");
+}
+
 const HISTORY_RUNS = 2000;
 const workerPath = fileURLToPath(new URL("../commands/heavy-run-worker.ts", import.meta.url));
 const cliPath = fileURLToPath(new URL("../commands/heavy-run-cli.ts", import.meta.url));
@@ -193,6 +226,7 @@ export interface HeavyOptions {
   /** Injectable host metric; never persisted in the shared queue. */
   readLoad?: () => number;
   readPressure?: () => MemoryPressure;
+  readCpuIdle?: () => number | undefined;
   /** Only for explicitly opted-in runners that reserve each heavy step. */
   deferred?: boolean;
   /** Explicit cap for a non-deferred gate or build; ordinary checks cannot exceed their 90-second cap. */
@@ -294,6 +328,7 @@ export interface HeavyContext {
   legacyTarget: string;
   readLoad?: () => number;
   readPressure?: () => MemoryPressure;
+  readCpuIdle?: () => number | undefined;
 }
 
 const legacyScheduler: HeavyScheduler = {
@@ -381,6 +416,7 @@ export async function runHeavyCommand(
     legacyTarget,
     readLoad: options.readLoad,
     readPressure: options.readPressure,
+    readCpuIdle: options.readCpuIdle,
   };
   const logFd = openSync(log, "w", 0o600);
   const queuedAt = Date.now();

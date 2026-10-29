@@ -37,4 +37,4 @@ export const T3_CLIENT_SETTINGS = {
 } as const;
 
 // `config/t3-theme.json` is published under this id and set as each device's theme.
-export const T3_THEME_ID = "codex";
+export const T3_THEME_ID = "phpstorm-islands-dark";

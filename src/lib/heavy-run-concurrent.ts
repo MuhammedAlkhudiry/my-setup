@@ -31,6 +31,7 @@ import {
 import {
   runHeavyCommand as runScheduledCommand,
   LEGACY_HEAVY_LOCK,
+  heavyCpuIdle,
   heavyLoadAdmission,
   type HeavyScheduler,
   type HeavyOptions,
@@ -257,8 +258,13 @@ export async function withConcurrentProcessState<T>(
 const scheduler: HeavyScheduler = {
   capacity: HEAVY_CAPACITY,
   express: true,
-  async acquire(job, { directory, legacyLockPath, readLoad, readPressure }, cancelled) {
+  async acquire(
+    job,
+    { directory, legacyLockPath, readLoad, readPressure, readCpuIdle },
+    cancelled,
+  ) {
     const memoryPressure = (readPressure ?? readMemoryPressure)();
+    const cpuIdle = heavyCpuIdle(readLoad, readCpuIdle);
     return withConcurrentProcessState(
       (state) => {
         if (cancelled()) return false;
@@ -277,7 +283,14 @@ const scheduler: HeavyScheduler = {
             legacy ? [legacy] : [],
             state.legacy.host.waiting,
             (ticket, active) =>
-              !heavyLoadAdmission(ticket, active, Date.now(), readLoad, () => memoryPressure).held,
+              !heavyLoadAdmission(
+                ticket,
+                active,
+                Date.now(),
+                readLoad,
+                () => memoryPressure,
+                () => cpuIdle,
+              ).held,
           )
         )
           return false;
@@ -380,8 +393,10 @@ export async function heavyStatus(
   legacyLockPath = LEGACY_HEAVY_LOCK,
   readLoad?: () => number,
   readPressure = readMemoryPressure,
+  readCpuIdle?: () => number | undefined,
 ) {
   const memoryPressure = readPressure();
+  const cpuIdle = heavyCpuIdle(readLoad, readCpuIdle);
   if (directory === queueDirectory() && legacyLockPath === LEGACY_HEAVY_LOCK)
     startCompatibilityDispatcher(directory, legacyLockPath);
   return withConcurrentProcessState(
@@ -408,6 +423,7 @@ export async function heavyStatus(
             Date.now(),
             readLoad,
             () => memoryPressure,
+            () => cpuIdle,
           ),
         })),
       ],

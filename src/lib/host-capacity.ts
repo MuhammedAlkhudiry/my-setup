@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { availableParallelism } from "node:os";
 import type { QueueState } from "./device-queue";
 import {
   groupIsAlive,
@@ -34,6 +35,18 @@ export function readMemoryPressure(): MemoryPressure {
   return known === "unknown"
     ? parseMemoryPressure(level, probe("/usr/bin/memory_pressure", []))
     : known;
+}
+
+/** CPU idle from the decayed per-process averages `ps -A -o %cpu=` reports. */
+export function parseCpuIdle(report: string, cores = availableParallelism()): number {
+  const busy = report.split("\n").reduce((total, line) => total + (Number(line.trim()) || 0), 0);
+  return Math.max(0, 100 - busy / cores);
+}
+
+export function readCpuIdle(): number | undefined {
+  if (process.platform === "win32") return undefined;
+  const result = spawnSync("ps", ["-A", "-o", "%cpu="], { encoding: "utf8", timeout: 1000 });
+  return result.status === 0 ? parseCpuIdle(result.stdout) : undefined;
 }
 
 export interface HostJob {

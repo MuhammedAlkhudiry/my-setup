@@ -16,7 +16,7 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
-import { availableParallelism, homedir } from "node:os";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { cac } from "cac";
 
@@ -40,6 +40,7 @@ import {
 } from "../lib/device-queue";
 
 import { agentOutput } from "../lib/agent-output";
+import { parseCpuIdle } from "../lib/host-capacity";
 import { queueDirectory, readQueueState, withQueueState as withState } from "../lib/queue-store";
 import { timedCommand } from "../lib/timed-command";
 
@@ -236,13 +237,11 @@ async function shutDownAll(shutdowns: Shutdowns) {
 
 /** CPU idle from the decayed per-process averages `ps` reports, and free memory as macOS memory_pressure reports it. */
 async function sampleHeadroom(): Promise<Pick<Headroom, "cpuIdle" | "memoryFree">> {
-  const busy = (await run("ps", ["-A", "-o", "%cpu="], true))
-    .split("\n")
-    .reduce((total, line) => total + (Number(line.trim()) || 0), 0);
+  const cpu = await run("ps", ["-A", "-o", "%cpu="], true);
   const free = (await run("memory_pressure", [], true)).match(/free percentage:\s*(\d+)%/)?.[1];
 
   return {
-    cpuIdle: Math.max(0, 100 - busy / availableParallelism()),
+    cpuIdle: parseCpuIdle(cpu),
     memoryFree: free === undefined ? 0 : Number(free),
   };
 }

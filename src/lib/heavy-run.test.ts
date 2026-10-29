@@ -21,12 +21,15 @@ import { fileURLToPath } from "node:url";
 import { emptyQueueState } from "./device-queue";
 import {
   claimHostCapacity,
+  parseCpuIdle,
   reapHostCapacity,
   type HostJob,
+  type MemoryPressure,
   type HeavyClass,
 } from "./host-capacity";
 import {
   heavyHistoryPath,
+  describeLoadHold,
   heavyLoadAdmission,
   HEAVY_LOAD_POLICY,
   runHeavyCommand,
@@ -152,7 +155,7 @@ function fixture(concurrent = false, load = 0) {
       import { readFileSync } from "node:fs";
       const abort = new AbortController();
       process.on("SIGTERM", ()=>abort.abort());
-      const receipt = await runHeavyCommand(${JSON.stringify({ argv: [process.execPath, "-e", source], class: className, waitSeconds, owner, requester: owner, directory, legacyLockPath, deferred, ...(runtimeLimitSeconds === undefined ? {} : { runtimeLimitSeconds }) }).slice(0, -1)}, waitForCapacityRetry: async (_timeout, _signal, onWaiting) => { onWaiting?.(); await Bun.sleep(10); }, readPressure: () => "normal", readLoad: () => Number(readFileSync(${JSON.stringify(join(root, "load"))}, "utf8")), signal: abort.signal, ${deadline ? `scheduleRuntimeDeadline: (expire, milliseconds) => { if(milliseconds !== ${(runtimeLimitSeconds ?? 90) * 1000}) throw new Error("Wrong deadline"); process.stdin.once("data", expire); return () => { process.stdin.removeListener("data", expire); process.stdin.pause(); }; },` : ""} onQueued: () => console.log(JSON.stringify({queued: true})) });
+      const receipt = await runHeavyCommand(${JSON.stringify({ argv: [process.execPath, "-e", source], class: className, waitSeconds, owner, requester: owner, directory, legacyLockPath, deferred, ...(runtimeLimitSeconds === undefined ? {} : { runtimeLimitSeconds }) }).slice(0, -1)}, waitForCapacityRetry: async (_timeout, _signal, onWaiting) => { onWaiting?.(); await Bun.sleep(10); }, readPressure: () => "normal", readCpuIdle: () => 0, readLoad: () => Number(readFileSync(${JSON.stringify(join(root, "load"))}, "utf8")), signal: abort.signal, ${deadline ? `scheduleRuntimeDeadline: (expire, milliseconds) => { if(milliseconds !== ${(runtimeLimitSeconds ?? 90) * 1000}) throw new Error("Wrong deadline"); process.stdin.once("data", expire); return () => { process.stdin.removeListener("data", expire); process.stdin.pause(); }; },` : ""} onQueued: () => console.log(JSON.stringify({queued: true})) });
       console.log(JSON.stringify(receipt)); process.exitCode = receipt.exitCode;`;
     const processHandle = spawn(process.execPath, ["--no-env-file", "-e", script], {
       cwd,
@@ -722,6 +725,41 @@ test("responsiveness admits busy hosts, holds critical pressure, and preserves t
   expect(parseMemoryPressure("", "System-wide memory free percentage: 1%")).toBe("unknown");
 });
 
+test("high load holds only while CPU idle is under the floor, and the hold names the idle reading", () => {
+  const job = { ...ticket("idle"), class: "checks" as const };
+  const load = HEAVY_LOAD_POLICY.threshold + 1;
+  const admit = (cpuIdle: number | undefined, pressure: MemoryPressure = "normal") =>
+    heavyLoadAdmission(
+      job,
+      [],
+      1,
+      () => load,
+      () => pressure,
+      () => cpuIdle,
+    );
+
+  expect(admit(HEAVY_LOAD_POLICY.minCpuIdle).held).toBe(false);
+  expect(admit(undefined).held).toBe(false);
+  expect(admit(HEAVY_LOAD_POLICY.minCpuIdle - 1).held).toBe(true);
+  expect(describeLoadHold(admit(4.4))).toBe(
+    `load ${load.toFixed(1)} > ${HEAVY_LOAD_POLICY.threshold} with 4% CPU idle`,
+  );
+  expect(admit(80, "critical").held).toBe(true);
+  expect(describeLoadHold(admit(80, "critical"))).toBe("critical memory pressure");
+  let sampled = false;
+  heavyLoadAdmission(
+    job,
+    [],
+    1,
+    () => HEAVY_LOAD_POLICY.threshold,
+    () => "normal",
+    () => ((sampled = true), 0),
+  );
+  expect(sampled).toBe(false);
+  expect(parseCpuIdle("  150.0\n 50.0\n\n", 4)).toBe(50);
+  expect(parseCpuIdle("900", 4)).toBe(0);
+});
+
 test("load admission preserves FIFO, recovers at the threshold, and admits overdue work singly", () => {
   const host = emptyConcurrentCapacity();
   const first = { ...ticket("first", "session"), class: "checks" as const };
@@ -743,6 +781,7 @@ test("load admission preserves FIFO, recovers at the threshold, and admits overd
           now,
           () => load,
           () => "normal",
+          () => 0,
         ).held,
     );
 
@@ -777,6 +816,7 @@ test("load admission includes express, legacy activity, and benchmarks", () => {
       now,
       () => HEAVY_LOAD_POLICY.threshold + 100,
       () => "normal",
+      () => 0,
     ).held;
   const legacy = { ...ticket("legacy"), class: "build" as const };
 
@@ -799,6 +839,8 @@ test("queued jobs report load holds and start in order when the injected load fa
       f.directory,
       f.legacyLockPath,
       () => HEAVY_LOAD_POLICY.threshold + 1,
+      () => "normal",
+      () => 0,
     );
     expect(status.active).toEqual([]);
     expect(status.waiting.map((job) => "loadAdmission" in job && job.loadAdmission.held)).toEqual([

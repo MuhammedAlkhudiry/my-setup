@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { deferredHeavyCommand, heavyStatus, runHeavyCommand } from "../lib/heavy-run-concurrent";
+import { describeLoadHold } from "../lib/heavy-run";
 import type { HeavyClass } from "../lib/host-capacity";
 
 const help = `Usage: heavy-run [--class checks|benchmark|build] [--wait <seconds>] [--runtime-limit <seconds>] [--owner <title>] [--json] [--verbose] -- <argv...>
@@ -98,8 +99,11 @@ try {
       else {
         const describe = (job: (typeof receipt.active)[number]) =>
           `${job.owner.replace(/\s+/g, " ")} (${job.class}; ${job.reservationMode ?? "eager"}; ${job.protocol})`;
+        const held = receipt.waiting
+          .map((job) => ("loadAdmission" in job ? job.loadAdmission : undefined))
+          .find((admission) => admission?.held);
         console.log(
-          `heavy-run: active ${receipt.active.map(describe).join(", ") || "none"}; waiting ${receipt.waiting.map(describe).join(", ") || "none"}${receipt.waiting.some((job) => "loadAdmission" in job && job.loadAdmission.held) ? "; held for responsiveness" : ""}${receipt.legacyBlocked && !receipt.active.length ? "; legacy lock held" : ""}`,
+          `heavy-run: active ${receipt.active.map(describe).join(", ") || "none"}; waiting ${receipt.waiting.map(describe).join(", ") || "none"}${held ? `; held for responsiveness (${describeLoadHold(held)})` : ""}${receipt.legacyBlocked && !receipt.active.length ? "; legacy lock held" : ""}`,
         );
         if (verbose) console.log(JSON.stringify(receipt, null, 2));
       }

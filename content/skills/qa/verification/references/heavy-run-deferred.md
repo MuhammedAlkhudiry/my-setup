@@ -18,7 +18,7 @@ pass `--runtime-limit 120` to bound a full gate. Deferred runners cap their own 
 
 `checks`, `build`, and `benchmark` share ten slots (`HEAVY_CAPACITY`). Benchmark timings can be noisy; compare repeated runs or medians. Requesters take turns on admission,
 with FIFO within each requester. High CPU/RAM use alone needs no extra throttling: new jobs wait only for critical memory pressure or
-1-minute load above six times the core count. After five minutes, an overdue job may start once active jobs drain.
+1-minute load above six times the core count while CPU idle is under 10%; macOS load also counts I/O and idle waits. After five minutes, an overdue job may start once active jobs drain.
 
 Undeclared `checks` commands use the express lane when their last 10 completed, non-deferred runs for the same exact argv and canonical
 repository have a median under 10 seconds and a nearest-rank p90 under 30 seconds (the ninth sorted duration). Express runs start without
