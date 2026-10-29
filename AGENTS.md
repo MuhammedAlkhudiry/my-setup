@@ -22,6 +22,7 @@
 - **MAIN-ONLY** — Work on `main`; create branches only when explicitly requested.
 - **NO-COMMITS** — Leave changes uncommitted for owner review. Never commit, ask about committing, or list uncommitted changes as pending work.
 - **INSTALL** — After changing content, config, or generator behavior, sync only with `mise run install`.
+- **WINDOWS** — This repo also installs on Windows; keep changes working there.
 - **THIN-ZSHRC** — Migrate custom `~/.zshrc` code into `shell/zsh-custom.zsh`, leave only its managed import in `~/.zshrc`, and rerun installation.
   Repair this directly if it blocks installation.
 - **SYSTEM-TOOLS** — Keep `src/lib/system-tools.ts` and `doctor` aligned when workflows change a system-tool dependency.

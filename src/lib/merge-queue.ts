@@ -1,14 +1,9 @@
-import { dlopen } from "bun:ffi";
+import { flock } from "./flock";
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { UpdateResult } from "./merge-queue-update";
 
-const {
-  symbols: { flock },
-} = dlopen(process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : "libc.so.6", {
-  flock: { args: ["i32", "i32"], returns: "i32" },
-});
 export const mergeQueueDirectory = () =>
   join(process.env.XDG_STATE_HOME || join(homedir(), ".local/state"), "merge-queue");
 export const MERGE_QUEUE_LABEL = "com.my-setup.merge-queue";

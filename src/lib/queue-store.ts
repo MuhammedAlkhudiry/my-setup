@@ -1,4 +1,4 @@
-import { dlopen } from "bun:ffi";
+import { flock } from "./flock";
 import {
   closeSync,
   existsSync,
@@ -16,11 +16,6 @@ import { emptyQueueState, type QueueState } from "./device-queue";
 
 // Both queues retain the existing device-queue state file. The kernel releases the
 // short transaction lock on crashes; a slow live writer is never evicted by age.
-const {
-  symbols: { flock },
-} = dlopen(process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : "libc.so.6", {
-  flock: { args: ["i32", "i32"], returns: "i32" },
-});
 
 export const queueDirectory = () =>
   join(process.env.XDG_STATE_HOME || join(homedir(), ".local/state"), "device-queue");

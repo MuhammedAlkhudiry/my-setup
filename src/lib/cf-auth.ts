@@ -1,4 +1,4 @@
-import { dlopen } from "bun:ffi";
+import { flock } from "./flock";
 import { closeSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,11 +14,6 @@ export const CF_CONFIG = join(homedir(), "Library/Preferences/cloudflare/config/
 export const EXPIRY_MARGIN_MS = 15_000;
 const LOCK_PATH = join(homedir(), ".local", "state", "share-html", "cf-auth.lock");
 
-const {
-  symbols: { flock },
-} = dlopen(process.platform === "darwin" ? "/usr/lib/libSystem.B.dylib" : "libc.so.6", {
-  flock: { args: ["i32", "i32"], returns: "i32" },
-});
 
 export type CfResult = Result<{ reject: false }>;
 
