@@ -53,13 +53,14 @@ import {
   readRemoteClaudePoolUrl,
   selectRemoteSkillSources,
 } from "../lib/device";
-import { installMergeQueue } from "../lib/merge-queue-install";
+import { installMergeQueue, uninstallMergeQueue } from "../lib/merge-queue-install";
 import { installMacWatcher } from "../lib/mac-watcher";
 import { installRaycastProvider, raycastProvidersPath } from "../lib/raycast";
 import { print } from "../lib/print";
 import { assertCentralizedModels, renderManagedMarkdown } from "../lib/models";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
 import { discoverLocalSkills, findUnknownSkillReferences } from "../lib/skills";
+import { disableSpotlightIndexing } from "../lib/spotlight";
 import { installT3Settings, t3StateDir } from "../lib/t3-settings";
 import { validateRemoteSkillSources } from "../lib/validation";
 import { installVscodeKeymap, vscodeKeybindingsPath } from "../lib/vscode";
@@ -151,6 +152,7 @@ const SHARED_BIN_COMMANDS = [
   "merge-queue",
   "wait-for",
 ];
+const MAIN_MAC_BIN_COMMANDS = ["telegram-me", "mail-read"];
 
 // =============================================================================
 // Individual Operations
@@ -282,7 +284,9 @@ async function assertThinUserZshrc(): Promise<void> {
 
   if (onlyKnownToolAdditions(codeLines)) {
     await writeFile(SHARED_PATHS.zshrc, `${USER_ZSHRC_HEADER}\n${USER_ZSHRC_IMPORT}\n`);
-    print.success("Removed the Herd or Bun lines added to .zshrc; shell/zsh-custom.zsh already provides them");
+    print.success(
+      "Removed the Herd or Bun lines added to .zshrc; shell/zsh-custom.zsh already provides them",
+    );
     return;
   }
 
@@ -622,15 +626,17 @@ async function installShared(profile: DeviceProfile): Promise<void> {
     await chmod(sourcePath, 0o755);
   }
 
-  // The owner's Telegram session lives only in the main Mac's Keychain; Macs using a remote pool are spare Macs.
+  // The owner's Telegram session and synced mail live only on the main Mac; Macs using a remote pool are spare Macs.
   if (profile.name === "personal" && !readRemoteClaudePoolUrl(HOME)) {
-    const source = join(ROOT_DIR, "shell", "telegram-me.zsh");
-    await installManagedSymlink(
-      source,
-      join(SHARED_PATHS.binDir, "telegram-me"),
-      "telegram-me command",
-    );
-    await chmod(source, 0o755);
+    for (const command of MAIN_MAC_BIN_COMMANDS) {
+      const source = join(ROOT_DIR, "shell", `${command}.zsh`);
+      await installManagedSymlink(
+        source,
+        join(SHARED_PATHS.binDir, command),
+        `${command} command`,
+      );
+      await chmod(source, 0o755);
+    }
   }
 
   print.info(`Ensuring local command paths are in PATH via ${SHARED_PATHS.zshenv}...`);
@@ -1040,8 +1046,14 @@ export async function install(): Promise<DeviceProfile> {
           })
           .then(() => Promise.all([installClaude(profile), installRaycastPoolProvider()]))
       : installClaude(profile),
+    // One queue runs, on main-mac; spare Macs, the ones using a remote pool, forward to it.
     profile.macWatcher &&
-      installMergeQueue({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }),
+      (readRemoteClaudePoolUrl(HOME)
+        ? uninstallMergeQueue(HOME).then(
+            (removed) =>
+              removed && print.success("Removed the merge queue worker; main-mac runs the queue"),
+          )
+        : installMergeQueue({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath })),
     profile.macWatcher &&
       installMacWatcher({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }).then(
         ({ memcapInstalled }) => {
@@ -1069,6 +1081,7 @@ export async function install(): Promise<DeviceProfile> {
         },
       ),
     registerXcodeApps(),
+    disableSpareMacSpotlight(),
     installT3Settings({ home: HOME }).then((result) => {
       if (!result.installed) {
         print.info("T3 Code is not installed; skipped its settings");
@@ -1095,6 +1108,20 @@ async function registerXcodeApps(): Promise<void> {
 
   await execa(LSREGISTER, ["-f", "-R", XCODE_APP]);
   print.success("Registered Xcode's DeviceHub with Launch Services");
+}
+
+// Spare Macs, the ones using a remote pool, keep Spotlight indexing off; it stays silent once it is off.
+async function disableSpareMacSpotlight(): Promise<void> {
+  if (!readRemoteClaudePoolUrl(HOME)) return;
+
+  try {
+    const changed = await disableSpotlightIndexing();
+    if (changed.length > 0) print.success(`Turned off Spotlight indexing on ${changed.join(", ")}`);
+  } catch {
+    print.warning(
+      "Spotlight indexing is on and passwordless sudo is missing; run sudo mdutil -a -i off",
+    );
+  }
 }
 
 // Only the Mac that runs the pool lists it in Raycast; Macs using a remote pool skip it.

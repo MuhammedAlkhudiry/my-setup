@@ -5,6 +5,7 @@ import {
   signoffDiagnostics,
   signoffPolicy,
 } from "./merge-queue-signoff";
+import { QueueTransientError } from "./merge-queue";
 
 test("admission waits below the configured threshold, serializes gates, and bounds waiting", async () => {
   let time = 0;
@@ -54,9 +55,58 @@ test("admission waits below the configured threshold, serializes gates, and boun
     maxLoad: 12,
     waitSeconds: 60,
   });
-  expect(() => signoffPolicy({ MERGE_QUEUE_MAX_LOAD: "NaN" })).toThrow(
-    "invalid merge queue",
-  );
+  expect(signoffPolicy({}, 14).maxLoad).toBe(14);
+  expect(() => signoffPolicy({ MERGE_QUEUE_MAX_LOAD: "NaN" })).toThrow("invalid merge queue");
+});
+
+test("a load wait that times out keeps the entry queued as a transient host-busy failure", async () => {
+  let time = 0;
+  const waiting = admitSignoff({
+    maxLoad: 14,
+    waitSeconds: 60,
+    now: () => time,
+    readLoad: () => 28,
+    lock: () => () => {},
+    log: async () => {},
+    pause: async (ms) => {
+      time += ms;
+    },
+  });
+  await expect(waiting).rejects.toBeInstanceOf(QueueTransientError);
+  await expect(waiting).rejects.toThrow("host busy");
+});
+
+test("a deterministic-looking failure under a mid-run load spike retries once and records why", async () => {
+  // Admission and end read 5; the sampler catches 30 while the run is in flight.
+  let load = 5;
+  let count = 0;
+  const lines: string[] = [];
+  const result = await candidateSignoff({
+    runLog: "/candidate.log",
+    policy: { maxLoad: 14, waitSeconds: 60 },
+    admission: { readLoad: () => load, lock: () => () => {}, sampleMs: 1 },
+    log: async (line) => {
+      lines.push(line);
+    },
+    requireClean: async () => {},
+    readLog: async () => "connection refused",
+    run: async () => {
+      count++;
+      if (count === 1) {
+        load = 30;
+        await Bun.sleep(20);
+        load = 5;
+      }
+      return { ok: count === 2, output: "FAIL api:test log=/api.log" };
+    },
+  });
+  expect(result.ok).toBe(true);
+  expect(count).toBe(2);
+  expect(result.runs[0]!.peakLoad).toBe(30);
+  expect(result.runs[0]!.endLoad).toBe(5);
+  expect(result.runs[0]!.retried).toContain("load peaked at 30.00, threshold 14");
+  expect(result.runs[1]!.retried).toBeUndefined();
+  expect(lines.some((line) => line.includes("peak=30.00"))).toBe(true);
 });
 
 test("nested stage logs explain an all-passing PHP suite rejected by timing or coverage", async () => {
@@ -112,12 +162,8 @@ test("timeout retry succeeds without reconstructing the candidate; deterministic
   expect(result.ok).toBe(true);
   expect(attempts).toEqual([1, 2]);
   expect(result.runs[0]!.failures[0]!.name).toBe("mobile:test");
-  expect(lines.some((line) => line.includes("run 1 start: load=1.00"))).toBe(
-    true,
-  );
-  expect(lines.some((line) => line.includes("run 2 end: load=1.00"))).toBe(
-    true,
-  );
+  expect(lines.some((line) => line.includes("run 1 start: load=1.00"))).toBe(true);
+  expect(lines.some((line) => line.includes("run 2 end: load=1.00"))).toBe(true);
   let count = 0;
   const failed = await candidateSignoff({
     runLog: "/candidate.log",
@@ -150,12 +196,7 @@ test("high-load failure retries once and retains both failing stages and logs", 
   });
   expect(result.ok).toBe(false);
   expect(
-    result.runs.map((run) => [
-      run.attempt,
-      run.log,
-      run.failures[0]!.name,
-      run.failures[0]!.log,
-    ]),
+    result.runs.map((run) => [run.attempt, run.log, run.failures[0]!.name, run.failures[0]!.log]),
   ).toEqual([
     [1, "/run-1.log", "stage-1", "/stage-1.log"],
     [2, "/run-2.log", "stage-2", "/stage-2.log"],

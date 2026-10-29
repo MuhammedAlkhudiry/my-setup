@@ -1,14 +1,15 @@
 import { readFile } from "node:fs/promises";
-import { loadavg } from "node:os";
+import { availableParallelism, loadavg } from "node:os";
 import {
   acquireQueueLock,
   QueueEnvironmentError,
+  QueueTransientError,
   type CandidateRun,
 } from "./merge-queue";
 
-export function signoffPolicy(env = process.env) {
-  // Owner chose 60 (2026-10-21): a busy Mac running simulators still merges; one retry absorbs slow false failures.
-  const maxLoad = Number(env.MERGE_QUEUE_MAX_LOAD ?? 60);
+export function signoffPolicy(env = process.env, cores = availableParallelism()) {
+  // Owner moved 60 to the core count (2026-10-29): timing-based e2e and concurrency tests failed falsely at load 28-200.
+  const maxLoad = Number(env.MERGE_QUEUE_MAX_LOAD ?? cores);
   const waitSeconds = Number(env.MERGE_QUEUE_WAIT_SECONDS ?? 3600);
   if (
     !Number.isFinite(maxLoad) ||
@@ -38,8 +39,7 @@ export async function admitSignoff(options: AdmissionOptions) {
   const now = options.now ?? Date.now;
   const readLoad = options.readLoad ?? (() => loadavg()[0]!);
   const pause =
-    options.pause ??
-    ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+    options.pause ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const deadline = now() + options.waitSeconds * 1000;
   let release: (() => void) | undefined;
   const maxLoad = options.maxLoad;
@@ -50,8 +50,9 @@ export async function admitSignoff(options: AdmissionOptions) {
       const load = readLoad();
       if (release && load < maxLoad) return { load, release };
       if (now() >= deadline)
-        throw new QueueEnvironmentError(
-          `environment broken: sign-off admission timed out (load ${load.toFixed(2)}, requires < ${maxLoad}; wait ${options.waitSeconds}s)`,
+        // A busy host is not a broken one: the worker retries shortly and waits again.
+        throw new QueueTransientError(
+          `host busy: sign-off admission timed out (load ${load.toFixed(2)}, requires < ${maxLoad}; wait ${options.waitSeconds}s)`,
         );
       if (!announced) {
         await options.log(
@@ -81,15 +82,11 @@ export async function signoffDiagnostics(
   const expand = async (text: string, depth = 0): Promise<string> => {
     text = stripAnsi(text);
     if (depth >= 8 || cache.size >= 64) return text;
-    const paths = [...text.matchAll(/\blog(?:=|:\s*)(\/[^\s;]+)/g)].map(
-      (match) => match[1]!,
-    );
+    const paths = [...text.matchAll(/\blog(?:=|:\s*)(\/[^\s;]+)/g)].map((match) => match[1]!);
     for (const path of new Set(paths)) {
       if (cache.has(path)) continue;
       cache.set(path, "");
-      const content = await readLog(path).catch(
-        () => `Log unavailable: ${path}`,
-      );
+      const content = await readLog(path).catch(() => `Log unavailable: ${path}`);
       cache.set(path, content);
       text += `\n${await expand(content, depth + 1)}`;
     }
@@ -101,10 +98,7 @@ export async function signoffDiagnostics(
   for (const match of stages.length ? stages : [["", "signoff", fallbackLog]]) {
     const name = match[1]!;
     const log = match[2]!;
-    if (
-      failures.some((failure) => failure.name === name && failure.log === log)
-    )
-      continue;
+    if (failures.some((failure) => failure.name === name && failure.log === log)) continue;
     // Expand this stage independently so unrelated passing/failing stages do not obscure its cause.
     const stageCache = new Set<string>();
     const stageText = async (text: string, depth = 0): Promise<string> => {
@@ -118,17 +112,14 @@ export async function signoffDiagnostics(
       }
       return text;
     };
-    const text = await stageText(
-      cache.get(log) ?? (await readLog(log).catch(() => output)),
-    );
-    const reason =
-      /test timing regression|slow[- ]test.{0,40}(?:exceed|budget)/i.test(text)
-        ? "slow-test budget"
-        : /coverage.{0,80}(?:below|fail|threshold|minimum)/i.test(text)
-          ? "coverage gate"
-          : /timed?\s*out|timeout/i.test(text)
-            ? "timeout"
-            : "check failure";
+    const text = await stageText(cache.get(log) ?? (await readLog(log).catch(() => output)));
+    const reason = /test timing regression|slow[- ]test.{0,40}(?:exceed|budget)/i.test(text)
+      ? "slow-test budget"
+      : /coverage.{0,80}(?:below|fail|threshold|minimum)/i.test(text)
+        ? "coverage gate"
+        : /timed?\s*out|timeout/i.test(text)
+          ? "timeout"
+          : "check failure";
     const details = text
       .split("\n")
       .filter((line) =>
@@ -146,31 +137,25 @@ export async function signoffDiagnostics(
       budgetOnly:
         reason === "slow-test budget" &&
         /Tests:.*\bpassed\b/.test(text) &&
-        !/Tests:.*\bfailed\b|\bFAILED\b|::error(?! title=PHP test timing regression)/.test(
-          text,
-        ),
+        !/Tests:.*\bfailed\b|\bFAILED\b|::error(?! title=PHP test timing regression)/.test(text),
     });
   }
   return {
     failures,
     transient: transientFailure.test(expanded),
-    environmentBroken: /missing from PATH|command not found|\bENOENT\b/.test(
-      expanded,
-    ),
+    environmentBroken: /missing from PATH|command not found|\bENOENT\b/.test(expanded),
   };
 }
 
 export async function candidateSignoff(options: {
-  run: (
-    attempt: number,
-  ) => Promise<{ ok: boolean; output: string; log?: string }>;
+  run: (attempt: number) => Promise<{ ok: boolean; output: string; log?: string }>;
   requireClean: () => Promise<void>;
   log: (line: string) => Promise<void>;
   runLog: string;
   policy?: ReturnType<typeof signoffPolicy>;
-  admission?: Partial<
-    Omit<AdmissionOptions, "log" | "maxLoad" | "waitSeconds">
-  >;
+  admission?: Partial<Omit<AdmissionOptions, "log" | "maxLoad" | "waitSeconds">> & {
+    sampleMs?: number;
+  };
   readLog?: (path: string) => Promise<string>;
 }) {
   const policy = options.policy ?? signoffPolicy();
@@ -184,16 +169,24 @@ export async function candidateSignoff(options: {
     });
     let result: Awaited<ReturnType<typeof options.run>>;
     let endLoad: number;
+    // Load that rises mid-run and falls before the end still slows tests, so sample the peak.
+    let peakLoad = admitted.load;
+    const sampler = setInterval(
+      () => (peakLoad = Math.max(peakLoad, readLoad())),
+      options.admission?.sampleMs ?? 15_000,
+    );
     try {
       await options.log(
         `sign-off run ${attempt} start: load=${admitted.load.toFixed(2)}, threshold=${policy.maxLoad}`,
       );
       result = await options.run(attempt);
     } finally {
+      clearInterval(sampler);
       endLoad = readLoad();
+      peakLoad = Math.max(peakLoad, endLoad);
       admitted.release();
       await options.log(
-        `sign-off run ${attempt} end: load=${endLoad.toFixed(2)}`,
+        `sign-off run ${attempt} end: load=${endLoad.toFixed(2)}, peak=${peakLoad.toFixed(2)}`,
       );
     }
     await options.requireClean();
@@ -205,6 +198,7 @@ export async function candidateSignoff(options: {
       attempt,
       startLoad: admitted.load,
       endLoad,
+      peakLoad,
       log: runLog,
       failures: diagnostics.failures,
     };
@@ -224,11 +218,12 @@ export async function candidateSignoff(options: {
       await options.log(`Landing with warning: ${run.warning}`);
       return { ok: true, runs };
     }
-    if (attempt === 2 || (!diagnostics.transient && endLoad < policy.maxLoad))
-      return { ok: false, runs };
-    await options.log(
-      "Retrying the exact candidate once after load/timeout/budget failure",
-    );
+    const overloaded = peakLoad >= policy.maxLoad;
+    if (attempt === 2 || (!diagnostics.transient && !overloaded)) return { ok: false, runs };
+    run.retried = overloaded
+      ? `load peaked at ${peakLoad.toFixed(2)}, threshold ${policy.maxLoad}; retried once load dropped`
+      : "timeout or timing-budget failure; retried once load was below the threshold";
+    await options.log(`Retrying the exact candidate: ${run.retried}`);
   }
   throw new Error("Unreachable sign-off attempt");
 }

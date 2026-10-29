@@ -39,6 +39,12 @@ export const DEVICE_POOL: PoolDevice[] = [
   { project: "awraq", platform: "android", kind: "main", name: "Awraq_Main" },
 ];
 
+/**
+ * Android emulator slots per Mac, keyed by host name, for Macs with fewer AVDs than the default; a host-local
+ * `DEVICE_QUEUE_ANDROID_SLOTS` still overrides it. big-mac runs only Awraq_Main.
+ */
+export const HOST_ANDROID_SLOTS: Record<string, number> = { "big-mac": 1 };
+
 /** Flags from the mobile-app-infra device-slimming reference; they keep sign-in, purchases, pickers, and links working. */
 export const SLIM_FLAGS = {
   ios: ["--except", "icloud,store,web,pim,photos,connectivity"],

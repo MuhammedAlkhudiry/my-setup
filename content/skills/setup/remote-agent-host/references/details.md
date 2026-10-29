@@ -24,6 +24,8 @@ keeps the old name until `tailscale serve reset` and the mapping is added again.
 - Turn off automatic macOS downloads and installs: a background update took a Mac off the network. The owner updates by hand.
 - Require `Self.Online: true` and non-empty `CertDomains` in `tailscale status --json`. If `CertDomains` is empty, enable MagicDNS and
   HTTPS Certificates on the [admin DNS page](https://login.tailscale.com/admin/dns).
+- Install keeps Spotlight indexing off (`sudo -n mdutil -a -i off`) and doctor flags it when it comes back: indexing a project's
+  `node_modules` held a spare Mac's load above 30 and starved its Android emulator.
 - FileVault off and automatic login both ask for the owner's password. macOS updates can turn FileVault back on, so check
   `fdesetup status` after each one.
 
@@ -71,6 +73,8 @@ keeps the old name until `tailscale serve reset` and the mapping is added again.
 - **Spare to main:** give each spare Mac its own `~/.ssh/main-mac-inbox` key and a `main-mac-inbox` host entry. On the main Mac, authorize
   it as `restrict,command="<setup>/shell/t3-inbox.zsh <name>" <key>`; it can then only post to the Housekeeper, with
   `ssh main-mac-inbox send` and the message on stdin. The main Mac needs Remote Login and key-only SSH.
+- **Merge queue:** only the main Mac runs a queue worker; install removes it from spare Macs. There, `merge-queue add` and
+  `merge-queue status` go to the main Mac's queue through the same inbox key, and each entry records the spare Mac as `host`.
 - T3's own MCP endpoint (`https://<host>.<tailnet>.ts.net/mcp`, with OAuth sign-ins renewed every 30 days) and its upstream
   linked-environment work may replace the inbox once they need no monthly approvals.
 

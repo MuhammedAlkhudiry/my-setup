@@ -1,3 +1,6 @@
+import { hostname } from "node:os";
+
+import { HOST_ANDROID_SLOTS } from "../../config/device-pool";
 import { emptyHostCapacity, type HostCapacity } from "./host-capacity";
 
 export type Platform = "ios" | "android";
@@ -5,11 +8,14 @@ export type Platform = "ios" | "android";
 export const DEVICE_QUEUE = {
   /**
    * Devices allowed to run at once per platform. Slots above `baseSlots` open only while the host has headroom;
-   * host-local overrides let smaller or larger Macs set their own maximum.
+   * `HOST_ANDROID_SLOTS` and host-local overrides let smaller or larger Macs set their own maximum.
    */
   maxRunning: {
     ios: slotCount(process.env.DEVICE_QUEUE_IOS_SLOTS, 5),
-    android: slotCount(process.env.DEVICE_QUEUE_ANDROID_SLOTS, 2),
+    android: slotCount(
+      process.env.DEVICE_QUEUE_ANDROID_SLOTS,
+      HOST_ANDROID_SLOTS[hostname().toLowerCase()] ?? 2,
+    ),
   } satisfies Record<Platform, number>,
   /** Slots always open, whatever the host load. */
   baseSlots: { ios: 2, android: 2 } satisfies Record<Platform, number>,

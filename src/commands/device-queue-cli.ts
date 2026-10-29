@@ -389,8 +389,10 @@ async function startEmulator(avd: string): Promise<string> {
 
   requireColdBoot(avd);
   // The emulator outlives this command and keeps its window, with hardware graphics and no snapshot to load or save.
+  // After a crash, every later launch otherwise waits on a hidden crash-report consent dialog and never boots.
   const output = openSync(join(queueDirectory(), `emulator-${avd}.log`), "a");
-  spawn(EMULATOR, ["-avd", avd, "-port", port, "-no-boot-anim", "-no-snapshot", "-gpu", "host"], {
+  const flags = ["-no-boot-anim", "-no-snapshot", "-gpu", "host", "-crash-report-mode", "never"];
+  spawn(EMULATOR, ["-avd", avd, "-port", port, ...flags], {
     detached: true,
     stdio: ["ignore", output, output],
     env: { ...process.env, ANDROID_AVD_HOME: AVD_HOME },

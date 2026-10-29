@@ -36,9 +36,11 @@ import {
   readState,
   renderMemcapConfig,
 } from "../lib/mac-watcher";
+import { listAccounts, openMailIndex } from "../lib/apple-mail";
 import { readDeviceProfile, readRemoteClaudePoolUrl } from "../lib/device";
 import { DEVICE_QUEUE } from "../lib/device-queue";
 import { checkRaycastProvider, RAYCAST_APP, raycastProvidersPath } from "../lib/raycast";
+import { readIndexedVolumes } from "../lib/spotlight";
 import { parsePruneReport } from "../lib/storage-prune";
 import { hasTelegramMeSession } from "../lib/telegram-me";
 import { cleanupDoctorHint } from "../lib/worktree-cleanup";
@@ -78,7 +80,7 @@ if (configuredAvds.length < DEVICE_QUEUE.maxRunning.android) {
   findings.push({
     level: "optional",
     label: "Android emulator slots",
-    detail: `${DEVICE_QUEUE.maxRunning.android} slots but ${configuredAvds.length} AVDs; create another AVD or lower DEVICE_QUEUE_ANDROID_SLOTS`,
+    detail: `${DEVICE_QUEUE.maxRunning.android} slots but ${configuredAvds.length} AVDs; create another AVD or set this Mac in HOST_ANDROID_SLOTS in config/device-pool.ts`,
   });
 }
 
@@ -314,6 +316,16 @@ if (remotePoolUrl) {
       level: "required",
       label: "Codex pool",
       detail: "Codex is not signed in to the remote pool; run mise run install",
+    });
+  }
+
+  // Spare Macs keep Spotlight indexing off; indexing node_modules starves emulators and builds.
+  const indexed = await readIndexedVolumes();
+  if (indexed.length > 0) {
+    findings.push({
+      level: "required",
+      label: "Spotlight indexing",
+      detail: `indexing is on for ${indexed.join(", ")}; run mise run install on the main Mac`,
     });
   }
 } else {
@@ -713,7 +725,19 @@ if (PROFILE.activeProjects) {
   }
 }
 
-if (PROFILE.macWatcher) {
+if (PROFILE.macWatcher && remotePoolUrl) {
+  if (
+    execaSync("launchctl", ["print", `gui/${process.getuid?.()}/com.my-setup.merge-queue`], {
+      reject: false,
+    }).exitCode === 0
+  )
+    findings.push({
+      level: "required",
+      label: "Merge queue service",
+      detail:
+        "spare Macs forward to main-mac's queue but a local worker is loaded; run mise run install",
+    });
+} else if (PROFILE.macWatcher) {
   const probe = execaSync(
     "/bin/zsh",
     workerShellArguments(join(import.meta.dir, "../.."), [
@@ -782,6 +806,33 @@ if (PROFILE.name === "personal" && !remotePoolUrl) {
       label: "telegram-me",
       detail: "not signed in; run telegram-me login while the owner is at this Mac",
     });
+
+  // mail-read sees only what Mail has synced, so Mail must run and every account must keep receiving.
+  if (!existsSync(join(HOME, "bin/mail-read")))
+    findings.push({
+      level: "optional",
+      label: "mail-read",
+      detail: "command not linked; run mise run install",
+    });
+  else if (execaSync("pgrep", ["-x", "Mail"], { reject: false }).exitCode !== 0)
+    findings.push({
+      level: "optional",
+      label: "mail-read",
+      detail: "Mail is not running, so new email stops syncing; open Mail",
+    });
+  else
+    try {
+      const staleBefore = new Date(Date.now() - 14 * 86_400_000).toISOString();
+      for (const account of listAccounts(openMailIndex()))
+        if (account.name !== "On My Mac" && (account.lastReceived ?? "") < staleBefore)
+          findings.push({
+            level: "optional",
+            label: "mail-read",
+            detail: `${account.name} received nothing in Mail for 14 days; check its sign-in in Mail`,
+          });
+    } catch (error) {
+      findings.push({ level: "optional", label: "mail-read", detail: (error as Error).message });
+    }
 }
 
 if (findings.length === 0) {

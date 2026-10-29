@@ -13,6 +13,8 @@ export interface CandidateRun {
   attempt: number;
   startLoad: number;
   endLoad: number;
+  /** Highest 1-minute load sampled during the run; unset on runs recorded before sampling. */
+  peakLoad?: number;
   log: string;
   failures: {
     name: string;
@@ -22,6 +24,8 @@ export interface CandidateRun {
   }[];
   /** Set when only per-test timing budgets failed: load noise in a batch, so it lands with this warning. */
   warning?: string;
+  /** Why this failed run earned the one retry, such as load above the admission threshold. */
+  retried?: string;
 }
 export interface QueueEntry {
   repo: string;
@@ -30,6 +34,8 @@ export interface QueueEntry {
   /** Set when `head` is the queue's merge of main into this signed head; that sign-off covers it. */
   signedHead?: string;
   thread?: string;
+  /** The spare Mac the owning thread runs on; unset for main-mac's own threads. */
+  host?: string;
   status: "queued" | "failed" | "merged" | "removed";
   enqueuedAt: string;
   mergedAt?: string;
@@ -222,7 +228,11 @@ export async function passingBatch(
 ): Promise<QueueEntry[]> {
   if (!entries.length) return prefix;
   const result = await backend.candidate([...prefix, ...entries], base, checks);
-  if (result.ok) return [...prefix, ...entries];
+  // Landing entries keep the runs that passed them, so a retried or warned run stays visible.
+  if (result.ok)
+    return [...prefix, ...entries].map((entry) =>
+      result.runs ? { ...entry, runs: result.runs } : entry,
+    );
   if (result.conflict !== undefined) {
     const culprit = entries.find((entry) => entry.pr === result.conflict);
     if (!culprit) throw new Error("Previously passing prefix now conflicts");
@@ -559,6 +569,7 @@ export async function processRepository(
         status: "merged",
         mergedAt: merged.mergedAt ?? new Date().toISOString(),
         mergedMainSha: expectedBase,
+        runs: entry.runs,
       });
       await updateMergeQueue(
         (state) => queueDeploy(state, repo, expectedBase, entry.pr),

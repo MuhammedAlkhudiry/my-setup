@@ -170,6 +170,11 @@ export function systemToolStatusLabel(status: SystemToolStatus): string {
   return normalized(status.current) === normalized(status.latest) ? "current" : "update";
 }
 
+// Only Macs that run Android emulators need avdslim and the emulator; spare agent Macs without the SDK have none.
+const ANDROID_TOOL_LEVEL = existsSync(join(homedir(), "Library/Android/sdk/emulator"))
+  ? "required"
+  : "optional";
+
 export const SYSTEM_TOOL_GROUPS = [
   {
     title: "Core repo tools",
@@ -431,10 +436,7 @@ export const SYSTEM_TOOL_GROUPS = [
       },
       {
         name: "avdslim",
-        // Only Macs that run Android emulators need it; spare agent Macs have none.
-        level: existsSync(join(homedir(), "Library/Android/sdk/emulator"))
-          ? "required"
-          : "optional",
+        level: ANDROID_TOOL_LEVEL,
         why: "device-queue slims every pool emulator after boot, so parallel agent emulators use less memory.",
         versionArgs: ["--version"],
         latest: {
@@ -444,6 +446,18 @@ export const SYSTEM_TOOL_GROUPS = [
         update: {
           commands: ["brew upgrade kdbhalala/avdslim/avdslim"],
           note: "Install with brew tap kdbhalala/avdslim https://github.com/kdbhalala/avdslim.git && brew install kdbhalala/avdslim/avdslim.",
+        },
+      },
+      {
+        name: "emulator",
+        level: ANDROID_TOOL_LEVEL,
+        why: "Runs the device-queue Android pool. Canary channel: stable 37.2.12 froze about 3 minutes after boot in its adb/JDWP handling; canary 37.3.6 stays up.",
+        versionArgs: ["-version"],
+        update: {
+          commands: [
+            'sdkmanager --sdk_root="$HOME/Library/Android/sdk" --channel=3 emulator',
+          ],
+          note: "Keep --channel=3: a plain sdkmanager --update stays on the stable channel. Return to stable once its version passes 37.3.6.",
         },
       },
       {

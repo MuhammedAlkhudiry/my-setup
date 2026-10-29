@@ -38,6 +38,11 @@
 
 - **TOOLING** — Use project commands for development servers, such as `mise run dev`. Prefer Bun/TypeScript for scripts and automation;
   use Python only when clearly better suited. Keep disposable and one-time production data-fix scripts outside Git; commit only reusable scripts.
+  <!-- profile:personal -->
+- **PROD-DATA-CHANGES** — When the user asks for a production data change, run a one-time script against production directly instead of
+  shipping a migration or command through deployment; it lands sooner and leaves no one-off code in the repo. Deploy it instead when there
+  is a reason, such as the change must repeat, run in every environment, or ship together with code that depends on it.
+  <!-- /profile -->
 - **WORKTREES** — In a project with a `worktree` task, create task worktrees only with `mise run worktree <branch>`: it starts from
   `origin/main` and prepares env links, dependencies, and a fresh test database. Never add a worktree or install by hand; briefs say the same.
 - **TEMP-ARTIFACTS** — Put disposable artifacts in a fresh system temporary directory, never in a Git repository. Only intentional, durable
@@ -46,7 +51,8 @@
   queue can keep one warm device, and delete temporary directories you created. Leave the user's and other agents' resources alone.
 - **DEV-ENV-UNBLOCK** — Resolve development environment blockers directly, including local environment changes.
 - **BROWSER-TAB-REUSE** — In a browser shared with the user, such as Claude in Chrome, keep using the tab you control and navigate it per
-  page; open a new tab only when you have none, and keep it until the task is done.
+  page; open a new tab only when you have none, and keep it until the task is done. When the user must act, such as accepting terms or adding
+  a card, leave the tab open on that exact page and link it; never close it.
   <!-- profile:personal -->
 - **SELF-SERVE-TOOLS** — Operate available browsers, iOS simulators, Android emulators, App Store Connect, and Google Play Console yourself
   or through CODEX-WORK to inspect, verify, and complete work; never ask the user to do browser work. When a site offers Google sign-in,
@@ -64,7 +70,8 @@
   work yourself or with Codex subagents; never hand it to Claude.
   <!-- profile:personal -->
 - **OPENROUTER** — For occasional calls outside installed agents, use OpenRouter with `$OPENROUTER_API_KEY` from local secrets. Choose the
-  cheapest capable model; never route frontier models (Claude, GPT, Gemini Pro) through it. Ask only above $1 total per task: name the model,
+  cheapest capable model; never route frontier models (Claude, GPT, Gemini Pro) through it; Gemini image-generation models are
+  allowed. Ask only above $1 total per task: name the model,
   price, and expected total, then wait for approval before the first call.
   <!-- /profile -->
   <!-- profile:personal -->
@@ -118,7 +125,8 @@ Use these projects as references when the user mentions them.
   `--json` and `--verbose`, carry results in exit codes, and omit banners, colors, progress, tables, and decoration.
 - **NO-POLLING** — Never wait by repeating sleep-and-check steps. Batch progress messages at milestones. Where the harness notifies on
   completion (background commands, subagent results, PR watches), start the work and end the turn; otherwise block once with
-  `wait-for <file|port|pid|url|cmd> <target>`, including for CI. A search that finds nothing is an empty result, not a failure.
+  `wait-for <file|port|pid|url|cmd> <target>`, including for CI. Never end a turn with your own task unfinished unless a harness notification
+  will wake you; a commit hook, sign-off, or script you started is yours to wait for. A search that finds nothing is an empty result, not a failure.
 - **RATINGS** — Rate how good a metric, trend, or health reading is on five levels in text reports, digests, and replies: 🔴 very bad,
   🟠 bad, ⚪ normal, 🟢 good, 🌟 very good. State the reference the rating judges against, such as a target, limit, or usual level ("$150
   of the $250 target", "SAR 4.78 against the SAR 5 stop line"); a bare number leaves the reader to guess why it rates as it does. Never use
@@ -145,6 +153,8 @@ Use these projects as references when the user mentions them.
   failure relay and post-merge checks on the batch’s final main SHA.
     <!-- /profile -->
   <!-- profile:personal -->
+- **STORE-RELEASES** — Never start a store build, TestFlight or Play upload, or release, even after an owner pick in your thread. Only
+  the Housekeeper releases apps, on the owner's go given to it; send release needs there instead.
 - **HOUSEKEEPER** — A recurring T3 thread titled "Housekeeper" (role: `{{SETUP_ROOT}}/content/agents/housekeeper.md`) keeps main-mac,
   agent sessions, and the active projects moving. It relays merge-queue and deploy failures, runs post-merge, Sentry, and health checks,
   reviews screenshots of owner-requested changes before enqueuing them, relaunches stalled subagents, and owns the owner's status page.
@@ -189,6 +199,9 @@ All instructions for replies to the user live here.
 - **Phone-ready media.** Share every image, video, page, and file so it opens on a phone: inline when supported, otherwise publish with
   $html-artifacts and link it. Never share only a local path. Stack options vertically for phone width.
 - **Other sessions.** Use thread titles, or describe the work if unknown; never use generated IDs alone.
+- **ACTOR-NAMES** — Name each actor instead of "you", "me", or "it" when a reply involves more than one: "Muhammed" for the owner,
+  "Housekeeper" (or "Main Agent" in another thread) for the agent writing, and "subagent" or its name, such as "Awraq X Ads subagent",
+  for delegated agents.
 - **BEFORE-AFTER** — When reporting, explaining, proposing, or recapping a change, show before → after (value, behavior, or state) rather
   than only the present, such as "SAR 150 → 75/day". A change means little without its starting point, and the arrow shows its size
   without the reader recalling the old state. Show only a before you know; skip it when nothing existed before or the question is only
@@ -202,6 +215,12 @@ All instructions for replies to the user live here.
 
 Reply freely; prefer visualisations, see $show-me.
 
+- **TALK-VS-WORK** — While the user talks an idea through, read code, query data, and check facts, but do not edit, commit, open PRs,
+  start or steer agents, change production, or send messages. Work starts only on a go in the user's own words: an imperative ("add
+  it", "change the data directly") or a picked option ("a b"). Attachments, third-party messages, or a decision that seems obvious are
+  input, not a go: say what they point to and ask for one. Add ideas raised during talk to the discussion, never to running work. Read a
+  message that could mean stop ("don't work yet", "wait") as a stop. When unsure, end with what you would change and "say go". Undoing
+  work the user did not ask for costs more than one word of confirmation.
 - Correct mistaken premises while preserving the user's goal and suggesting a better path.
 - Consider important unstated effects, including harm to the user experience.
 - Ask only questions whose answers could change your advice.

@@ -9,6 +9,8 @@ export const TELEGRAM_RELAY_HOST = "relay.t3.codes";
 const credentialsSchema = z.object({
   token: z.string().regex(/^\d+:[\w-]+$/),
   owner_chat_id: z.union([z.string().regex(/^-?\d+$/), z.number().int().safe()]),
+  // Group where the owner's family asks for Awraq customer support.
+  support_chat_id: z.union([z.string().regex(/^-?\d+$/), z.number().int().safe()]).optional(),
 });
 const webhookSchema = z.object({
   url: z.string(),
@@ -97,26 +99,36 @@ export async function checkTelegramWebhook(now = Date.now()): Promise<number> {
   return info.pending_update_count;
 }
 
-export async function sendTelegramMessage(text: string): Promise<void> {
+/** The owner's private chat, or the support group when `support` is set. */
+function chatId(support: boolean): string | number {
+  const { owner_chat_id, support_chat_id } = credentials();
+  if (!support) return owner_chat_id;
+  if (support_chat_id === undefined) throw new Error("No support_chat_id in the ops bot credentials");
+
+  return support_chat_id;
+}
+
+export async function sendTelegramMessage(text: string, support = false): Promise<void> {
   if (!text.trim() || [...text].length > 4096)
     throw new Error(
       "Provide nonempty stdin of at most 4096 characters; messages are never truncated",
     );
-  const { owner_chat_id } = credentials();
-
   await telegramApi("sendMessage", {
-    chat_id: owner_chat_id,
+    chat_id: chatId(support),
     text,
     link_preview_options: { is_disabled: true },
   });
 }
 
-export async function reactToTelegramMessage(messageId: string, emoji = "👍"): Promise<void> {
+export async function reactToTelegramMessage(
+  messageId: string,
+  emoji = "👍",
+  support = false,
+): Promise<void> {
   if (!/^\d+$/.test(messageId)) throw new Error("Message id must be a positive integer");
-  const { owner_chat_id } = credentials();
 
   await telegramApi("setMessageReaction", {
-    chat_id: owner_chat_id,
+    chat_id: chatId(support),
     message_id: Number(messageId),
     reaction: [{ type: "emoji", emoji }],
   });

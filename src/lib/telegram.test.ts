@@ -48,6 +48,7 @@ test("ops bot health rejects backlog, recent errors, and foreign webhook hosts w
     await expect(sendTelegramMessage(" ")).rejects.toThrow("nonempty");
     await expect(sendTelegramMessage("x".repeat(4097))).rejects.toThrow("never truncated");
     await expect(reactToTelegramMessage("abc")).rejects.toThrow("positive integer");
+    await expect(sendTelegramMessage("hi", true)).rejects.toThrow("No support_chat_id");
   } finally {
     globalThis.fetch = previousFetch;
     if (previousHome === undefined) delete process.env.SERVICE_CREDENTIALS_HOME;

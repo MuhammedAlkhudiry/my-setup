@@ -95,4 +95,12 @@ Saved Messages need no approval. Never read the session from the Keychain or sen
 `telegram-me login` asks for the api_id, api_hash, phone number, login code, and two-step password in native macOS prompts on the main Mac,
 so the owner must be at it; never ask for them in chat.
 
+## Email
+
+`mail-read` reads the owner's Gmail and Hotmail from what the Mail app has synced on the main Mac; it never contacts a mail server, so
+reading cannot send, mark as read, move, or delete mail. `mail-read search [text] [--account gmail|hotmail] [--from x] [--since
+YYYY-MM-DD] [--unread]` lists newest first by subject, sender, and preview; `mail-read read <id>` prints the headers, text body, and
+attachment names; `mail-read accounts` shows each account's newest message. Use it for verification codes and receipts instead of the
+browser. Never send, reply to, or change mail through Mail, AppleScript, or a mail server.
+
 <!-- /profile -->

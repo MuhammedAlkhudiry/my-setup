@@ -16,15 +16,15 @@ const cli = cac("telegram-send").option("--verbose", "Print detailed output");
 
 cli
   .command("", "Send stdin as one plain-text message to the owner (maximum 4096 characters)")
-  .action(async () => {
+  .action(async (options: { support?: boolean }) => {
     if (process.stdin.isTTY) throw new Error("Pipe the message into telegram-send");
-    await sendTelegramMessage(await Bun.stdin.text());
+    await sendTelegramMessage(await Bun.stdin.text(), options.support);
     console.log("telegram-send: sent");
   });
 cli
   .command("react <messageId> [emoji]", "React to one of the owner's messages (default 👍) instead of replying")
-  .action(async (messageId: string, emoji?: string) => {
-    await reactToTelegramMessage(messageId, emoji);
+  .action(async (messageId: string, emoji: string | undefined, options: { support?: boolean }) => {
+    await reactToTelegramMessage(messageId, emoji, options.support);
     console.log("telegram-send: reacted");
   });
 cli
@@ -44,6 +44,7 @@ cli
     console.log("telegram-send: webhook set");
   });
 cli.option("--json", "Return a structured receipt");
+cli.option("--support", "Send or react in the Awraq support group instead of the owner's chat");
 cli.help();
 cli.addEventListener("command:*", () => {
   throw new Error("Unknown command; run telegram-send --help");

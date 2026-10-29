@@ -45,6 +45,27 @@ test("a bisection leaf persists the failing stages and log paths from both attem
     expect(entry.error).toContain(`/run-${attempt}.log`);
   }
 });
+test("an entry that lands after a load retry keeps both runs", async () => {
+  const f = await fixture(1);
+  const runs = [
+    {
+      attempt: 1,
+      startLoad: 5,
+      endLoad: 9,
+      peakLoad: 30,
+      log: "/run-1.log",
+      failures: [{ name: "e2e", log: "/e2e.log", reason: "check failure" }],
+      retried: "load peaked at 30.00, threshold 14; retried once load dropped",
+    },
+    { attempt: 2, startLoad: 4, endLoad: 6, peakLoad: 6, log: "/run-2.log", failures: [] },
+  ];
+  f.backend.candidate = async () => ({ ok: true, log: "/candidate.log", runs });
+  await processRepository("owner/repo", f.backend, f.directory);
+  const entry = f.state().entries[0]!;
+  expect(entry.status).toBe("merged");
+  expect(entry.runs).toEqual(runs);
+});
+
 test("transient preparation failures keep PRs queued with a short retry", async () => {
   const f = await fixture(1);
   f.backend.candidate = async () => {

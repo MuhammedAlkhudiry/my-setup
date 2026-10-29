@@ -9,6 +9,14 @@ APIs; pause for OAuth or new IAM grants.
 
 Use `rclone` and live help for authentication and a read-only check.
 
+<!-- profile:personal -->
+
+## Gmail
+
+Read mail with `mail-read`; see [Email](others.md#email).
+
+<!-- /profile -->
+
 ## Google Play
 
 Use `gpc` through $mobile-app-infra. Reserve Play Console browser work for explicit user-run account, policy, legal, payment, or review tasks outside

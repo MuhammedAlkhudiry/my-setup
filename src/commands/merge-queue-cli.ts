@@ -1,8 +1,16 @@
 #!/usr/bin/env bun
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
+import { homedir } from "node:os";
 import { cac } from "cac";
 import { execa } from "execa";
 import { agentOutput, parseCli } from "../lib/agent-output";
+import { readRemoteClaudePoolUrl } from "../lib/device";
+import {
+  forwardedMergeQueueArgs,
+  mainMacQueueCommand,
+  processRequests,
+  submitRequest,
+} from "../lib/merge-queue-forward";
 import { githubBackend, projectForRepo } from "../lib/merge-queue-backend";
 import {
   mergeQueueDirectory,
@@ -13,6 +21,30 @@ import {
   validatePr,
   type QueueEntry,
 } from "../lib/merge-queue";
+
+// Set only by main-mac's inbox forced command: the spare Mac whose thread enqueued the PR.
+const forwardedFrom = process.env.MERGE_QUEUE_FORWARDED_FROM;
+const spareMac = Boolean(readRemoteClaudePoolUrl(homedir()));
+const args = process.argv.slice(2);
+const allowed = forwardedFrom || spareMac ? forwardedMergeQueueArgs(args) : args;
+if (typeof allowed === "string") {
+  console.error(`merge-queue: ${allowed}`);
+  process.exit(64);
+}
+// Spare Macs (those using a remote pool) run no queue of their own; main-mac's queue takes their PRs.
+if (!forwardedFrom && spareMac) {
+  const [command, ...rest] = mainMacQueueCommand(allowed);
+  const result = await execa(command, rest, {
+    stdio: "inherit",
+    reject: false,
+  });
+  process.exit(result.exitCode ?? 1);
+}
+if (forwardedFrom && allowed[0] === "add") {
+  const result = await submitRequest(allowed, forwardedFrom, mergeQueueDirectory());
+  (result.exitCode === 0 ? console.log : console.error)(result.output.trim());
+  process.exit(result.exitCode);
+}
 
 agentOutput("merge-queue", {
   nativeJson: true,
@@ -64,6 +96,8 @@ cli
       ...identity(repo, pr),
       head: "",
       thread: options.thread,
+      // Set only by process-requests for a spare Mac's forwarded add.
+      host: process.env.MERGE_QUEUE_HOST,
       status: "queued",
       enqueuedAt: new Date().toISOString(),
     };
@@ -137,6 +171,19 @@ cli
       `merge-queue: ${options.dryRun ? "would retry" : "retrying"} deploy for ${id}`,
       options.json,
     );
+  });
+cli
+  .command("process-requests", "Run spare Macs' forwarded adds; launchd entrypoint")
+  .action(async (options) => {
+    const processed = await processRequests(mergeQueueDirectory(), async (args, from) => {
+      const result = await execa(process.execPath, ["--no-env-file", import.meta.path, ...args], {
+        env: { MERGE_QUEUE_HOST: from },
+        reject: false,
+        all: true,
+      });
+      return { exitCode: result.exitCode ?? 1, output: result.all ?? "" };
+    });
+    output({ processed }, `merge-queue: ${processed} forwarded requests processed`, options.json);
   });
 cli
   .command("run [repo]", "Process queued repositories once; launchd entrypoint")
