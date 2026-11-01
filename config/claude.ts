@@ -12,6 +12,7 @@ export function createClaudeManagedSettings(profile: DeviceProfile): {
   cleanupPeriodDays: number;
   effortLevel: "high";
   modelSettings: Record<string, never>;
+  autoCompactWindow: number;
 } {
   return {
     permissions: { allow: createClaudePermissionAllowList(profile) },
@@ -22,5 +23,9 @@ export function createClaudeManagedSettings(profile: DeviceProfile): {
     // Every model runs at high by default; per-model overrides (such as Opus at xhigh) are cleared.
     effortLevel: "high",
     modelSettings: {},
+    // Compact at 500K of the 1M window: each turn re-reads the whole context, so a 1M thread burns about twice
+    // the weekly allowance, and a 500K summary keeps more detail. Never CLAUDE_CODE_MAX_CONTEXT_TOKENS: on known
+    // Claude models it only applies with compaction disabled.
+    autoCompactWindow: 500000,
   };
 }

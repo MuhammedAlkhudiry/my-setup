@@ -1,6 +1,10 @@
-import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
+import { execa } from "execa";
 import { z } from "zod";
 import { CREDENTIALS_ROOT } from "../../config/credentials";
 
@@ -132,4 +136,171 @@ export async function reactToTelegramMessage(
     message_id: Number(messageId),
     reaction: [{ type: "emoji", emoji }],
   });
+}
+
+// Large v3 turbo handles Arabic dialects well and runs fast on Apple silicon through Metal.
+export const WHISPER_MODEL = {
+  name: "ggml-large-v3-turbo-q8_0.bin",
+  url: "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q8_0.bin",
+  sha256: "317eb69c11673c9de1e1f0d459b253999804ec71ac4c23c17ecf5fbe24e259a1",
+  bytes: 874_188_075,
+};
+
+export function whisperModelPath(home = homedir()): string {
+  return join(home, ".local/share/my-setup/whisper", WHISPER_MODEL.name);
+}
+
+const fileSchema = z.object({ file_path: z.string().min(1), file_size: z.number().optional() });
+const whisperJsonSchema = z.object({
+  result: z.object({ language: z.string() }).optional(),
+  transcription: z.array(z.object({ text: z.string() })),
+});
+
+export interface Transcript {
+  text: string;
+  language: string;
+  durationSeconds: number;
+}
+
+export function validateFileId(fileId: string): void {
+  if (!/^[\w-]{10,200}$/.test(fileId)) throw new Error("File id must be a Telegram Bot API file_id");
+}
+
+export function ffmpegArgs(input: string, output: string): string[] {
+  return [
+    "-nostdin",
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    input,
+    "-ar",
+    "16000",
+    "-ac",
+    "1",
+    "-c:a",
+    "pcm_s16le",
+    "-map_metadata",
+    "-1",
+    "-y",
+    output,
+  ];
+}
+
+export function whisperArgs(model: string, wav: string, outputBase: string): string[] {
+  return ["-m", model, "-f", wav, "-l", "auto", "-nt", "-np", "-oj", "-of", outputBase];
+}
+
+export function parseWhisperJson(json: string, durationSeconds: number): Transcript {
+  const parsed = whisperJsonSchema.parse(JSON.parse(json));
+
+  return {
+    text: parsed.transcription
+      .map((segment) => segment.text.trim())
+      .filter(Boolean)
+      .join(" "),
+    language: parsed.result?.language ?? "unknown",
+    durationSeconds,
+  };
+}
+
+/** Duration of a 16 kHz mono 16-bit PCM WAV, read from its data chunk. */
+export function wavDurationSeconds(wav: Buffer): number {
+  let offset = 12;
+  while (offset + 8 <= wav.length) {
+    const size = wav.readUInt32LE(offset + 4);
+    if (wav.toString("ascii", offset, offset + 4) === "data")
+      return Math.round((Math.min(size, wav.length - offset - 8) / 32_000) * 10) / 10;
+    offset += 8 + size + (size % 2);
+  }
+
+  throw new Error("Converted audio has no WAV data chunk");
+}
+
+async function downloadTelegramFile(fileId: string, destination: string): Promise<void> {
+  const file = fileSchema.safeParse(await telegramApi("getFile", { file_id: fileId }));
+  if (!file.success) throw new Error("Telegram returned invalid file information");
+  const { token } = credentials();
+
+  try {
+    // The file URL contains the bot token; never print or log it.
+    const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.data.file_path}`, {
+      signal: AbortSignal.timeout(60_000),
+    });
+    if (!response.ok || !response.body) throw new Error();
+    await Bun.write(destination, response);
+  } catch {
+    throw new Error("Telegram file download failed; check credentials and connectivity");
+  }
+}
+
+/** Downloads the Whisper model once, verifying its SHA-256 before it is used. */
+export async function ensureWhisperModel(path = whisperModelPath()): Promise<string> {
+  if (existsSync(path)) return path;
+  mkdirSync(dirname(path), { recursive: true });
+  const partial = `${path}.partial`;
+  const hash = createHash("sha256");
+
+  try {
+    const response = await fetch(WHISPER_MODEL.url, { signal: AbortSignal.timeout(30 * 60_000) });
+    if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`);
+    await pipeline(
+      Readable.fromWeb(response.body as never),
+      new Transform({
+        transform(chunk, _encoding, callback) {
+          hash.update(chunk);
+          callback(null, chunk);
+        },
+      }),
+      createWriteStream(partial),
+    );
+  } catch (error) {
+    rmSync(partial, { force: true });
+    throw new Error(
+      `Whisper model download failed: ${error instanceof Error ? error.message : "unknown error"}`,
+    );
+  }
+
+  if (hash.digest("hex") !== WHISPER_MODEL.sha256) {
+    rmSync(partial, { force: true });
+    throw new Error("Whisper model checksum mismatch; deleted the download");
+  }
+  renameSync(partial, path);
+
+  return path;
+}
+
+/** Transcribes a local audio file; pass `fileId` instead to fetch a Telegram voice note first. */
+export async function transcribeAudio(source: { fileId?: string; file?: string }): Promise<Transcript> {
+  if (!source.fileId === !source.file) throw new Error("Pass either a file id or --file <path>");
+  if (source.fileId) validateFileId(source.fileId);
+  if (source.file && !existsSync(source.file)) throw new Error("Audio file not found");
+  for (const tool of ["whisper-cli", "ffmpeg"])
+    if (!Bun.which(tool)) throw new Error(`${tool} is not installed; transcription is unavailable here`);
+
+  const directory = mkdtempSync(join(tmpdir(), "telegram-transcribe-"));
+
+  try {
+    const input = source.file ?? join(directory, "voice");
+    if (source.fileId) await downloadTelegramFile(source.fileId, input);
+    const model = await ensureWhisperModel();
+
+    const wav = join(directory, "voice.wav");
+    const converted = await execa("ffmpeg", ffmpegArgs(input, wav), { reject: false, timeout: 120_000 });
+    if (converted.exitCode !== 0) throw new Error("ffmpeg could not convert the audio");
+
+    const outputBase = join(directory, "transcript");
+    const transcribed = await execa("whisper-cli", whisperArgs(model, wav, outputBase), {
+      reject: false,
+      timeout: 600_000,
+    });
+    if (transcribed.exitCode !== 0) throw new Error("whisper-cli failed to transcribe the audio");
+
+    return parseWhisperJson(
+      readFileSync(`${outputBase}.json`, "utf8"),
+      wavDurationSeconds(readFileSync(wav)),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 }

@@ -28,7 +28,7 @@ Use one file per decision, tech-debt entry, or release action with a short kebab
 
 ## Writing
 
-- Search before adding a fact; update its home and link to it elsewhere.
+- Search before adding a fact, decisions with `decisions search "<fact>"`; update its home and link to it elsewhere.
 - Give each `AGENTS.md` rule a one-clause reason so cleanup can assess whether it still applies.
 - Prevent agent mistakes with lint, tests, or hooks; add a written rule only when none can catch them.
 - Follow $writing-md-files.

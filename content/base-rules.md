@@ -50,7 +50,8 @@
   project files belong in the repository.
 - **CLEAN-UP** — When done, close browser sessions, stop servers/processes and unqueued devices you started, release device leases so the
   queue can keep one warm device, and delete temporary directories you created. Leave the user's and other agents' resources alone.
-- **DEV-ENV-UNBLOCK** — Resolve development environment blockers directly, including local environment changes.
+- **DEV-ENV-UNBLOCK** — Resolve development environment blockers directly, including local environment changes. Before asking the
+  owner for a password, run `sudo -n -l` and use any passwordless `sudo` command it lists, such as Xcode's first-launch setup on main-mac.
 - **BROWSER-TAB-REUSE** — In a browser shared with the user, such as Claude in Chrome, keep using the tab you control and navigate it per
   page; open a new tab only when you have none, and keep it until the task is done. When the user must act, such as accepting terms or adding
   a card, leave the tab open on that exact page and link it; never close it.
@@ -80,7 +81,9 @@
   are on. `main-mac` runs the Housekeeper, the Claude and Codex account pool, and the owner's phone connection, so it must stay awake.
   `small-mac` and `big-mac` are spare agent Macs: they use main-mac's pool, and their `{{SETUP_ROOT}}` is a read-only copy main-mac
   replaces on every install; never edit it there, and send setup changes to the Housekeeper instead. From them, when blocked and the
-  owner is unreachable, message the Housekeeper with `ssh main-mac-inbox send` and the message on stdin. Call each Mac by its name in
+  owner is unreachable, message the Housekeeper with `ssh main-mac-inbox send` and the message on stdin. Production SSH and the
+  Forge token live only on main-mac; spare Macs never get them, so they send production steps as a runbook to the Housekeeper, which
+  runs them. Call each Mac by its name in
   replies, docs, and briefs, never "this Mac" or "the other Mac".
   <!-- /profile -->
 
@@ -109,7 +112,8 @@ Use these projects as references when the user mentions them.
 - **CROSS-PROJECT-PARITY** — Identify project-agnostic additions to one active project that belong in the others. Skip product-, domain-,
   or feature-specific work.
   <!-- /profile -->
-- **SOFT-DECISIONS** — Recorded decisions are history and defaults. Follow them unless new information or direction warrants a deliberate
+- **SOFT-DECISIONS** — Recorded decisions are history and defaults. Before changing behavior in an area, find them with
+  `decisions search "<task>" --keywords "<terms>"`. Follow them unless new information or direction warrants a deliberate
   change; update or delete the record on the same branch.
 - **AGENT-PROMPTS** — Assume other agents share your skills and instructions. Write only the task and context, never copied system prompts,
   rules, `AGENTS.md`, `CLAUDE.md`, or skill text. Refer to relevant skills by name.
@@ -250,7 +254,8 @@ Reply freely; prefer visualisations, see $show-me.
   - **Close:** the next action, or "No next action needed", then a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`,
     `⏳ **AWAITING**` (on-track work waiting on a named external event), `🔴 **ACTION REQUIRED**`, or `⛔ **BLOCKED**`.
 - **DECISION-CONTEXT** — Start each question with 🔴. Give one line on today's behavior with a concrete example, then one line per lettered
-  option with its tradeoff, and mark your recommendation. Require no code reading or scrolling back.
+  option with its tradeoff, and mark your recommendation. Require no code reading or scrolling back. Letter options consecutively across
+  the whole chat, never restarting (after Z, AA), so a bare answer like "A E" names one option each.
 - **VISUAL-DECISIONS** — For decisions about what users see, show each option as an image, following **Phone-ready media**: a running-app
   screenshot for existing options, a rendered mockup otherwise. Text and ASCII sketches do not replace images.
 - **PROGRESS** — Only while work continues, at milestones: a task group finishes, the plan changes, work fails or blocks, or input is

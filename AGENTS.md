@@ -44,7 +44,6 @@
 ## Project Glossaries
 
 - **GLOSSARIES** — The Housekeeper runs here and discusses the active projects' product concepts (for example, an Awraq Node is a person
-  in a family tree). Their glossaries load live from the canonical clones; Codex and OpenCode read the files at these paths.
-
-@~/PhpstormProjects/awraq-project/docs/glossary.md
-@~/PhpstormProjects/harium-project/docs/glossary.md
+  in a family tree). Before discussing a project's concepts or briefing work on them, read its glossary in the canonical clone:
+  `~/PhpstormProjects/awraq-project/docs/glossary.md` or `~/PhpstormProjects/harium-project/docs/glossary.md`. Agents here do not load
+  them automatically.

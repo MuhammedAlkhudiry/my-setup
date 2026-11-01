@@ -55,6 +55,7 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
       "bun",
       "composer",
       "pk",
+      "decisions",
       "mail-read",
       "share-html",
       "html-artifact",

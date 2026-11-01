@@ -559,7 +559,7 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "ffmpeg",
         level: "optional",
-        why: "Edits demo recordings for pull requests and renders promo videos.",
+        why: "Edits demo recordings, renders promo videos, and converts Telegram voice notes for transcription.",
         versionArgs: ["-version"],
         latest: {
           type: "homebrew",
@@ -567,6 +567,20 @@ export const SYSTEM_TOOL_GROUPS = [
         },
         update: {
           commands: ["brew upgrade ffmpeg"],
+        },
+      },
+      {
+        name: "whisper-cli",
+        level: "optional",
+        why: "Transcribes Telegram voice notes locally through whisper.cpp for telegram-send transcribe.",
+        versionArgs: ["--version"],
+        latest: {
+          type: "homebrew",
+          formula: "whisper-cpp",
+        },
+        update: {
+          commands: ["brew upgrade whisper-cpp"],
+          note: "Install with brew install whisper-cpp; telegram-send transcribe downloads its model on first use.",
         },
       },
       {
@@ -613,7 +627,7 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "qmd",
         level: "required",
-        why: "Provides local keyword, semantic, and hybrid search for maintained personal knowledge.",
+        why: "Provides local keyword, semantic, and hybrid search for maintained personal knowledge and recorded project decisions.",
         versionArgs: ["--version"],
         latest: {
           type: "command",

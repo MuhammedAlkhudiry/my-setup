@@ -88,4 +88,4 @@ export function sleepPoll(command: string): string | undefined {
 }
 
 export const SLEEP_POLL_MESSAGE =
-  "Waiting by sleeping and checking again burns turns and hours. If the job notifies when it finishes (a run_in_background command, a subagent, a PR watch), start it and end the turn. Otherwise block once with a timeout: wait-for [--timeout <seconds>] <file|port|pid|url|cmd> <target>, such as wait-for port 3000 or wait-for --timeout 300 cmd 'gh run view 123 --exit-status'.";
+  "Waiting by sleeping and checking again burns turns and hours. If the job notifies when it finishes (a run_in_background command, a subagent, a PR watch), start it and end the turn. For a merge-queue PR, run merge-queue wait <owner/repo> <pr> [--deploy] in the background. Otherwise block once with a timeout: wait-for [--timeout <seconds>] <file|port|pid|url|cmd> <target>, such as wait-for port 3000 or wait-for --timeout 300 cmd 'gh run view 123 --exit-status'.";

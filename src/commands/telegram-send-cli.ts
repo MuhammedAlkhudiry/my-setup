@@ -7,10 +7,17 @@ import {
   reactToTelegramMessage,
   sendTelegramMessage,
   telegramApi,
+  transcribeAudio,
   validateRelayUrl,
 } from "../lib/telegram";
 
-agentOutput("telegram-send", { summary: (output) => output.trim() });
+agentOutput("telegram-send", { nativeJson: true, summary: (output) => output.trim() });
+
+const json = process.argv.includes("--json");
+
+function report(line: string): void {
+  console.log(json ? JSON.stringify({ command: "telegram-send", status: "success", output: [line] }) : line);
+}
 
 const cli = cac("telegram-send").option("--verbose", "Print detailed output");
 
@@ -19,13 +26,13 @@ cli
   .action(async (options: { support?: boolean }) => {
     if (process.stdin.isTTY) throw new Error("Pipe the message into telegram-send");
     await sendTelegramMessage(await Bun.stdin.text(), options.support);
-    console.log("telegram-send: sent");
+    report("telegram-send: sent");
   });
 cli
   .command("react <messageId> [emoji]", "React to one of the owner's messages (default 👍) instead of replying")
   .action(async (messageId: string, emoji: string | undefined, options: { support?: boolean }) => {
     await reactToTelegramMessage(messageId, emoji, options.support);
-    console.log("telegram-send: reacted");
+    report("telegram-send: reacted");
   });
 cli
   .command(
@@ -35,15 +42,25 @@ cli
   .action(async (action: string, url?: string) => {
     if (action === "check" && !url) {
       const pending = await checkTelegramWebhook();
-      console.log(`telegram-send: ops bot healthy; ${pending} pending updates`);
+      report(`telegram-send: ops bot healthy; ${pending} pending updates`);
       return;
     }
     if (action !== "set" || !url) throw new Error("Use webhook check or webhook set <url>");
     validateRelayUrl(url);
     await telegramApi("setWebhook", { url });
-    console.log("telegram-send: webhook set");
+    report("telegram-send: webhook set");
   });
-cli.option("--json", "Return a structured receipt");
+cli
+  .command(
+    "transcribe [fileId]",
+    "Print the text of a Telegram voice note (Bot API file_id) or a local --file, transcribed locally",
+  )
+  .option("--file <path>", "Transcribe a local audio file instead of a Telegram file")
+  .action(async (fileId: string | undefined, options: { file?: string }) => {
+    const transcript = await transcribeAudio({ fileId, file: options.file });
+    console.log(json ? JSON.stringify(transcript) : transcript.text || "telegram-send: no speech found");
+  });
+cli.option("--json", "Return a structured receipt; transcribe returns {text, language, durationSeconds}");
 cli.option("--support", "Send or react in the Awraq support group instead of the owner's chat");
 cli.help();
 cli.addEventListener("command:*", () => {

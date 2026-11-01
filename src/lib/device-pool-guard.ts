@@ -105,6 +105,8 @@ function matchingParen(text: string, open: number): number {
 
 const WRAPPERS = new Set(["sudo", "env", "command", "exec", "time", "nohup", "nice", "caffeinate", "heavy-run"]);
 const SHELLS = new Set(["sh", "bash", "zsh"]);
+// Reserved words that start a command list, as in `for d in a; do rm -rf $d; done`.
+const KEYWORDS = new Set(["do", "then", "else", "elif", "{", "!"]);
 const basename = (word: string) => word.slice(word.lastIndexOf("/") + 1);
 const operands = (words: string[]) => words.filter((word) => !word.startsWith("-"));
 
@@ -113,7 +115,7 @@ export function invokedProgram(words: string[]): { name: string; args: string[] 
   let rest = words;
   while (rest.length) {
     const [first, ...tail] = rest;
-    if (/^[A-Za-z_]\w*=/.test(first!)) rest = tail;
+    if (/^[A-Za-z_]\w*=/.test(first!) || KEYWORDS.has(first!)) rest = tail;
     else if (WRAPPERS.has(basename(first!)))
       rest = tail.includes("--") ? tail.slice(tail.indexOf("--") + 1) : tail.filter((word) => !word.startsWith("-"));
     else break;

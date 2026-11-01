@@ -22,5 +22,25 @@ export function unresolvedRemoval(command: string): string | undefined {
   return undefined;
 }
 
+/** The first zsh expansion flag, such as `${(f)…}` or `${=list}`, outside heredoc bodies. */
+export function zshExpansionFlag(command: string): string | undefined {
+  const lines: string[] = [];
+  let heredoc: { delimiter: string; indented: boolean } | undefined;
+  for (const line of command.split("\n")) {
+    if (heredoc) {
+      if ((heredoc.indented ? line.replace(/^\t+/, "") : line) === heredoc.delimiter) heredoc = undefined;
+      continue;
+    }
+    lines.push(line);
+    const start = line.match(/<<(-?)\s*['"]?([\w.-]+)['"]?/);
+    if (start && !line.includes("<<<")) heredoc = { delimiter: start[2]!, indented: start[1] === "-" };
+  }
+  return lines.join("\n").match(/\$\{[(=~^](?:[^{}]|\{[^}]*\})*\}?/)?.[0];
+}
+
+// Claude Code's safety check cannot parse these flags, so it asks a person to approve the command even in bypass mode.
+export const ZSH_FLAG_MESSAGE =
+  "Claude Code asks a person to approve inline zsh expansion flags, such as ${(f)...} or ${=...}, even in bypass mode. Put the logic in a script file (bun or bash) and run that instead.";
+
 export const RM_GUARD_MESSAGE =
   "Claude Code asks a person to approve rm on a target built from a variable or $(...), even in bypass mode. Print the path first, then remove it by its literal path, such as rm -rf /tmp/demo.Ab12.";

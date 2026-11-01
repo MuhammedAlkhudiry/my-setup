@@ -142,6 +142,7 @@ const SHARED_BIN_COMMANDS = [
   "hugeicons",
   "doctor",
   "pk",
+  "decisions",
   "share-html",
   "html-artifact",
   "store-build",

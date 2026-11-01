@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 
-import { unresolvedRemoval } from "./rm-target-guard";
+import { unresolvedRemoval, zshExpansionFlag } from "./rm-target-guard";
 
 const guard = new URL("../../shell/rm-target-guard.zsh", import.meta.url).pathname;
 
@@ -25,7 +25,23 @@ const blocked: Array<[string, string]> = [
   ["sudo rm -rf $TARGET", "rm $TARGET"],
   ["rmdir ${dir}", "rmdir ${dir}"],
   ["bash -c 'rm -rf $1' _ /tmp/x", "rm $1"],
+  // Lint agents on 2026-10-29: a removal right after a reserved word slipped past the hook.
+  ["for d in a b; do rm -rf $d/1.58.2; cp -R $SRC $d/; done", "rm $d/1.58.2"],
+  ['if [ -d "$T" ]; then rm -rf "$T"; fi', "rm $T"],
+  ["{ rm -rf $D; }", "rm $D"],
 ];
+
+// The Awraq lint agent's command that Claude Code held for approval on 2026-10-29, though it runs no rm.
+const zshFlags: Array<[string, string | undefined]> = [
+  ['files=(${(f)"$(git diff --name-only)"}); for f in ${(u)files}; do echo $f; done', '${(f)"$(git diff --name-only)"}'],
+  ["print -l ${=list}", "${=list}"],
+  ["echo ${name:-x} ${#items} ${dir}/x", undefined],
+  ["cat > s.zsh <<'EOF'\nprint -l ${(f)lines}\nEOF\nzsh s.zsh", undefined],
+];
+
+test("inline zsh expansion flags are blocked, other expansions and heredoc bodies pass", () => {
+  for (const [command, flag] of zshFlags) expect([command, zshExpansionFlag(command)]).toEqual([command, flag]);
+});
 
 test("removals of literal paths and commands that only mention rm pass", () => {
   for (const command of allowed) expect([command, unresolvedRemoval(command)]).toEqual([command, undefined]);

@@ -1,6 +1,7 @@
 # Decisions
 
-Read every decision in each area a change touches.
+Read every decision in each area a change touches. `decisions search "<task in plain words>" --keywords "<terms>"` finds related
+ones across areas; pass glossary terms or identifiers as keywords, since the sentence alone misses some. `--full` prints the files.
 
 ## What gets an entry
 
