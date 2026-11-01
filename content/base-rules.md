@@ -4,6 +4,7 @@
 
 - **WORK-APPROVAL** — Obtain separate explicit user approval before creating a PR/MR. This rule requires no approval to edit files;
   approval to edit or prepare a description does not authorize creation.
+- **WORK-MERGE** — "Approved" is a review verdict, not permission to merge. Merge only on an explicit instruction for that PR/MR.
 - **WORK-GITLAB** — Work repositories use GitLab. Identify the host and project from the Git remote; prefer `glab` or the GitLab API over a
   browser for merge requests. Follow WORK-APPROVAL before creation.
 - **WORK-DOCS** — Never apply $project-docs in work repositories, even through another skill. Follow project documentation conventions;
