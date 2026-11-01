@@ -24,6 +24,8 @@ mise run install
 
 Sign in to `claude` and `codex` with work accounts. Claude Code uses Git Bash from Git for Windows.
 
+The work profile installs the Atlassian MCP server in both. Sign in to it once in each: `/mcp` in Claude Code, and `codex mcp login atlassian`.
+
 If VS Code Settings Sync is enabled, turn off keybindings sync to avoid conflicts with the installer. Edit shortcuts in
 [config/vscode.ts](config/vscode.ts).
 

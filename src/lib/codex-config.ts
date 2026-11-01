@@ -1,7 +1,7 @@
 import { CODEX_CONFIG } from "../../config/codex";
-import { MCP_SERVERS } from "../../config/mcp";
+import type { McpServer } from "../../config/mcp";
 
-export function renderCodexMcpServersToml(servers = MCP_SERVERS): string {
+export function renderCodexMcpServersToml(servers: Record<string, McpServer>): string {
   const lines = [
     "# Managed by my-setup. Do not edit by hand.",
     "# Source of truth: config/mcp.ts",
@@ -9,6 +9,10 @@ export function renderCodexMcpServersToml(servers = MCP_SERVERS): string {
   ];
   for (const serverName of Object.keys(servers).sort()) {
     const server = servers[serverName];
+    if (server.type === "http") {
+      lines.push(`[mcp_servers.${serverName}]`, `url = ${JSON.stringify(server.url)}`, "");
+      continue;
+    }
     const [command, ...args] = server.command;
     lines.push(
       `[mcp_servers.${serverName}]`,

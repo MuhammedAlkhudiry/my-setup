@@ -3,7 +3,7 @@
  * Single source of truth for MCP entries used during config generation.
  */
 
-interface McpServer {
+interface LocalMcpServer {
   type: "local";
   command: [string, ...string[]];
   enabledTools: readonly string[];
@@ -11,7 +11,18 @@ interface McpServer {
   toolTimeoutSec: number;
 }
 
-export const MCP_SERVERS: Record<string, McpServer> = {};
+interface HttpMcpServer {
+  type: "http";
+  url: string;
+}
+
+export type McpServer = LocalMcpServer | HttpMcpServer;
+
+export const MCP_SERVERS: Record<string, LocalMcpServer> = {};
+
+export const WORK_MCP_SERVERS: Record<string, McpServer> = {
+  atlassian: { type: "http", url: "https://mcp.atlassian.com/v1/mcp" },
+};
 
 /**
  * Servers install removes from Claude Code, which keeps a server until it is removed by name. Codex and OpenCode drop them

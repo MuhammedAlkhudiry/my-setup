@@ -34,7 +34,7 @@ import type { DeviceProfile } from "../../config/devices";
 import { createClaudeManagedSettings } from "../../config/claude";
 import { CODEX_RETIRED_TOP_LEVEL_KEYS } from "../../config/codex";
 import { CREDENTIALS_HOME_ENV, CREDENTIALS_ROOT } from "../../config/credentials";
-import { MCP_SERVERS, RETIRED_MCP_SERVERS } from "../../config/mcp";
+import { RETIRED_MCP_SERVERS } from "../../config/mcp";
 import { createOpencodeCliConfig, mergeOpencodeConfig } from "../../config/opencode";
 import { mergeClaudeHooks, removeRetiredHooks } from "../../config/hooks";
 import { renderCodexRules } from "../../config/permissions";
@@ -405,7 +405,7 @@ async function installClaude(profile: DeviceProfile): Promise<void> {
   copyRules(paths.rules, "Claude Code", profile);
   await installManagedSymlink(SHARED_PATHS.skills, paths.skills, "Claude Code skills");
   await mergeClaudeSettingsAsync(profile, paths.settings);
-  if (profile.mcpServers) await installClaudeMcpServers(paths.configDir);
+  await installClaudeMcpServers(profile, paths.configDir);
 }
 
 async function mergeClaudeSettingsAsync(
@@ -436,17 +436,30 @@ async function mergeClaudeSettingsAsync(
   print.success("Claude Code settings merged");
 }
 
-async function installClaudeMcpServers(configDir: string): Promise<void> {
+async function installClaudeMcpServers(profile: DeviceProfile, configDir: string): Promise<void> {
   if (!Bun.which("claude")) {
     print.warning("claude CLI not found; skipped Claude Code MCP servers");
     return;
   }
-  const env = { CLAUDE_CONFIG_DIR: configDir };
+  // Setting this on a direct install would move Claude's config from ~/.claude.json to ~/.claude/.claude.json.
+  const env = profile.claude === "pool" ? { CLAUDE_CONFIG_DIR: configDir } : {};
   const remove = (name: string) =>
     execa("claude", ["mcp", "remove", "-s", "user", name], { env, reject: false, stdio: "pipe" });
 
   for (const name of RETIRED_MCP_SERVERS) await remove(name);
-  for (const [name, server] of Object.entries(MCP_SERVERS)) {
+  for (const [name, server] of Object.entries(profile.mcpServers)) {
+    if (server.type === "http") {
+      // Added once and never removed, so a reinstall cannot cost the server its sign-in.
+      const added = await execa(
+        "claude",
+        ["mcp", "add-json", "-s", "user", name, JSON.stringify(server)],
+        { env, reject: false, stdio: "pipe" },
+      );
+      if (added.failed && !/already exists/i.test(`${added.stdout}${added.stderr}`)) {
+        throw new Error(`Could not add Claude Code MCP server ${name}: ${added.stderr}`);
+      }
+      continue;
+    }
     const [command, ...args] = server.command;
     await remove(name);
     await execa(
@@ -455,7 +468,7 @@ async function installClaudeMcpServers(configDir: string): Promise<void> {
       { env, stdio: "pipe" },
     );
   }
-  print.success(`Claude Code MCP servers installed (${Object.keys(MCP_SERVERS).length})`);
+  print.success(`Claude Code MCP servers installed (${Object.keys(profile.mcpServers).length})`);
 }
 
 function removeTomlTopLevelKey(configToml: string, key: string): string {
@@ -578,7 +591,7 @@ async function signInCodexToRemotePool(clientKey: string): Promise<void> {
 
 async function mergeCodexMcpConfigAsync(profile: DeviceProfile): Promise<void> {
   print.info(`Merging Codex MCP config into ${CODEX_PATHS.config}...`);
-  const managedContent = renderCodexMcpServersToml(profile.mcpServers ? MCP_SERVERS : {}).trimEnd();
+  const managedContent = renderCodexMcpServersToml(profile.mcpServers).trimEnd();
   const startMarker = "# >>> my-setup mcp >>>";
   const endMarker = "# <<< my-setup mcp <<<";
   const managedBlock = `${startMarker}\n${managedContent}\n${endMarker}\n`;

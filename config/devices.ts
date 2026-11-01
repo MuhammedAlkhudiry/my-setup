@@ -3,6 +3,8 @@
  * (see src/lib/device.ts); the installer installs only what that profile enables.
  */
 
+import { MCP_SERVERS, type McpServer, WORK_MCP_SERVERS } from "./mcp";
+
 export const DEVICE_PROFILE_NAMES = ["personal", "work"] as const;
 
 export type DeviceProfileName = (typeof DEVICE_PROFILE_NAMES)[number];
@@ -16,7 +18,7 @@ export interface DeviceProfile {
   // Mac-only zsh layer: .zshrc/.zshenv, local secrets, shared bin commands, and `doctor`.
   shell: boolean;
   macWatcher: boolean;
-  mcpServers: boolean;
+  mcpServers: Record<string, McpServer>;
   // PhpStorm shortcuts in VS Code: the IntelliJ keymap extension plus `config/vscode.ts` (Windows keys).
   vscodeKeymap: boolean;
   // The RTK OpenCode plugin is installed whenever OpenCode is enabled and RTK is present; `required` fails the install without RTK.
@@ -41,7 +43,7 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
     activeProjects: true,
     shell: true,
     macWatcher: true,
-    mcpServers: true,
+    mcpServers: MCP_SERVERS,
     vscodeKeymap: false,
     rtk: "required",
     requiredSecrets: ["POSTHOG_CLI_API_KEY", "HUGEICONS_TOKEN"],
@@ -71,7 +73,7 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
     activeProjects: false,
     shell: false,
     macWatcher: false,
-    mcpServers: false,
+    mcpServers: WORK_MCP_SERVERS,
     vscodeKeymap: true,
     rtk: "optional",
     requiredSecrets: [],
