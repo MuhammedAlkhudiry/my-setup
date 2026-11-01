@@ -7,6 +7,7 @@ import {
   QueueEnvironmentError,
   QueueTransientError,
   readMergeQueue,
+  settledEntry,
   updateMergeQueue,
   validatePr,
   type PullRequest,
@@ -401,6 +402,27 @@ test("external main movement aborts; setup errors leave entries queued", async (
   );
   expect(f.state().entries.every((entry) => entry.status === "queued")).toBe(true);
 });
+test("wait settles on merge or failure, and on the deploy with --deploy", () => {
+  const entry: QueueEntry = {
+    repo: "owner/repo",
+    pr: 1,
+    head: "h1",
+    status: "queued",
+    enqueuedAt: "",
+  };
+  expect(settledEntry(undefined, false)?.exitCode).toBe(2);
+  expect(settledEntry(entry, false)).toBeUndefined();
+  expect(settledEntry({ ...entry, status: "failed", error: "red", log: "/l" }, false)).toEqual({
+    exitCode: 1,
+    summary: "failed: red; log=/l",
+  });
+
+  const merged = { ...entry, status: "merged" as const, mergedMainSha: "m1" };
+  expect(settledEntry(merged, false)).toEqual({ exitCode: 0, summary: "merged as m1" });
+  expect(settledEntry(merged, true)).toBeUndefined();
+  expect(settledEntry({ ...merged, deployedSha: "m1" }, true)?.exitCode).toBe(0);
+  expect(settledEntry({ ...merged, deployError: "down" }, true)?.exitCode).toBe(1);
+});
 test("drafts and closed PRs fail validation", async () => {
   const f = await fixture(1);
   for (const patch of [{ isDraft: true }, { state: "CLOSED" }])
@@ -622,4 +644,123 @@ test("the nightly sign-off waits while PRs are ready to merge", async () => {
     () => new Date(2026, 9, 26, 4),
   );
   expect(nightly).toBe(1);
+});
+function listen(f: Awaited<ReturnType<typeof fixture>>) {
+  const messages: string[] = [];
+  f.backend.notify = async (message) => {
+    messages.push(message);
+  };
+  return messages;
+}
+test("the Housekeeper hears about failed PRs and deploys, never about waiting entries", async () => {
+  const f = await fixture(2);
+  const messages = listen(f);
+  f.backend.signed = async () => false;
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(messages).toEqual([]);
+
+  f.backend.signed = async () => true;
+  f.backend.candidate = async (batch) => ({
+    ok: !batch.some((entry) => entry.pr === 2),
+    log: "/signoff.log",
+  });
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(messages).toEqual([
+    "merge-queue: owner/repo#2 failed: Candidate sign-off failed. Log: /signoff.log. Owning thread: owning-thread on main-mac.",
+    "merge-queue: owner/repo: PRs #1 merged; main is merge1; deployed merge1. Run the post-merge checks on it.",
+  ]);
+
+  messages.length = 0;
+  f.backend.base = async () => "direct";
+  f.backend.deploy = async () => ({ ok: false, log: "/deploy.log", error: "health check failed" });
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(messages).toEqual([
+    "merge-queue: owner/repo: no queued PRs (main moved outside the queue) merged; main is direct; deploy failed: health check failed. Log: /deploy.log. After fixing, run merge-queue retry-deploy owner/repo.",
+  ]);
+});
+test("a broken environment is reported once per spell, and its recovery once", async () => {
+  const f = await fixture(1);
+  const messages = listen(f);
+  const reopen = () =>
+    updateMergeQueue((state) => {
+      state.environment!["owner/repo"].retryAt = "2000-01-01";
+    }, f.directory);
+  let broken = true;
+  const candidate = f.backend.candidate;
+  f.backend.candidate = async (...args) => {
+    if (broken) throw new QueueEnvironmentError("environment broken: prepare failed; /prepare.log");
+    return candidate(...args);
+  };
+  for (let pass = 0; pass < 3; pass++) {
+    await expect(processRepository("owner/repo", f.backend, f.directory)).rejects.toThrow("broken");
+    await reopen();
+  }
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toStartWith(
+    "merge-queue: owner/repo environment broken (attempt 1): environment broken: prepare failed; /prepare.log. Log: /prepare.log. Queued PRs stay queued; next retry at ",
+  );
+
+  broken = false;
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(f.state().environment?.["owner/repo"]).toBeUndefined();
+  expect(messages.slice(1, 2)).toEqual([
+    "merge-queue: owner/repo environment recovered; the queue is processing again.",
+  ]);
+});
+test("short transient spells stay quiet; stubborn ones are reported", async () => {
+  const f = await fixture(1);
+  const messages = listen(f);
+  f.backend.candidate = async () => {
+    throw new QueueTransientError("host busy: sign-off admission timed out");
+  };
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    await expect(processRepository("owner/repo", f.backend, f.directory)).rejects.toThrow("busy");
+    if (attempt === 4) expect(messages).toEqual([]);
+    await updateMergeQueue((state) => {
+      state.environment!["owner/repo"].retryAt = "2000-01-01";
+    }, f.directory);
+  }
+  expect(messages).toHaveLength(1);
+  expect(messages[0]).toContain("environment broken (attempt 5): host busy");
+});
+test("a quiet transient spell clears without a recovery message", async () => {
+  const f = await fixture(1);
+  const messages = listen(f);
+  f.remote.get(1)!.mergeable = "UNKNOWN";
+  await expect(
+    processRepository("owner/repo", f.backend, f.directory, async () => {}),
+  ).rejects.toThrow("recalculating");
+  f.remote.get(1)!.mergeable = "MERGEABLE";
+  await updateMergeQueue((state) => {
+    state.environment!["owner/repo"].retryAt = "2000-01-01";
+  }, f.directory);
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(f.state().environment?.["owner/repo"]).toBeUndefined();
+  expect(messages.every((message) => !message.includes("environment"))).toBe(true);
+});
+test("a message that fails to send never breaks the pass", async () => {
+  const f = await fixture(2);
+  let sends = 0;
+  f.backend.notify = async () => {
+    sends++;
+    throw new Error("t3 not running");
+  };
+  f.backend.candidate = async (batch) => ({
+    ok: !batch.some((entry) => entry.pr === 2),
+    log: "/signoff.log",
+  });
+  const errors: string[] = [];
+  const original = console.error;
+  console.error = (message: string) => errors.push(message);
+  try {
+    await processRepository("owner/repo", f.backend, f.directory);
+  } finally {
+    console.error = original;
+  }
+  expect(f.merged).toEqual([1]);
+  expect(f.deploys).toEqual(["merge1"]);
+  expect(f.state().entries.map((entry) => entry.status)).toEqual(["merged", "failed"]);
+  expect(sends).toBe(2);
+  expect(errors.every((error) => error.includes("Housekeeper message not sent: t3 not running"))).toBe(true);
+  expect(errors).toHaveLength(2);
 });

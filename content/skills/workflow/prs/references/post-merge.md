@@ -4,6 +4,8 @@
 
 The Housekeeper owns these checks after a queue handoff; the originating agent stops after enqueue. Read `merge-queue status --json`, group new merges per repository, and check the final main SHA covering the batch. Its `deploys` record
 shows whether the worker deployed, skipped, or failed that SHA. Relay failures to owning threads; record checked SHAs to avoid duplicate work.
+To wait for a queued PR, run `merge-queue wait <owner/repo> <pr> --deploy` as a background command and end the turn: it exits 0 once the PR
+is merged and deployed, 1 on a failure, and 75 after `--timeout` (default 3600 seconds). Never poll the queue or the server for it.
 
 <!-- /profile -->
 

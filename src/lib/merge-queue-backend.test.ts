@@ -233,6 +233,11 @@ test("deploy runs the project's deploy task at the merged SHA and parses its res
     expect(calls).toContain("git reset --hard sha");
     expect(calls).toContain("mise run deploy -- --sha sha");
     expect(calls.some((call) => call.includes("run prepare"))).toBe(false);
+    result = `deployed ${"b".repeat(40)}; Forge script unchanged`;
+    expect(await backend.deploy("sha")).toMatchObject({
+      ok: true,
+      deployedSha: "b".repeat(40),
+    });
     tree = "other";
     result = "skipped docs only";
     expect(await backend.deploy("sha")).toMatchObject({

@@ -2,6 +2,7 @@ import { flock } from "./flock";
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { shorten } from "./merge-queue-notify";
 import type { UpdateResult } from "./merge-queue-update";
 
 export const mergeQueueDirectory = () =>
@@ -85,7 +86,14 @@ export const NIGHTLY_HOUR = 3;
 export interface MergeQueueState {
   environment?: Record<
     string,
-    { cause: string; attempts: number; retryAt: string; transient?: boolean }
+    {
+      cause: string;
+      attempts: number;
+      retryAt: string;
+      transient?: boolean;
+      /** Set once the Housekeeper heard about this broken spell, so retries stay quiet until it clears. */
+      notified?: boolean;
+    }
   >;
   /** The latest merged main SHA each repository's worker deploys, and how that went. */
   deploys?: Record<string, DeployRecord>;
@@ -143,6 +151,26 @@ export function record(state: MergeQueueState, entry: QueueEntry, event: string)
     entry: { ...entry },
   });
 }
+/** How `merge-queue wait` ends for an entry: undefined while it is still queued, or merged but not yet deployed with `deploy`. */
+export function settledEntry(
+  entry: QueueEntry | undefined,
+  deploy: boolean,
+): { exitCode: number; summary: string } | undefined {
+  if (!entry) return { exitCode: 2, summary: "is not in the queue" };
+  if (entry.status === "queued") return undefined;
+  if (entry.status === "removed") return { exitCode: 1, summary: "was removed" };
+  if (entry.status === "failed")
+    return {
+      exitCode: 1,
+      summary: `failed: ${entry.error ?? "unknown error"}${entry.log ? `; log=${entry.log}` : ""}`,
+    };
+
+  const merged = `merged as ${entry.mergedMainSha ?? "unknown SHA"}`;
+  if (!deploy) return { exitCode: 0, summary: merged };
+  if (entry.deployedSha) return { exitCode: 0, summary: `${merged}; deployed ${entry.deployedSha}` };
+  if (entry.deployError) return { exitCode: 1, summary: `${merged}; deploy failed: ${entry.deployError}` };
+  return undefined;
+}
 export interface PullRequest {
   state: string;
   isDraft: boolean;
@@ -182,7 +210,24 @@ export interface QueueBackend {
   }>;
   /** Removes the merged PR's own task worktree when nothing in it can be lost; returns the removed path. */
   removeWorktree?(entry: QueueEntry): Promise<string | undefined>;
+  /** Messages the Housekeeper about an event that needs action; only main-mac's worker sets it. */
+  notify?(message: string): Promise<void>;
 }
+/** Transient spells, such as GitHub recalculating mergeability, usually clear within seconds; report only stubborn ones. */
+export const TRANSIENT_NOTIFY_ATTEMPTS = 5;
+/** A message that fails to send is logged and dropped: notifying must never break or hold up the worker. */
+async function tell(backend: QueueBackend, message: string) {
+  if (!backend.notify) return;
+  try {
+    await backend.notify(message);
+  } catch (error) {
+    console.error(
+      `merge-queue: Housekeeper message not sent: ${error instanceof Error ? error.message : String(error)}; message: ${message}`,
+    );
+  }
+}
+const prList = (prs: number[]) =>
+  prs.length ? `PRs ${prs.map((pr) => `#${pr}`).join(", ")}` : "no queued PRs (main moved outside the queue)";
 export function validatePr(pr: PullRequest) {
   if (pr.mergeable === "UNKNOWN")
     throw new QueueTransientError("GitHub is recalculating PR mergeability");
@@ -324,10 +369,11 @@ async function deployMerged(repo: string, backend: QueueBackend, directory: stri
     result = { ok: false, log: "", error: String(error) };
   }
 
+  const status = !result.ok ? "failed" : result.skipped ? "skipped" : "deployed";
   await updateMergeQueue((state) => {
     state.deploys![repo] = {
       ...pending,
-      status: !result.ok ? "failed" : result.skipped ? "skipped" : "deployed",
+      status,
       at: new Date().toISOString(),
       deployedSha: result.deployedSha,
       skipped: result.skipped,
@@ -346,6 +392,15 @@ async function deployMerged(repo: string, backend: QueueBackend, directory: stri
       );
     }
   }, directory);
+  const merged = `${repo}: ${prList(pending.prs)} merged; main is ${pending.sha}`;
+  await tell(
+    backend,
+    status === "deployed"
+      ? `merge-queue: ${merged}; deployed ${result.deployedSha ?? pending.sha}. Run the post-merge checks on it.`
+      : status === "skipped"
+        ? `merge-queue: ${merged}; deploy skipped: ${shorten(result.skipped!)}.`
+        : `merge-queue: ${merged}; deploy failed: ${shorten(result.error ?? "deploy failed")}. Log: ${result.log || "none"}. After fixing, run merge-queue retry-deploy ${repo}.`,
+  );
 }
 const localDate = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
@@ -408,7 +463,14 @@ export async function processRepository(
         throw new Error("Queue changed during batch; rebuilding next pass");
       Object.assign(current, patch);
       record(state, current, event);
-    }, directory);
+    }, directory).then(() =>
+      patch.status === "failed"
+        ? tell(
+            backend,
+            `merge-queue: ${repo}#${entry.pr} failed: ${shorten(patch.error ?? "unknown error")}. Log: ${patch.log ?? "none"}. Owning thread: ${entry.thread ?? "none"} on ${entry.host ?? "main-mac"}.`,
+          )
+        : undefined,
+    );
   const failed = (entry: QueueEntry, error: string, log?: string) =>
     change(entry, "failed", {
       status: "failed",
@@ -432,6 +494,17 @@ export async function processRepository(
       );
     return result.status;
   };
+  // A pass that gets this far without an error ends a broken spell.
+  const recovered = async () => {
+    const cleared = readMergeQueue(directory).environment?.[repo];
+    if (!cleared) return;
+
+    await updateMergeQueue((state) => {
+      delete state.environment?.[repo];
+    }, directory);
+    if (cleared.notified)
+      await tell(backend, `merge-queue: ${repo} environment recovered; the queue is processing again.`);
+  };
   try {
     const broken = readMergeQueue(directory).environment?.[repo];
     if (broken && Date.parse(broken.retryAt) > Date.now()) return;
@@ -439,6 +512,7 @@ export async function processRepository(
     await backend.recover?.();
 
     // Holding the worker lock, a running deploy belongs to a worker that died mid-deploy.
+    const deploying = readMergeQueue(directory).deploys?.[repo];
     await updateMergeQueue((state) => {
       const deploy = state.deploys?.[repo];
       if (deploy?.status === "running")
@@ -455,6 +529,11 @@ export async function processRepository(
           error: "Worker stopped during the nightly full sign-off",
         });
     }, directory);
+    if (deploying?.status === "running")
+      await tell(
+        backend,
+        `merge-queue: ${repo}: ${prList(deploying.prs)} merged; main is ${deploying.sha}; deploy failed: the worker stopped mid-deploy. Check production, then run merge-queue retry-deploy ${repo}.`,
+      );
     // Direct merges bypass the batch receipts; deploy main whenever it moved past the last deploy.
     const last = readMergeQueue(directory).deploys?.[repo];
     if (!last || last.status === "deployed" || last.status === "skipped") {
@@ -522,7 +601,8 @@ export async function processRepository(
     }
     if (!ready.length) {
       await deployMerged(repo, backend, directory);
-      return await nightlySignoff(repo, backend, directory, now());
+      await nightlySignoff(repo, backend, directory, now());
+      return await recovered();
     }
     const base = await backend.base();
     const passing = await passingBatch(ready, base, backend, async (entry, error, log, runs) => {
@@ -577,17 +657,19 @@ export async function processRepository(
       );
       landed.push(entry);
     }
-    await updateMergeQueue((state) => {
-      delete state.environment?.[repo];
-    }, directory);
+    await recovered();
     await deployMerged(repo, backend, directory);
     for (const entry of landed) await removeMergedWorktree(entry, backend, directory);
   } catch (error) {
     if (error instanceof QueueEnvironmentError) {
+      let announce = undefined as NonNullable<MergeQueueState["environment"]>[string] | undefined;
       await updateMergeQueue((state) => {
         state.environment ??= {};
         const transient = error instanceof QueueTransientError;
-        const attempts = (state.environment[repo]?.attempts ?? 0) + 1;
+        const previous = state.environment[repo];
+        const attempts = (previous?.attempts ?? 0) + 1;
+        const notified =
+          previous?.notified || !transient || attempts >= TRANSIENT_NOTIFY_ATTEMPTS;
         state.environment[repo] = {
           cause: error.message,
           attempts,
@@ -598,8 +680,15 @@ export async function processRepository(
                 : Math.min(86_400_000, 900_000 * 2 ** Math.min(attempts - 1, 7))),
           ).toISOString(),
           transient,
+          notified,
         };
+        if (notified && !previous?.notified) announce = state.environment[repo];
       }, directory);
+      if (announce)
+        await tell(
+          backend,
+          `merge-queue: ${repo} environment broken (attempt ${announce.attempts}): ${shorten(announce.cause)}. Log: ${announce.cause.match(/; (\/[^\s;]+)$/)?.[1] ?? join(directory, "worker.log")}. Queued PRs stay queued; next retry at ${announce.retryAt}. A "recovered" message follows when it clears.`,
+        );
     }
     throw error;
   } finally {

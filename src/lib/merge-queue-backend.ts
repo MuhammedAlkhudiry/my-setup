@@ -312,7 +312,7 @@ export function githubBackend(
           (await step("mise", ["run", "deploy", "--", "--sha", sha], 2_700_000))
             .split("\n")
             .at(-1) ?? "";
-        const deployed = last.match(/^deployed ([0-9a-f]{40})$/)?.[1];
+        const deployed = last.match(/^deployed ([0-9a-f]{40})(?:;.*)?$/)?.[1];
         const skipped = last.match(/^skipped (.+)$/)?.[1];
         if (!deployed && !skipped) throw new Error(`Deploy printed no result line: ${last}`);
         return { ok: true, log, deployedSha: deployed, skipped };

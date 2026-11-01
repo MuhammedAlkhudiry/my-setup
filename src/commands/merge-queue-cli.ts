@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { cac } from "cac";
 import { execa } from "execa";
 import { agentOutput, parseCli } from "../lib/agent-output";
@@ -12,11 +13,13 @@ import {
   submitRequest,
 } from "../lib/merge-queue-forward";
 import { githubBackend, projectForRepo } from "../lib/merge-queue-backend";
+import { housekeeperNotifier } from "../lib/merge-queue-notify";
 import {
   mergeQueueDirectory,
   processRepository,
   readMergeQueue,
   record,
+  settledEntry,
   updateMergeQueue,
   validatePr,
   type QueueEntry,
@@ -132,6 +135,32 @@ cli
       options.json,
     );
   });
+cli
+  .command(
+    "wait <repo> <pr>",
+    "Block until an entry merges or fails; exit 0 done, 1 failed, 2 not queued, 75 timed out",
+  )
+  .option("--deploy", "Also wait for the deploy of its merge")
+  .option("--timeout <seconds>", "Give up after this many seconds", { default: 3600 })
+  .action(async (repo, pr, options) => {
+    const id = identity(repo, pr);
+    const deadline = Date.now() + Number(options.timeout) * 1000;
+    for (;;) {
+      const entry = readMergeQueue().entries.find((item) => item.repo === id.repo && item.pr === id.pr);
+      const settled = settledEntry(entry, Boolean(options.deploy));
+      if (settled || Date.now() >= deadline) {
+        const result = settled ?? { exitCode: 75, summary: `still ${entry?.status} after ${options.timeout}s` };
+        const summary = `merge-queue: ${id.repo}#${id.pr} ${result.summary}`;
+        // Failures reach the caller only through stderr.
+        if (result.exitCode && !options.json) console.error(summary);
+        else output({ ...id, ...result }, summary, options.json);
+        process.exitCode = result.exitCode;
+        return;
+      }
+
+      await Bun.sleep(5000);
+    }
+  });
 for (const command of ["remove", "retry"])
   cli.command(`${command} <repo> <pr>`, `${command} an entry`).action(async (repo, pr, options) => {
     const id = identity(repo, pr);
@@ -198,8 +227,12 @@ cli
         );
     const plans = [];
     if (!options.dryRun) {
+      // Only main-mac runs passes: spare Macs forward to it and never reach `run`.
+      const notify = housekeeperNotifier(join(import.meta.dir, "../.."));
       const results = await Promise.allSettled(
-        repos.map((repository) => processRepository(repository, githubBackend(repository))),
+        repos.map((repository) =>
+          processRepository(repository, { ...githubBackend(repository), notify }),
+        ),
       );
       const errors = results.flatMap((result, index) =>
         result.status === "rejected" ? [`${repos[index]}: ${String(result.reason)}`] : [],

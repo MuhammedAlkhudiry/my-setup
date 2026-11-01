@@ -1,5 +1,5 @@
 // One merge queue runs, on main-mac: it is the Housekeeper's host and owns relays and post-merge checks. Spare Macs run no
-// worker; their `add` and `status` travel over the restricted main-mac-inbox SSH key, whose forced command (shell/t3-inbox.zsh)
+// worker; their `add`, `status`, and `wait` travel over the restricted main-mac-inbox SSH key, whose forced command (shell/t3-inbox.zsh)
 // accepts only these shapes. An SSH session cannot read GitHub's keychain sign-in, so a forwarded `add` is spooled as a request
 // that a launchd agent in main-mac's GUI session runs, recording which Mac the owning thread lives on.
 import { existsSync } from "node:fs";
@@ -21,6 +21,13 @@ export function forwardedMergeQueueArgs(args: string[]): string[] | string {
   const positional = rest.filter((arg) => !FLAGS.has(arg));
 
   if (command === "status" && positional.length === 0 && !flags.includes("--dry-run")) return args;
+  if (command === "wait") {
+    const [repo, pr, ...options] = positional.filter((arg) => arg !== "--deploy");
+    const timeout =
+      options.length === 0 ||
+      (options.length === 2 && options[0] === "--timeout" && /^[1-9][0-9]{0,5}$/.test(options[1]!));
+    if (REPO.test(repo ?? "") && PR.test(pr ?? "") && timeout) return args;
+  }
   if (command === "add") {
     const [repo, pr, option, thread, ...extra] = positional;
     if (
@@ -32,7 +39,7 @@ export function forwardedMergeQueueArgs(args: string[]): string[] | string {
     )
       return args;
   }
-  return "spare Macs only run `merge-queue add <owner/repo> <pr> --thread <id>` and `merge-queue status`; main-mac's queue does the rest";
+  return "spare Macs only run `merge-queue add <owner/repo> <pr> --thread <id>`, `merge-queue status`, and `merge-queue wait <owner/repo> <pr>`; main-mac's queue does the rest";
 }
 
 /** The SSH command a spare Mac runs to reach main-mac's queue. */

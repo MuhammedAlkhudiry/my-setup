@@ -1,14 +1,15 @@
 #!/bin/zsh
 # Forced SSH command for spare Macs' inbox keys: such a key can only post the message on stdin to the Housekeeper
-# thread on this Mac (ssh main-mac-inbox send <<< "message"), or reach this Mac's merge queue with `merge-queue add`
-# or `merge-queue status`, which spare Macs' merge-queue command does for them. The CLI validates forwarded arguments.
+# thread on this Mac (ssh main-mac-inbox send <<< "message"), or reach this Mac's merge queue with `merge-queue add`,
+# `merge-queue status`, or `merge-queue wait`, which spare Macs' merge-queue command does for them. The CLI validates forwarded arguments.
 # authorized_keys: restrict,command="<this file> <mac name>" ssh-ed25519 ...
 
 set -euo pipefail
 
-HOUSEKEEPER_THREAD="feb86885-0ba2-42b9-9bf2-2a149f93fd86"
 from=${1:?mac name}
 setup=${0:A:h:h}
+# The merge-queue worker reads the same file to message the Housekeeper.
+HOUSEKEEPER_THREAD=$(<"$setup/config/housekeeper-thread.txt")
 
 if [[ ${SSH_ORIGINAL_COMMAND:-} == "merge-queue "* ]]; then
   # (z) splits words without expanding anything; quotes stay literal and fail the CLI's validation.
@@ -19,7 +20,7 @@ if [[ ${SSH_ORIGINAL_COMMAND:-} == "merge-queue "* ]]; then
 fi
 
 if [[ ${SSH_ORIGINAL_COMMAND:-} != send ]]; then
-  print -u2 "t3-inbox: only 'send' (message on stdin) and 'merge-queue add|status' are allowed"
+  print -u2 "t3-inbox: only 'send' (message on stdin) and 'merge-queue add|status|wait' are allowed"
   exit 64
 fi
 
