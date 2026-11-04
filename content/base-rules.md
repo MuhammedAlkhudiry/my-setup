@@ -26,6 +26,12 @@
   current response, and proposed response as concrete JSON with new fields marked and illustrative values labelled. Log each request with
   its date, status, and linked merge request in `~/dev/<project>-notes/backend-requests.md`, outside the repository; update it when the
   backend answers or ships.
+- **WORK-BACKEND-GAPS** — Only a missing endpoint or field blocks frontend work; missing or wrong dev data never does. When the contract
+  exists but the data is empty or wrong, or the user says to assume the backend, build against the contract and show the UI with local fake
+  values (the ticket's numbers) in a block marked `TEMP-FAKE-BACKEND` that is never committed; list the gap in the backend message. Tag MR
+  titles `[Blocked by BE]` only for a missing contract and `[Blocked by Product]` only for an open product answer; an MR with neither is
+  ready, not draft.
+- **WORK-JIRA** — Read Jira through the Atlassian connector; use the browser only when the connector is unavailable.
   <!-- /profile -->
 - **CONCURRENT-AGENTS** — Coordinate only for possible overwrites or shared-resource interference. Before writes, check available session
   information once; do not scan every harness or poll. Read-only work needs no coordination; missing visibility is no blocker. Separate
