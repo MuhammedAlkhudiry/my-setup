@@ -1,8 +1,22 @@
+import { deadlineRunner } from "../commands/merge-queue-signoff-worker";
+import { QueueTransientError } from "./merge-queue";
 import { expect, test } from "bun:test";
-import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  readlinkSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { githubBackend } from "./merge-queue-backend";
+import { githubBackend as createBackend } from "./merge-queue-backend";
+
+const githubBackend: typeof createBackend = (repo, execute, options = {}) =>
+  createBackend(repo, execute, { hosts: null, ...options });
 
 test("candidate construction, uncapped gate, conflict and crash cleanup without remote writes", async () => {
   const root = mkdtempSync(join(tmpdir(), "merge-queue-backend-test-"));
@@ -11,6 +25,7 @@ test("candidate construction, uncapped gate, conflict and crash cleanup without 
   const calls: { command: string; args: string[]; uncapped?: string }[] = [];
   let conflict = false;
   let prepareFailure = 0;
+  let prepareAlwaysFails = false;
   let prepareTimeouts = 0;
   let prepares = 0;
   let dirty = "";
@@ -61,7 +76,7 @@ test("candidate construction, uncapped gate, conflict and crash cleanup without 
           (conflict && command === "git" && args.includes("merge")) ||
           (args.includes("signoff") && signoffRuns <= signoffFailures) ||
           (args.includes("prepare") && prepares <= prepareTimeouts) ||
-          (args.includes("prepare") && prepares === prepareFailure),
+          (args.includes("prepare") && (prepareAlwaysFails || prepares === prepareFailure)),
       };
     },
     {
@@ -108,6 +123,15 @@ test("candidate construction, uncapped gate, conflict and crash cleanup without 
     expect(nightly.find((call) => call.args.includes("signoff"))!.args).toContain("--full");
     expect(nightly.filter((call) => call.args.includes("--base"))).toHaveLength(0);
     expect(nightly.filter((call) => call.args.includes("prepare"))).toHaveLength(1);
+    const beforeFull = calls.length;
+    expect(await backend.candidate([entry], "base", undefined, { full: true })).toMatchObject({
+      ok: true,
+    });
+    const full = calls.slice(beforeFull);
+    expect(full.find((call) => call.args.includes("signoff"))!.args).toContain("--full");
+    expect(full.filter((call) => call.args.includes("Queue PR #1"))).toHaveLength(1);
+    // One prepare, of the constructed candidate.
+    expect(full.filter((call) => call.args.includes("prepare"))).toHaveLength(1);
     const beforeRetry = calls.length;
     signoffFailures = 1;
     signoffRuns = 0;
@@ -127,7 +151,9 @@ test("candidate construction, uncapped gate, conflict and crash cleanup without 
       true,
     );
     expect(retried.filter((call) => call.args.includes("Queue PR #1"))).toHaveLength(1);
-    expect(retried.filter((call) => call.args.includes("--fresh"))).toHaveLength(1);
+    // The retry reuses the first run's remembered passes, rerunning only what failed.
+    expect(retried.filter((call) => call.args.includes("--fresh"))).toHaveLength(0);
+    expect(retried.filter((call) => call.args.includes("prepare"))).toHaveLength(1);
     signoffFailures = 2;
     signoffRuns = 0;
     expect(await backend.candidate([entry], "base")).toMatchObject({
@@ -148,7 +174,7 @@ test("candidate construction, uncapped gate, conflict and crash cleanup without 
     dirtyOnPrepare = "?? linked env";
     const beforeDirty = calls.filter((call) => call.args.includes("signoff")).length;
     await expect(backend.candidate([entry], "base")).rejects.toThrow(
-      "Dirty candidate after plain main prepare",
+      "Dirty candidate before verification",
     );
     expect(calls.filter((call) => call.args.includes("signoff")).length).toBe(beforeDirty);
     dirty = "";
@@ -159,21 +185,25 @@ test("candidate construction, uncapped gate, conflict and crash cleanup without 
     );
     dirtyAfterSignoff = false;
     dirty = "";
+    // Plain main fails to prepare too: the environment, not the PR.
+    prepares = 0;
+    prepareAlwaysFails = true;
+    await expect(backend.candidate([entry], "base")).rejects.toThrow("environment broken");
+    prepareAlwaysFails = false;
+    // Only the candidate fails to prepare: the PR's failure, found with one extra prepare of plain main.
     prepares = 0;
     prepareFailure = 1;
-    await expect(backend.candidate([entry], "base")).rejects.toThrow("environment broken");
-    prepares = 0;
-    prepareFailure = 2;
     expect(await backend.candidate([entry], "base")).toMatchObject({
       ok: false,
     });
+    expect(prepares).toBe(2);
     prepareFailure = 0;
     prepares = 0;
     prepareTimeouts = 1;
     expect(await backend.candidate([entry], "base")).toMatchObject({
       ok: true,
     });
-    expect(prepares).toBe(3);
+    expect(prepares).toBe(2);
     prepares = 0;
     prepareTimeouts = 2;
     await expect(backend.candidate([entry], "base")).rejects.toThrow("prepare timed out twice");
@@ -314,6 +344,11 @@ test("a check failing twice on the batch and also on main lands the batch", asyn
       ok: true,
     });
     expect(onMain).toHaveLength(1);
+    // A full candidate on a held main must pass on its own; main's breakage is no excuse.
+    expect(await backend.candidate([entry], "base", undefined, { full: true })).toMatchObject({
+      ok: false,
+    });
+    expect(onMain).toHaveLength(1);
     mainFails = false;
     main = "other";
     expect(await backend.candidate([entry], "other")).toMatchObject({
@@ -416,6 +451,424 @@ test("update merges main in the PR's own branch, and merge signs the queue's mer
     calls.length = 0;
     await backend.merge(entry);
     expect(calls.some((call) => call.args.includes("context=signoff"))).toBe(false);
+  } finally {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("reuse, docs-only admission and sign-off receipts", async () => {
+  const root = mkdtempSync(join(tmpdir(), "merge-queue-reuse-"));
+  const previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = root;
+  const calls: string[] = [];
+  let clock = 0;
+  let headTree = "candidate-tree";
+  let changed = "docs/guide.md";
+  const receipt = {
+    version: 1,
+    checks: [
+      { task: "docs:check", status: "passed", seconds: 1.234, reused: false, log: "/docs.log" },
+      { task: "format:check", status: "passed", seconds: 0, reused: true, log: null },
+    ],
+    errors: [],
+  };
+  const backend = githubBackend(
+    "MuhammedAlkhudiry/harium-project",
+    async (command, args, options) => {
+      calls.push(`${command} ${args.join(" ")}`);
+      if (command === "git" && args[0] === "clone") mkdirSync(args.at(-1)!);
+      if (command === "git" && args[0] === "worktree" && args[1] === "add") {
+        mkdirSync(join(args[3]!, "scripts"), { recursive: true });
+        writeFileSync(join(args[3]!, "scripts/check.ts"), 'options: ["--base", "--json"]');
+        writeFileSync(join(args[3]!, "scripts/areas.sh"), "");
+      }
+      if (command.endsWith("scripts/areas.sh")) {
+        const backendChange = options.input?.includes("harium/");
+        return { stdout: `backend=${backendChange}\nformat=true\n` };
+      }
+      if (command === "gh")
+        return { stdout: JSON.stringify({ statuses: [{ context: "signoff", state: "success" }] }) };
+      let stdout = "";
+      if (command === "git" && args[0] === "rev-parse")
+        stdout =
+          args[1] === "origin/main"
+            ? "base"
+            : args[1] === "HEAD^{tree}"
+              ? "candidate-tree"
+              : args[1] === "head^{tree}"
+                ? headTree
+                : "head";
+      if (command === "git" && args[0] === "diff" && args.includes("--no-renames"))
+        stdout = changed;
+      if (args.includes("signoff")) stdout = `heavy-run: slot\n${JSON.stringify(receipt)}`;
+      return { stdout, all: stdout };
+    },
+    {
+      // Load stays far above the limit: only a docs-only batch may start without waiting.
+      policy: { maxLoad: 1, waitSeconds: 1 },
+      admission: {
+        readLoad: () => 50,
+        now: () => (clock += 500),
+        pause: async () => {},
+        lock: () => () => {},
+      },
+    },
+  );
+  const entry = {
+    repo: "MuhammedAlkhudiry/harium-project",
+    pr: 1,
+    head: "head",
+    status: "queued",
+    enqueuedAt: "now",
+  } as const;
+  try {
+    // The candidate's tree equals the signed PR head's: land on that sign-off, with no prepare or sign-off run.
+    expect(await backend.candidate([entry], "base", undefined, { reuse: true })).toMatchObject({
+      ok: true,
+      reusedFrom: "head",
+    });
+    expect(calls.some((call) => call.includes("mise run"))).toBe(false);
+    // Without the trusted-main reuse flag the same candidate signs off.
+    calls.length = 0;
+    const docs = await backend.candidate([entry], "base");
+    expect(docs).toMatchObject({
+      ok: true,
+      runs: [
+        {
+          checks: [
+            { name: "docs:check", status: "passed", seconds: 1.2, reused: false },
+            { name: "format:check", status: "passed", seconds: 0, reused: true },
+          ],
+        },
+      ],
+    });
+    expect(docs.reusedFrom).toBeUndefined();
+    expect(calls.some((call) => call.includes("signoff -- --no-post --base base --json"))).toBe(
+      true,
+    );
+    expect(JSON.parse(readFileSync(docs.runs![0]!.receipt!, "utf8"))).toEqual(receipt);
+    expect(docs.runs![0]!.receipt).toBe(`${docs.log}.run-1.receipt.json`);
+    // A different tree is not covered by the PR's sign-off; a backend change waits for load and times out.
+    headTree = "other-tree";
+    changed = "harium/app/Models/User.php\ndocs/guide.md";
+    await expect(backend.candidate([entry], "base", undefined, { reuse: true })).rejects.toThrow(
+      "host busy",
+    );
+  } finally {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("remote worker verifies the transferred commit and treats candidate and main recheck deadlines as transient", async () => {
+  const root = mkdtempSync(join(tmpdir(), "merge-queue-remote-test-"));
+  const previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = root;
+  const calls: { command: string; args: string[] }[] = [];
+  const sha = "a".repeat(40);
+  let head = "base";
+  let timeoutAt = "";
+  let missingBase = false;
+  try {
+    const backend = githubBackend(
+      "MuhammedAlkhudiry/harium-project",
+      deadlineRunner(async (command, args) => {
+        calls.push({ command, args });
+        if (command === "git" && args[0] === "clone") mkdirSync(args.at(-1)!);
+        if (command === "git" && args[0] === "worktree" && args[1] === "add") mkdirSync(args[3]!);
+        if (command === "git" && args[0] === "reset") head = args[2]!;
+        const stdout =
+          command === "git" && args[0] === "rev-parse"
+            ? args[1] === "origin/main"
+              ? "base"
+              : args[1] === "FETCH_HEAD"
+                ? sha
+                : head
+            : "";
+        const signoff = args.includes("signoff");
+        const recheck = args.at(-1) === "api:test";
+        const timedOut = timeoutAt === "candidate" ? signoff : timeoutAt === "main" && recheck;
+        const output = timeoutAt === "main" && signoff ? "FAIL api:test log=/api.log" : stdout;
+        return {
+          stdout: output,
+          all: output,
+          failed:
+            timedOut ||
+            (timeoutAt === "main" && signoff) ||
+            (missingBase && args[0] === "cat-file"),
+          timedOut,
+        };
+      }, Date.now() + 60_000),
+      {
+        hosts: null,
+        preparedCandidate: { sha, bundle: "/transfer.bundle" },
+        admission: { readLoad: () => 0 },
+        readLog: async () => "timed out after 30000 ms",
+      },
+    );
+    const result = await backend.candidate(
+      [
+        {
+          repo: "MuhammedAlkhudiry/harium-project",
+          pr: 42,
+          head: "pr-head",
+          status: "queued",
+          enqueuedAt: "now",
+        },
+      ],
+      "base",
+    );
+    for (const scenario of ["candidate", "main"]) {
+      timeoutAt = scenario;
+      await expect(
+        backend.candidate(
+          [
+            {
+              repo: "MuhammedAlkhudiry/harium-project",
+              pr: 42,
+              head: "pr-head",
+              status: "queued",
+              enqueuedAt: "now",
+            },
+          ],
+          "base",
+        ),
+      ).rejects.toBeInstanceOf(QueueTransientError);
+    }
+    timeoutAt = "";
+    expect(result.ok).toBe(true);
+    expect(head).toBe("base");
+    expect(
+      calls
+        .filter((call) => call.command === "git" && call.args[0] === "fetch")
+        .map((call) => call.args)
+        .filter((_args, i) => i === 0),
+    ).toEqual([["fetch", "/transfer.bundle", "refs/heads/merge-queue-transfer"]]);
+    expect(calls.some((call) => call.command === "gh" || call.args.includes("--squash"))).toBe(
+      false,
+    );
+    expect(
+      calls.some((call) => call.command === "heavy-run" && call.args.includes("signoff")),
+    ).toBe(true);
+    missingBase = true;
+    await backend.candidate([], "base");
+    expect(
+      calls.some((call) => call.command === "git" && call.args.join(" ") === "fetch origin base"),
+    ).toBe(true);
+  } finally {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("main dispatch transfers a delta and forces local prepare before deploy after remote success", async () => {
+  const root = mkdtempSync(join(tmpdir(), "queue-dispatch-test-"));
+  const previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = root;
+  const calls: string[][] = [];
+  let head = "base";
+  let prepared = false;
+  try {
+    const backend = githubBackend(
+      "MuhammedAlkhudiry/harium-project",
+      async (command, args, options) => {
+        calls.push([command, ...args]);
+        let stdout = "";
+        if (command === "git") {
+          if (args[0] === "clone") mkdirSync(args.at(-1)!);
+          if (args[0] === "worktree" && args[1] === "add") mkdirSync(args[3]!);
+          if (args[0] === "reset") head = args[2]!;
+          if (args.includes("commit")) head = "candidate";
+          if (args[0] === "bundle") writeFileSync(args[2]!, "delta");
+          if (args[0] === "rev-parse")
+            stdout =
+              args[1] === "origin/main"
+                ? "base"
+                : args[1]!.endsWith("^{tree}")
+                  ? "same-tree"
+                  : head === "base"
+                    ? "pr-head"
+                    : head;
+        }
+        if (command === "ssh") {
+          if (args.at(-1)!.includes("--probe")) stdout = JSON.stringify({ load: 0, maxLoad: 10 });
+          else {
+            const request = JSON.parse(options.input!);
+            expect(request).toMatchObject({
+              base: "base",
+              sha: "candidate",
+              bundle: Buffer.from("delta").toString("base64"),
+            });
+            stdout = JSON.stringify({
+              result: { ok: true, log: "/remote/candidate.log" },
+              logs: { "/remote/candidate.log": "passed" },
+            });
+          }
+        }
+        if (args.includes("prepare")) prepared = true;
+        if (args[0] === "tasks") stdout = JSON.stringify([{ name: "deploy" }]);
+        if (args.includes("deploy")) {
+          expect(prepared).toBe(true);
+          stdout = `deployed ${"a".repeat(40)}`;
+        }
+        return { stdout, all: stdout, failed: false };
+      },
+      { hosts: ["small-mac"] },
+    );
+    const result = await backend.candidate(
+      [
+        {
+          repo: "MuhammedAlkhudiry/harium-project",
+          pr: 1,
+          head: "pr-head",
+          status: "queued",
+          enqueuedAt: "now",
+        },
+      ],
+      "base",
+    );
+    expect(result.ok).toBe(true);
+    expect(prepared).toBe(false);
+    expect(head).toBe("candidate");
+    const candidateRoot = join(root, "merge-queue/candidates/muhammedalkhudiry-harium-project");
+    expect(existsSync(join(candidateRoot, "unprepared"))).toBe(true);
+    expect(existsSync(join(candidateRoot, "transfer.bundle"))).toBe(false);
+    expect(calls.find((call) => call[1] === "bundle")?.at(-1)).toBe(
+      "base..refs/heads/merge-queue-transfer",
+    );
+    expect(await backend.deploy("a".repeat(40))).toMatchObject({ ok: true });
+    expect(prepared).toBe(true);
+    expect(existsSync(join(candidateRoot, "unprepared"))).toBe(false);
+  } finally {
+    if (previous === undefined) delete process.env.XDG_STATE_HOME;
+    else process.env.XDG_STATE_HOME = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("a trusted-main candidate signs off only areas changed on both sides, and a held main only those since it was trusted", async () => {
+  const root = mkdtempSync(join(tmpdir(), "merge-queue-areas-"));
+  const previous = process.env.XDG_STATE_HOME;
+  process.env.XDG_STATE_HOME = root;
+  const canonical = join(root, "canonical.git");
+  const calls: string[] = [];
+  // Paths each diff changes, by its two ends.
+  let diffs: Record<string, string> = {};
+  let ancestor = true;
+  let fetched = "";
+  const backend = githubBackend(
+    "MuhammedAlkhudiry/harium-project",
+    async (command, args, options) => {
+      calls.push(`${command} ${args.join(" ")}`);
+      if (command === "git" && args[0] === "clone")
+        mkdirSync(join(args.at(-1)!, ".git/check-stamps"), { recursive: true });
+      if (command === "git" && args[0] === "worktree" && args[1] === "add") {
+        mkdirSync(join(args[3]!, "scripts"), { recursive: true });
+        writeFileSync(
+          join(args[3]!, "scripts/check.ts"),
+          'options: ["--base", "--areas", "--full"]',
+        );
+        writeFileSync(join(args[3]!, "scripts/areas.sh"), "");
+      }
+      if (command.endsWith("scripts/areas.sh")) {
+        const paths = options.input!.split("\n");
+        return {
+          stdout: [
+            `backend=${paths.some((path) => path.startsWith("harium/"))}`,
+            `mobile=${paths.some((path) => path.startsWith("harium-app/"))}`,
+          ].join("\n"),
+        };
+      }
+      if (command === "gh") return { stdout: JSON.stringify({ statuses: [] }) };
+      const pull = args.at(-1)?.match(/^refs\/pull\/(\d+)\/head$/);
+      if (pull) fetched = `head${pull[1]}`;
+      let stdout = "";
+      if (command === "git" && args[1] === "FETCH_HEAD") stdout = fetched;
+      else if (command === "git" && args.includes("--git-common-dir")) stdout = canonical;
+      else if (command === "git" && args[0] === "rev-parse")
+        stdout =
+          args[1] === "origin/main"
+            ? "base"
+            : args[1] === "HEAD^{tree}"
+              ? "candidate-tree"
+              : "head";
+      if (command === "git" && args[0] === "merge-base" && args[1] !== "--is-ancestor")
+        stdout = `mb-${args[1]}`;
+      if (command === "git" && args[0] === "diff" && args.includes("--name-only"))
+        stdout = diffs[`${args.at(-2)}..${args.at(-1)}`] ?? "";
+      return {
+        stdout,
+        all: stdout,
+        failed: command === "git" && args[1] === "--is-ancestor" && !ancestor,
+      };
+    },
+    { admission: { readLoad: () => 0 } },
+  );
+  const entry = (pr: number, head: string, signedHead?: string) =>
+    ({
+      repo: "MuhammedAlkhudiry/harium-project",
+      pr,
+      head,
+      ...(signedHead ? { signedHead } : {}),
+      status: "queued",
+      enqueuedAt: "now",
+    }) as const;
+  const signoff = () => calls.findLast((call) => call.includes("run signoff"));
+  try {
+    // Main moved only in mobile since the PR's signed base, and the PR changed only the backend: nothing to recheck.
+    diffs = {
+      "mb-signed1..signed1": "harium/app/Models/User.php",
+      "mb-signed1..base": "harium-app/app/index.tsx",
+    };
+    expect(
+      await backend.candidate([entry(1, "head1", "signed1")], "base", undefined, { reuse: true }),
+    ).toMatchObject({ ok: true, areas: [] });
+    expect(calls.some((call) => call.includes("mise run"))).toBe(false);
+    // The candidate clone shares the canonical clone's remembered check passes.
+    const stamps = join(
+      root,
+      "merge-queue/candidates/muhammedalkhudiry-harium-project/repo/.git/check-stamps",
+    );
+    expect(lstatSync(stamps).isSymbolicLink()).toBe(true);
+    expect(readlinkSync(stamps)).toBe(join(canonical, "check-stamps"));
+
+    // Main also changed the backend: only the backend signs off again, with one prepare.
+    diffs["mb-signed1..base"] += "\nharium/routes/api.php";
+    calls.length = 0;
+    expect(
+      await backend.candidate([entry(1, "head1", "signed1")], "base", undefined, { reuse: true }),
+    ).toMatchObject({ ok: true, areas: ["backend"] });
+    expect(signoff()).toContain("--no-post --areas backend");
+    expect(calls.filter((call) => call.includes("prepare"))).toHaveLength(1);
+
+    // Two PRs in one batch on unchanged main: each one's areas the other changed too.
+    diffs = {
+      "mb-head1..head1": "harium-app/app/index.tsx",
+      "mb-head2..head2": "harium-app/app/other.tsx\nharium/app/Models/User.php",
+    };
+    expect(
+      await backend.candidate([entry(1, "head1"), entry(2, "head2")], "base", undefined, {
+        reuse: true,
+      }),
+    ).toMatchObject({ ok: true, areas: ["mobile"] });
+    expect(signoff()).toContain("--areas mobile");
+
+    // Without the trusted-main flag, the batch signs off every area it changed.
+    expect(await backend.candidate([entry(1, "head1")], "base")).not.toHaveProperty("areas");
+    expect(signoff()).toContain("--no-post --base base");
+
+    // A held main signs off the areas changed since the last trusted main, or every area if that is not an ancestor.
+    await backend.nightly!("base", { since: "trusted" });
+    expect(signoff()).toContain("--no-post --base trusted");
+    await backend.candidate([entry(1, "head1")], "base", undefined, { since: "trusted" });
+    expect(signoff()).toContain("--no-post --base trusted");
+    ancestor = false;
+    await backend.nightly!("base", { since: "trusted" });
+    expect(signoff()).toContain("--no-post --full");
   } finally {
     if (previous === undefined) delete process.env.XDG_STATE_HOME;
     else process.env.XDG_STATE_HOME = previous;

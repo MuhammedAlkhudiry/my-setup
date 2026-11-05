@@ -1,8 +1,15 @@
 #!/usr/bin/env bun
 
 import { cac } from "cac";
+import { MemoryStorage, TelegramClient } from "@mtcute/bun";
 import { agentOutput } from "../lib/agent-output";
 import {
+  type BotFileClient,
+  downloadTelegramMessageFile,
+  readMtprotoApp,
+} from "../lib/telegram-mtproto";
+import {
+  opsBotToken,
   checkTelegramWebhook,
   reactToTelegramMessage,
   sendTelegramMessage,
@@ -17,6 +24,31 @@ const json = process.argv.includes("--json");
 
 function report(line: string): void {
   console.log(json ? JSON.stringify({ command: "telegram-send", status: "success", output: [line] }) : line);
+}
+
+function mtprotoBotClient(): BotFileClient {
+  const tg = new TelegramClient({
+    ...readMtprotoApp(),
+    storage: new MemoryStorage(),
+    updates: false,
+    logLevel: 0 /* LogManager.OFF */,
+  });
+
+  return {
+    signIn: async (session) => {
+      if (session) await tg.importSession(session);
+      await tg.start({ botToken: opsBotToken() });
+      return tg.exportSession();
+    },
+    downloadMessageFile: async (chatId, messageId, path) => {
+      const [message] = await tg.getMessages(chatId, [messageId]);
+      const media = message?.media;
+      if (!media || !("fileId" in media)) return false;
+      await tg.downloadToFile(path, media);
+      return true;
+    },
+    close: () => tg.destroy(),
+  };
 }
 
 const cli = cac("telegram-send").option("--verbose", "Print detailed output");
@@ -60,6 +92,15 @@ cli
     const transcript = await transcribeAudio({ fileId, file: options.file });
     console.log(json ? JSON.stringify(transcript) : transcript.text || "telegram-send: no speech found");
   });
+cli
+  .command(
+    "download <chatId> <messageId> <outPath>",
+    "Download a message's file of up to 2 GB through the ops bot's MTProto session",
+  )
+  .action(async (chatId: string, messageId: string, outPath: string) => {
+    const bytes = await downloadTelegramMessageFile(mtprotoBotClient(), chatId.trim(), messageId, outPath);
+    report(`telegram-send: downloaded ${bytes} bytes`);
+  });
 cli.option("--json", "Return a structured receipt; transcribe returns {text, language, durationSeconds}");
 cli.option("--support", "Send or react in the Awraq support group instead of the owner's chat");
 cli.help();
@@ -68,7 +109,11 @@ cli.addEventListener("command:*", () => {
 });
 
 try {
-  cli.parse(process.argv, { run: false });
+  // Group chat ids are negative; a leading space keeps cac from reading them as flags, and download trims it.
+  cli.parse(
+    process.argv.map((arg) => (/^-\d+$/.test(arg) ? ` ${arg}` : arg)),
+    { run: false },
+  );
   await cli.runMatchedCommand();
 } catch (error) {
   console.error(error instanceof Error ? error.message : "Telegram command failed");

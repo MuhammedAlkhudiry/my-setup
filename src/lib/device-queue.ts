@@ -28,6 +28,11 @@ export const DEVICE_QUEUE = {
   ticketStaleMs: 2 * 60_000,
   /** Released devices stay ready for the next lease this long, then sleep. */
   warmIdleMs: 30 * 60_000,
+  /**
+   * The scheduled reap (`device-queue reap`) stops a booted device beyond the warm ones only after it has held no lease
+   * this long, so a device booted outside the queue a moment ago survives. `acquire` and `status` reap without it.
+   */
+  unleasedGraceMs: 10 * 60_000,
   /** Released devices kept booted: one, or two while the host has headroom. */
   warmDevices: { base: 1, withHeadroom: 2 },
 };
@@ -137,6 +142,15 @@ export type Decision =
 export interface ReapOptions {
   warmDevices: number;
   slots: Record<Platform, number>;
+  /** How long a device beyond the warm ones may stay unleased before it is stopped; 0 stops it at once. */
+  graceMs?: number;
+}
+
+export interface Shutdown {
+  device: Device;
+  reason: string;
+  /** How long the device had held no lease. */
+  unleasedMs: number;
 }
 
 export const emptyQueueState = (): QueueState => ({
@@ -216,15 +230,15 @@ export function reapQueue(
   now: number,
   isAlive: (pid: number) => boolean,
   busy: Map<string, Set<number>> = new Map(),
-  { warmDevices, slots }: ReapOptions = {
+  { warmDevices, slots, graceMs = 0 }: ReapOptions = {
     warmDevices: DEVICE_QUEUE.warmDevices.base,
     slots: DEVICE_QUEUE.maxRunning,
   },
-): Array<{ device: Device; reason: string }> {
-  const shutdowns: Array<{ device: Device; reason: string }> = [];
+): Shutdown[] {
+  const shutdowns: Shutdown[] = [];
   const reclaim = (device: Device | undefined, reason: string) => {
     if (!device?.booted) return;
-    shutdowns.push({ device, reason });
+    shutdowns.push({ device, reason, unleasedMs: now - (state.unleasedSince[device.id] ?? now) });
     device.booted = false;
     delete state.unleasedSince[device.id];
   };
@@ -253,8 +267,10 @@ export function reapQueue(
     .filter((device) => device.booted && !state.leases[device.id])
     .sort((a, b) => (state.unleasedSince[b.id] ?? now) - (state.unleasedSince[a.id] ?? now));
   for (const device of warm) state.unleasedSince[device.id] ??= now;
-  for (const device of warm.slice(warmDevices))
-    reclaim(device, "enough warm devices are available");
+  for (const device of warm.slice(warmDevices)) {
+    if (now - state.unleasedSince[device.id]! >= graceMs)
+      reclaim(device, "enough warm devices are available");
+  }
 
   // A ticket needs a slot only when one of its devices is free and not already booted.
   const needsSlot = (ticket: Ticket) =>
@@ -438,6 +454,27 @@ export function simulatorDeviceType(
       lines.indexOf(iphoneLine(a.name)) - lines.indexOf(iphoneLine(b.name)) ||
       generation(b.name) - generation(a.name),
   )[0]?.identifier;
+}
+
+/**
+ * The newest iOS runtime that supports the member's device type; only when none does, the newest runtime and its closest iPhone.
+ * A new Xcode's newest runtime can offer a single new iPhone line, such as the fold, so newest-first alone picks the wrong phone.
+ */
+export function simulatorTarget(
+  member: Pick<PoolMember, "kind"> & { deviceType?: string },
+  runtimes: SimRuntime[],
+): { runtime: SimRuntime; deviceType: string } | undefined {
+  const ios = runtimes
+    .filter((candidate) => candidate.isAvailable !== false && candidate.platform === "iOS")
+    .toSorted((a, b) => Bun.semver.order(b.version, a.version));
+  const exact = ios.find((runtime) =>
+    runtime.supportedDeviceTypes?.some((type) => type.identifier === member.deviceType),
+  );
+  if (exact) return { runtime: exact, deviceType: member.deviceType! };
+
+  const newest = ios[0];
+  const deviceType = newest && simulatorDeviceType(member, newest);
+  return deviceType ? { runtime: newest, deviceType } : undefined;
 }
 
 export function releaseLease(state: QueueState, id: string, now = Date.now()): Lease | undefined {

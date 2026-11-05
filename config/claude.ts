@@ -23,9 +23,9 @@ export function createClaudeManagedSettings(profile: DeviceProfile): {
     // Every model runs at high by default; per-model overrides (such as Opus at xhigh) are cleared.
     effortLevel: "high",
     modelSettings: {},
-    // Compact at 500K of the 1M window: each turn re-reads the whole context, so a 1M thread burns about twice
-    // the weekly allowance, and a 500K summary keeps more detail. Never CLAUDE_CODE_MAX_CONTEXT_TOKENS: on known
-    // Claude models it only applies with compaction disabled.
-    autoCompactWindow: 500000,
+    // Compact at 200K of the 1M window (owner, 2026-11-03): each turn re-reads the whole context, so a full 500K
+    // thread costs about 2.5× per turn, and recall of old details degrades; durable state lives in files instead.
+    // Never CLAUDE_CODE_MAX_CONTEXT_TOKENS: on known Claude models it only applies with compaction disabled.
+    autoCompactWindow: 200000,
   };
 }

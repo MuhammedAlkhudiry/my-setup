@@ -25,6 +25,11 @@ export function prepareConcurrentTurns(
 ): { next?: ConcurrentJob; yieldLegacy: boolean } {
   const heads = new Map<string, ConcurrentJob>();
   for (const job of host.waiting) if (!heads.has(requester(job))) heads.set(requester(job), job);
+  // Let other requesters proceed while a timing lane is occupied; keep each requester's FIFO.
+  const timingBusy = [...host.active, ...otherActive].some((job) => job.timingSensitive);
+  const waiting = host.waiting.filter(
+    (job) => !timingBusy || !heads.get(requester(job))?.timingSensitive,
+  );
   const activeIds = new Set(host.active.map((job) => job.reservationId));
   const stillRunning = (anchors: string[]) => anchors.some((id) => activeIds.has(id));
 
@@ -34,7 +39,7 @@ export function prepareConcurrentTurns(
   // Older clients cannot share the serial lane or pass a serial waiter. Their
   // tickets stay intact, including the FIFO of requesters with an older head.
   if (otherActive.length || legacyWaiting.length) {
-    const eligible = host.waiting.filter(
+    const eligible = waiting.filter(
       (job) =>
         job.clientVersion === CURRENT_HEAVY_CLIENT &&
         heads.get(requester(job))?.clientVersion === CURRENT_HEAVY_CLIENT,
@@ -46,12 +51,12 @@ export function prepareConcurrentTurns(
     };
   }
 
-  rotate(host, host.waiting);
+  rotate(host, waiting);
   const saved = host.backfill;
-  let priority = saved && host.waiting.find((job) => job.reservationId === saved.reservationId);
+  let priority = saved && waiting.find((job) => job.reservationId === saved.reservationId);
   if (!priority || heads.get(requester(priority)) !== priority) {
     delete host.backfill;
-    priority = host.waiting.find((job) => requester(job) === host.requesters[0]);
+    priority = waiting.find((job) => requester(job) === host.requesters[0]);
   }
   if (
     !priority ||

@@ -43,7 +43,8 @@ export const MAC_WATCHER = {
   cpu: {
     /**
      * Leftover agent tooling (parent exited) is stopped after staying at `hotPercent` CPU for `stopAfterMinutes`, or
-     * below `idlePercent` for `stopIdleAfterHours`, since nothing uses a leftover that idle. Nothing else is stopped.
+     * below `idlePercent` for `stopIdleAfterHours`, since nothing uses a leftover that idle. Each pass also stops
+     * recordings past `RECORDING_REAPER.maxAgeMinutes` and runs `device-queue reap`; nothing else is stopped.
      */
     guard: {
       intervalSeconds: 60,

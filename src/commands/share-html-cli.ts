@@ -2,7 +2,7 @@
 
 import { agentOutput, parseCli } from "../lib/agent-output";
 import { cac } from "cac";
-import { readFeedback, shareHtml } from "./share-html";
+import { getPage, readFeedback, shareHtml } from "./share-html";
 
 agentOutput("share-html", {
   nativeJson: true,
@@ -26,6 +26,14 @@ cli
     "Print the feedback a writable page saved; defaults to the newest writable page",
   )
   .action((page?: string) => run(() => readFeedback(page)));
+
+cli
+  .command(
+    "get <url>",
+    "Save a published page and its assets, signing in to Cloudflare Access as the agents' service token",
+  )
+  .option("--out <dir>", "Folder to save into, defaults to a new temporary folder")
+  .action((url: string, options: { out?: string }) => run(() => getPage(url, options)));
 
 cli
   .command("<path>", "Publish an HTML file or a folder with index.html to a private URL")

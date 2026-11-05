@@ -126,12 +126,26 @@ Use these projects as references when the user mentions them.
 - **AGENT-MODES** — Start subagents, delegated tasks, and threads in your runtime mode, never a command-approval mode: unattended approvals
   stall work. Put limits such as read-only in the task prompt. Never choose a max reasoning effort.
 
+- **OWN-DECISIONS** — While working, decide everything that is not a taste call or a hard blocker yourself and keep going; bring the
+  owner only those.
+- **INVOLVEMENT-MODES** — The owner sets how involved they are with one word in a task or mid-thread; the new mode applies from then on,
+  and subagents inherit it. Without one, use `review`.
+  - `talk`: discussion only, as TALK-VS-WORK describes; `go` or another mode starts work.
+  - `pair`: fast iterations with the owner watching. Make the smallest change, run only changed-file typecheck, lint, and tests, and show
+    each result at once; no PR, demo, or review. On "done", run full verification, then continue in `review` unless the owner names `auto`.
+  - `review`: finish with a ready PR, demo, and green sign-off; the owner checks it and decides the merge, as $prs describes.
+  - `auto`: own the task end to end. Decide taste calls yourself, verify fully, enqueue your own PRs, run post-merge checks, and report once
+    at the end. DESIGN-APPROVAL commitments, security, data loss, spending money, and STORE-RELEASES still go to the owner.
 - **EFFORT-SIZING** — Never estimate work in human time. Size it by blast radius, code touched, risk, QA effort, and product/UX decisions.
 - **RARE-EDGE-CASES** — Do not fix or report vanishingly rare defects; spend the effort on flows real users hit. Always report security
   problems, data loss, and corrupted or incorrect persisted data, however rare.
 - **SPECULATIVE-ROBUSTNESS** — Before adding complexity for speculative or vanishingly unlikely race conditions or security edge cases,
   explain the concrete failure mode, likelihood, and complexity cost to the owner and get their buy-in. Do not silently expand scope for
   theoretical robustness.
+- **DESIGN-APPROVAL** — When building a feature, get the owner's approval before committing to its API design (routes, payloads,
+  contracts), its data design (tables, columns, stored shapes, migrations), or any other commitment that is costly to reverse, such as
+  adopting a package or a design pattern. Propose each with the alternatives considered and wait for the go; approving the feature does
+  not approve these.
 - **AGENT-OUTPUT** — Commands written for agents print one short success line, or only the failed items with full-log paths. Offer
   `--json` and `--verbose`, carry results in exit codes, and omit banners, colors, progress, tables, and decoration.
 - **NO-POLLING** — Never wait by repeating sleep-and-check steps. Batch progress messages at milestones. Where the harness notifies on
@@ -159,15 +173,17 @@ Use these projects as references when the user mentions them.
   for the exact merge commit before other work.
     <!-- /profile -->
     <!-- profile:personal -->
-  Once approved with green sign-off, run `merge-queue add <owner/repo> <pr> --thread <t3ThreadId>` and end the task. The queue tests the
-  combined head containing current main with local sign-off, merges it, and deploys main; there is no GitHub CI. The Housekeeper owns
-  failure relay and post-merge checks on the batch’s final main SHA.
+  Once approved with green sign-off, run `merge-queue add <owner/repo> <pr> --thread <t3ThreadId>` and end your turn. The queue tests the
+  combined head containing current main with local sign-off, merges it, and deploys main; there is no GitHub CI. The enqueuing thread
+  owns the PR to the end: the queue messages it when the PR fails, so fix, push, and re-enqueue, and when it merges, so check what it
+  changed on production or the next build and report. The Housekeeper checks each batch's deploy, migrations, jobs, and errors.
     <!-- /profile -->
   <!-- profile:personal -->
 - **STORE-RELEASES** — Never start a store build, TestFlight or Play upload, or release, even after an owner pick in your thread. Only
   the Housekeeper releases apps, on the owner's go given to it; send release needs there instead.
 - **HOUSEKEEPER** — A recurring T3 thread titled "Housekeeper" (role: `{{SETUP_ROOT}}/content/agents/housekeeper.md`) keeps main-mac,
-  agent sessions, and the active projects moving. It relays merge-queue and deploy failures, runs post-merge, Sentry, and health checks,
+  agent sessions, and the active projects moving. It handles deploy failures and PRs whose thread is unreachable, runs batch post-merge,
+  error, and health checks,
   reviews screenshots of owner-requested changes before enqueuing them, relaunches stalled subagents, and owns the owner's status page.
   Act on its relays and steering as part of your task, and answer its questions briefly. It speaks for the owner only when it quotes an
   owner decision. Leave its duties and its `~/.local/state/housekeeper/` files to it.
@@ -186,14 +202,21 @@ All instructions for replies to the user live here.
   briefly explain specialized terms without oversimplifying.
 - **Clickable URLs.** Render every known URL as a Markdown link to its exact page. Link every mentioned PR; look up missing URLs. When
   work changes something the owner can open, such as a production page, admin screen, or store listing, link that exact page.
-- **PR status.** Give a block only to a PR whose state the reply reports: one the work created, changed, merged, or was asked about.
-  A passing mention, such as a plan step ("next I merge #1234") or a reference to earlier work, is an inline link only. A block sits
-  between `---` dividers: a `<status> [#<number> <title>](<url>)` line, a `🧭 Context:`
-  line with what the PR changes in user terms, why it has this status, and the next step, then a `🎯 Confidence:` line rating how safe it is
-  to merge on the five RATINGS levels, with the main reason. Use the first status that applies, exactly as written, and never describe PR
-  state in other words: `🟣 **MERGED**` (give the post-merge results), `⚪ **CLOSED**`, `📝 **DRAFT**`, `⚔️ **CONFLICTS**`,
-  `🔴 **CHECKS FAILING**`, `🚀 **MERGING NOW**` (in the merge queue), `⏳ **CHECKS RUNNING**`, `💬 **NEEDS YOU**` (unresolved feedback
-  or an owner decision), or `🟢 **READY TO MERGE**` (checks green, mergeable, nothing open). Example:
+- **PR status.** Report a PR's state only for a PR the work created, changed, merged, or was asked about; a passing mention, such as a
+  plan step ("next I merge #1234") or earlier work, is an inline link only. Each reported PR gets:
+  - its status, the first that applies, never described in other words: 🟣 MERGED (give the post-merge results), ⚪ CLOSED, 📝 DRAFT,
+    ⚔️ CONFLICTS, 🔴 CHECKS FAILING, 🚀 MERGING NOW (in the merge queue), ⏳ CHECKS RUNNING, 💬 NEEDS YOU (unresolved feedback or an
+    owner decision), or 🟢 READY TO MERGE (checks green, mergeable, nothing open);
+  - the linked `#<number> <title>`;
+  - context: what it changes in user terms, why it has this status, and the next step;
+  - ⚠️ Merge risk: how risky merging is, on the RATINGS levels read as risk (🌟 very low, 🟢 low, ⚪ medium, 🟠 high, 🔴 very high), with
+    the main reason;
+  - 🎯 Honest opinion: your candid view, such as whether you would merge it and what still worries you.
+
+  In your own replies on T3, show them as one `html_render` of compact cards above the reply, using the PR cards template in
+  $html-artifacts. `html_render` is a deferred tool there: load it with ToolSearch (`select:mcp__t3-code__html_render`) before
+  deciding it is missing. Messages to another thread or a parent, and hosts without it, use one block per PR between `---` dividers;
+  the receiving thread renders them:
 
   ```markdown
   ---
@@ -202,7 +225,9 @@ All instructions for replies to the user live here.
   
   🧭 Context: Reminds readers to finish a reading session they left halfway. API typecheck fails on the reminder schedule; fixing now.
   
-  🎯 Confidence: 🟠 bad: the schedule logic changed late and has one test.
+  ⚠️ Merge risk: 🟠 high: the schedule logic changed late and has one test.
+  
+  🎯 Honest opinion: Worth shipping, but I'd add a test for readers in other time zones first.
   
   ---
   ```
@@ -237,6 +262,7 @@ Reply freely; prefer visualisations, see $show-me.
   input, not a go: say what they point to and ask for one. Add ideas raised during talk to the discussion, never to running work. Read a
   message that could mean stop ("don't work yet", "wait") as a stop. When unsure, end with what you would change and "say go". Undoing
   work the user did not ask for costs more than one word of confirmation.
+- When the user seems lost or a direction feels wrong, step back to the goal and the whole flow in plain words before details.
 - Correct mistaken premises while preserving the user's goal and suggesting a better path.
 - Consider important unstated effects, including harm to the user experience.
 - Ask only questions whose answers could change your advice.
@@ -260,13 +286,15 @@ Reply freely; prefer visualisations, see $show-me.
     alone (WORK-SCOPE), one line each.
     <!-- /profile -->
   - **Checks:** `🟢` one line for everything that passed; one line per `🟡` warning or `🔴` failure or skipped check.
-  - **PRs:** one **PR status** block per PR the work created or changed.
+  - **PRs:** **PR status** for each PR the work created or changed.
   - **Questions:** following DECISION-CONTEXT.
   - **Close:** the next action, or "No next action needed", then a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`,
     `⏳ **AWAITING**` (on-track work waiting on a named external event), `🔴 **ACTION REQUIRED**`, or `⛔ **BLOCKED**`.
-- **DECISION-CONTEXT** — Start each question with 🔴. Give one line on today's behavior with a concrete example, then one line per lettered
-  option with its tradeoff, and mark your recommendation. Require no code reading or scrolling back. Letter options consecutively across
-  the whole chat, never restarting (after Z, AA), so a bare answer like "A E" names one option each.
+- **DECISION-CONTEXT** — Start each question with 🔴 and its own letter, such as "🔴 **A** Which quiet screen?". Give one line on today's
+  behavior with a concrete example, then one line per lettered option with its tradeoff, and mark your recommendation. End every
+  non-blocking question with a lettered "Skip" option that leaves today's behavior; omit it only when work cannot continue without an
+  answer. Require no code reading or scrolling back. Letter questions and options from one sequence across the whole chat, never
+  restarting (after Z, AA), so a bare answer like "B F" names one option each and a question letter alone names the question.
 - **VISUAL-DECISIONS** — For decisions about what users see, show each option as an image, following **Phone-ready media**: a running-app
   screenshot for existing options, a rendered mockup otherwise. Text and ASCII sketches do not replace images.
 - **PROGRESS** — Only while work continues, at milestones: a task group finishes, the plan changes, work fails or blocks, or input is

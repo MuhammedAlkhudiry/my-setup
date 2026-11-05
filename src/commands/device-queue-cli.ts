@@ -35,7 +35,7 @@ import {
   poolMembers,
   reapQueue,
   releaseLease,
-  simulatorDeviceType,
+  simulatorTarget,
   updateHeadroom,
 } from "../lib/device-queue";
 
@@ -49,7 +49,7 @@ agentOutput("device-queue", {
   summary: (output) => {
     try {
       const receipt = JSON.parse(output);
-      return `device-queue: ${receipt.status}${receipt.name ? ` ${receipt.name}` : ""}${receipt.id ? ` ${receipt.id}` : ""}${receipt.serial ? ` ${receipt.serial}` : ""}`;
+      return `device-queue: ${receipt.status}${receipt.name ? ` ${receipt.name}` : ""}${receipt.id ? ` ${receipt.id}` : ""}${receipt.serial ? ` ${receipt.serial}` : ""}${receipt.stopped ? `, stopped ${receipt.stopped.length}` : ""}`;
     } catch {
       return `device-queue: ${output
         .trim()
@@ -213,26 +213,35 @@ async function busyDevices(devices: Map<string, Device>): Promise<Map<string, Se
   return busy;
 }
 
-/** Reclaiming a device is best effort: one already off counts as done, and a failure leaves it for the next reap. */
-async function shutDown(device: Device, reason: string) {
+/**
+ * Reclaiming a device is best effort: one already off counts as done, and a failure leaves it for the next reap.
+ * Returns whether the device is now off.
+ */
+async function shutDown(device: Device, reason: string): Promise<boolean> {
   const command =
     device.platform === "ios"
       ? (["xcrun", ["simctl", "shutdown", device.id]] as const)
       : device.serial
         ? ([ADB, ["-s", device.serial, "emu", "kill"]] as const)
         : undefined;
-  if (!command) return;
+  if (!command) return false;
 
   const result = await timedCommand(command[0], [...command[1]], { timeout: 60_000 });
-  if (result.failed && !alreadyShutDown(result.stderr))
+  if (result.failed && !alreadyShutDown(result.stderr)) {
     log(
       `could not shut down ${device.name} (${device.id}): ${result.stderr.trim() || result.shortMessage}`,
     );
-  else log(`shut down ${device.name} (${device.id}): ${reason}`);
+    return false;
+  }
+  log(`shut down ${device.name} (${device.id}): ${reason}`);
+  return true;
 }
 
-async function shutDownAll(shutdowns: Shutdowns) {
-  for (const { device, reason } of shutdowns) await shutDown(device, reason);
+async function shutDownAll(shutdowns: Shutdowns): Promise<Shutdowns> {
+  const stopped: Shutdowns = [];
+  for (const shutdown of shutdowns)
+    if (await shutDown(shutdown.device, shutdown.reason)) stopped.push(shutdown);
+  return stopped;
 }
 
 /** CPU idle from the decayed per-process averages `ps` reports, and free memory as macOS memory_pressure reports it. */
@@ -267,21 +276,16 @@ function poolRequest(project: string, platform: string, kind: string | undefined
 }
 
 /**
- * Pool simulators are created once, on the newest installed iOS, and kept; the queue never creates any other device.
- * When that runtime lacks the member's device type, the closest iPhone it supports stands in.
+ * Pool simulators are created once and kept; the queue never creates any other device. Each goes on the newest iOS that supports
+ * its device type, or the newest iOS with its closest iPhone when none does.
  */
 async function createSimulator(member: PoolDevice): Promise<void> {
   const runtimes = JSON.parse(
     await run("xcrun", ["simctl", "list", "devicetypes", "runtimes", "-j"]),
   ).runtimes as SimRuntime[];
-  const runtime = runtimes
-    .filter((candidate) => candidate.isAvailable && candidate.platform === "iOS")
-    .sort((a, b) => Bun.semver.order(a.version, b.version))
-    .at(-1);
-  if (!runtime) throw new Error(`No iOS runtime to create ${member.name}`);
-  const deviceType = simulatorDeviceType(member, runtime);
-  if (!deviceType)
-    throw new Error(`iOS ${runtime.version} has no iPhone device type to create ${member.name}`);
+  const target = simulatorTarget(member, runtimes);
+  if (!target) throw new Error(`No iOS runtime with an iPhone device type to create ${member.name}`);
+  const { runtime, deviceType } = target;
 
   const udid = (
     await run("xcrun", ["simctl", "create", member.name, deviceType, runtime.identifier])
@@ -632,6 +636,36 @@ async function status(options: { json?: boolean }) {
   );
 }
 
+/**
+ * The scheduled reap the Mac watcher's guard runs every minute: the same reap as `status`, except that a device beyond
+ * the warm ones goes only after holding no lease for `unleasedGraceMs`. Leased devices are never stopped.
+ */
+async function reap() {
+  const devices = await listDevices();
+  const busy = await busyDevices(devices);
+  const sample = await sampleHeadroom();
+  const now = Date.now();
+  const shutdowns = await withState((state) => {
+    state.headroom = updateHeadroom(state.headroom, sample, now);
+    const limits = { ...laneLimits(state.headroom.open), graceMs: DEVICE_QUEUE.unleasedGraceMs };
+    return reapQueue(state, devices, now, isAlive, busy, limits);
+  });
+  const stopped = await shutDownAll(shutdowns);
+
+  console.log(
+    JSON.stringify({
+      status: "ok",
+      stopped: stopped.map(({ device, reason, unleasedMs }) => ({
+        id: device.id,
+        name: device.name,
+        platform: device.platform,
+        reason,
+        unleasedMs,
+      })),
+    }),
+  );
+}
+
 class InputError extends Error {}
 
 function requireOwner(owner: unknown): string {
@@ -704,6 +738,10 @@ cli
 
 cli.command("status", "Show slots, leases, unleased devices, and the queue").action(status);
 
+cli
+  .command("reap", "Stop unleased devices beyond the warm ones; the Mac watcher's guard runs it every minute")
+  .action(reap);
+
 cli.help();
 cli.addEventListener("command:*", () => {
   throw new InputError(`Unknown command: ${cli.args.join(" ")}. Run device-queue --help.`);
@@ -715,7 +753,7 @@ try {
   cli.parse(process.argv, { run: false });
   parsed = true;
   if (!cli.matchedCommand && !cli.options.help && process.argv.length === 2)
-    throw new InputError("Pass acquire, release, or status; see --help");
+    throw new InputError("Pass acquire, release, status, or reap; see --help");
   await cli.runMatchedCommand();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);

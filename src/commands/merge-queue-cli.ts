@@ -13,7 +13,7 @@ import {
   submitRequest,
 } from "../lib/merge-queue-forward";
 import { githubBackend, projectForRepo } from "../lib/merge-queue-backend";
-import { housekeeperNotifier } from "../lib/merge-queue-notify";
+import { queueNotifier } from "../lib/merge-queue-notify";
 import {
   mergeQueueDirectory,
   processRepository,
@@ -87,6 +87,12 @@ cli.command("status", "Read queue entries and history").action((options) => {
         ([repo, nightly]) =>
           `; ${repo}: nightly full sign-off of ${nightly.sha} failed: ${nightly.error}; log=${nightly.log}`,
       )
+      .join("")}${Object.entries(state.main ?? {})
+      .filter(([, main]) => main.status === "failed")
+      .map(
+        ([repo, main]) =>
+          `; ${repo}: held, main ${main.sha} fails its sign-off${main.since ? ` (areas changed since ${main.since})` : ""}: ${main.error}; log=${main.log}`,
+      )
       .join("")}`,
     options.json,
   );
@@ -146,10 +152,15 @@ cli
     const id = identity(repo, pr);
     const deadline = Date.now() + Number(options.timeout) * 1000;
     for (;;) {
-      const entry = readMergeQueue().entries.find((item) => item.repo === id.repo && item.pr === id.pr);
+      const entry = readMergeQueue().entries.find(
+        (item) => item.repo === id.repo && item.pr === id.pr,
+      );
       const settled = settledEntry(entry, Boolean(options.deploy));
       if (settled || Date.now() >= deadline) {
-        const result = settled ?? { exitCode: 75, summary: `still ${entry?.status} after ${options.timeout}s` };
+        const result = settled ?? {
+          exitCode: 75,
+          summary: `still ${entry?.status} after ${options.timeout}s`,
+        };
         const summary = `merge-queue: ${id.repo}#${id.pr} ${result.summary}`;
         // Failures reach the caller only through stderr.
         if (result.exitCode && !options.json) console.error(summary);
@@ -202,6 +213,26 @@ cli
     );
   });
 cli
+  .command(
+    "retry-main <repo>",
+    "Run the sign-off of a held main again, such as after a flaky failure",
+  )
+  .action(async (repo, options) => {
+    const { repo: id } = identity(repo, "1");
+    if (!options.dryRun)
+      await updateMergeQueue((state) => {
+        const main = state.main?.[id];
+        if (main?.status !== "failed") throw new Error("Main is not held");
+        // The next pass reruns a `running` record's sign-off; the kept error makes it announce the resume.
+        main.status = "running";
+      });
+    output(
+      { repo: id, dryRun: Boolean(options.dryRun) },
+      `merge-queue: ${options.dryRun ? "would retry" : "retrying"} the sign-off of main for ${id}`,
+      options.json,
+    );
+  });
+cli
   .command("process-requests", "Run spare Macs' forwarded adds; launchd entrypoint")
   .action(async (options) => {
     const processed = await processRequests(mergeQueueDirectory(), async (args, from) => {
@@ -228,7 +259,7 @@ cli
     const plans = [];
     if (!options.dryRun) {
       // Only main-mac runs passes: spare Macs forward to it and never reach `run`.
-      const notify = housekeeperNotifier(join(import.meta.dir, "../.."));
+      const notify = queueNotifier(join(import.meta.dir, "../.."));
       const results = await Promise.allSettled(
         repos.map((repository) =>
           processRepository(repository, { ...githubBackend(repository), notify }),

@@ -52,8 +52,8 @@ keeps the old name until `tailscale serve reset` and the mapping is added again.
   `cliproxyapi -config ~/.cli-proxy-api/config.yaml -codex-device-login`.
 - **On the spare Mac:** copy the main Mac's `~/.cli-proxy-api/client-key` (mode 600). Add
   `"claudePoolUrl": "http://<main-mac>.<tailnet>.ts.net:18317"` to `~/.config/my-setup/device.json`, then rerun `mise run install`.
-  Install points Claude Code and Codex at the pool. Codex there has no built-in image tool, so it makes images through the image skill's
-  script and the pool's Images API.
+  Install points Claude Code at the pool. Codex signs in to ChatGPT on the spare Mac itself (`codex login --device-auth`, approved in
+  the main Mac's browser) so it keeps its built-in image tool.
 - **Sign-ins over SSH:** a device-code sign-in started over SSH must keep running until it's approved, so start it with `nohup` and keep
   its log. Approve the code in the main Mac's signed-in browser; an agent can do this. Codes expire within minutes.
 
@@ -63,6 +63,10 @@ keeps the old name until `tailscale serve reset` and the mapping is added again.
   `https://<host>.<tailnet>.ts.net`.
 - Mint pairing links over SSH. Non-interactive SSH has no `tailscale` on `PATH`:
   `ssh <host> 'PATH=/usr/local/bin:$PATH ~/.t3/bin/t3 pair --tailscale --label "<client>" --ttl 30m'`. Use one single-use link per client.
+- T3 Connect (T3's relay, so phones reach the Mac off the tailnet): install `cloudflared` with Homebrew, run
+  `ssh <host> '~/.t3/bin/t3 connect link --headless'`, and approve its device code at accounts.t3.codes in the owner's Chrome. Then quit
+  and reopen the desktop app (`t3 up` hangs over SSH), run `t3 connect publish` for push notifications, and expect `t3 connect status`
+  to end with "Tunnel connected". A free T3 account links at most 3 machines; a T3 Chat plan raises the limit.
 - Pairing on a Mac: Settings → Connections → add environment, then paste the link. On the iPhone: Settings → Environments → Add
   environment, then enter the HTTPS host and code. QR codes scanned with the camera open Safari instead.
 

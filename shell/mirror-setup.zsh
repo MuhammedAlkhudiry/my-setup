@@ -69,6 +69,18 @@ copy_minio() {
     <"$root/shell/mirror-spare-minio.zsh"
 }
 
+# Copies the credentials named in MIRROR_CREDENTIALS (relative to MIRROR_CREDENTIALS_ROOT, the same path on every Mac), such
+# as the agents' Cloudflare Access service token. Directories stay 700 and files 600.
+copy_credentials() {
+  local host=$1 file target
+  for file in ${=MIRROR_CREDENTIALS:-}; do
+    [[ -f $MIRROR_CREDENTIALS_ROOT/$file ]] || continue
+    target=${MIRROR_CREDENTIALS_ROOT#$HOME/}/$file
+    ssh -o BatchMode=yes "$host" "umask 077 && mkdir -p ${(q)target:h} && cat >${(q)target}.tmp && chmod 600 ${(q)target}.tmp && mv ${(q)target}.tmp ${(q)target}" \
+      <"$MIRROR_CREDENTIALS_ROOT/$file" || return 1
+  done
+}
+
 for host in "$@"; do
   if ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$host" true 2>/dev/null; then
     print "$host: offline, skipped"
@@ -77,6 +89,7 @@ for host in "$@"; do
 
   copy_herd "$host" >/dev/null 2>&1 || print "$host: could not copy Herd PHP"
   copy_typesense "$host" >/dev/null 2>&1 || print "$host: could not copy the Typesense config"
+  copy_credentials "$host" >/dev/null 2>&1 || print "$host: could not copy credentials"
 
   if ! edits=$(ssh -o BatchMode=yes "$host" zsh -s -- unlock "$relative" <"$spare" 2>&1); then
     print "$host: could not save local edits or unlock the copy, skipped: ${edits//$'\n'/ }"

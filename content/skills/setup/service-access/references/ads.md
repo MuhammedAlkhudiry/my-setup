@@ -13,6 +13,9 @@ Pause for login, OAuth, 2FA, CAPTCHA, or missing permissions. Get approval befor
 ## Apple Ads
 
 - Confirm the account, currency, timezone, and role in [Apple Ads](https://app-ads.apple.com/cm/app/).
+- Harium has no Apple Ads API user: Apple blocks creating its Apple Account from the home network, and the owner chose not to
+  deal with it (2026-11-04). Read and export reports from the signed-in Apple Ads web dashboard in the shared browser instead,
+  and never ask the owner to set up API access.
 - Prefer `asc ads` where it covers the task. Read `asc ads --help`; the default is Platform API v1, while `asc ads v5` is deprecated.
   Verify credentials with `asc ads auth discover`; use `asc ads auth login` to register keys rather than implementing custom OAuth.
 - Platform API `--ad-account` IDs are distinct from legacy v5 `--org` IDs. Discover each; never substitute one for the other.
@@ -35,6 +38,15 @@ Pause for login, OAuth, 2FA, CAPTCHA, or missing permissions. Get approval befor
 - Prefer the Marketing API when `$SERVICE_CREDENTIALS_HOME/snapchat-ads/oauth.json` exists. Refresh through the official endpoint; verify by listing
   the user's organizations. Keep OAuth app, organization, and ad account distinct.
 - Repair organization/account roles; never share another person's credentials.
+
+## X Ads
+
+- Use the Ads API (`https://ads-api.x.com/12`) when `$SERVICE_CREDENTIALS_HOME/x-ads/oauth.json` exists: OAuth 1.0a user context
+  (HMAC-SHA1) with its consumer key/secret and access token/secret. Verify by listing `/accounts`.
+- Ads API IDs are base36 and differ from the numeric IDs in Ads Manager URLs; list campaigns and line items (ad groups) to map them. Budgets
+  usually live on the line item, in local micros.
+- Access is granted per developer app through X's Ads API access form; regenerating keys in the developer console invalidates the stored
+  ones, so update the file in the same step.
 
 ## TikTok Ads
 

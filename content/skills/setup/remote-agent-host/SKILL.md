@@ -18,8 +18,8 @@ settings that ask for the Mac password. Batch those into one short list with exa
    project secrets.
 4. **Tools and projects:** match the main Mac's Homebrew packages and agent CLIs, install this setup with the `personal` profile, and
    clear `doctor` failures. Skip what its role doesn't need. Clone and prepare its projects.
-5. **Accounts:** Claude and Codex go through the main Mac's pool (`claudePoolUrl` in `device.json`), so the main Mac must stay awake.
-   Other services, such as `gh` and `cf`, sign in on the spare Mac itself; never copy a sign-in that renews itself.
+5. **Accounts:** Claude uses the main Mac's pool (`claudePoolUrl` in `device.json`), so the main Mac stays awake. Codex, `gh`,
+   and `cf` sign in on the spare Mac itself; never copy a sign-in that renews itself.
 6. **T3:** pair the main Mac's app with it through a single-use link minted over SSH, and the phone separately: apps connect to each Mac
    directly. Add the Claude Pool provider and the projects.
 7. **Setup sync:** list the Mac under `"mirrors"` in the main Mac's `device.json`, so every install there copies this setup to it.
@@ -31,5 +31,5 @@ settings that ask for the Mac password. Batch those into one short list with exa
 ## Done when
 
 - The spare Mac shows in the main Mac's T3 and runs a thread; `tailscale ping <name>` replies; `doctor` has no unexpected failures;
-  Claude and Codex answer through the pool.
+  Claude answers through the pool and Codex through its ChatGPT sign-in.
 - The $personal-knowledge devices note records its name, role, and owner decisions such as FileVault.

@@ -53,7 +53,12 @@ import {
   HEAVY_CAPACITY,
 } from "./concurrent-capacity";
 import { recoverLegacyLock, releaseLegacyLock } from "./heavy-legacy-lock";
-import { parseMemoryPressure, releaseHostCapacity } from "./host-capacity";
+import {
+  parseMemoryPressure,
+  parseSwapouts,
+  releaseHostCapacity,
+  swapOutRate,
+} from "./host-capacity";
 import { withQueueState } from "./queue-store";
 import { prepareConcurrentTurns, CURRENT_HEAVY_CLIENT } from "./concurrent-turns";
 import { expressHeavyCommand, heavyProject, readHeavyHistory } from "./heavy-express";
@@ -150,12 +155,13 @@ function fixture(concurrent = false, load = 0) {
     deadline = false,
     cwd = process.cwd(),
     runtimeLimitSeconds?: number,
+    timingSensitive = false,
   ) => {
     const script = `import { runHeavyCommand } from ${JSON.stringify(implementation)};
       import { readFileSync } from "node:fs";
       const abort = new AbortController();
       process.on("SIGTERM", ()=>abort.abort());
-      const receipt = await runHeavyCommand(${JSON.stringify({ argv: [process.execPath, "-e", source], class: className, waitSeconds, owner, requester: owner, directory, legacyLockPath, deferred, ...(runtimeLimitSeconds === undefined ? {} : { runtimeLimitSeconds }) }).slice(0, -1)}, waitForCapacityRetry: async (_timeout, _signal, onWaiting) => { onWaiting?.(); await Bun.sleep(10); }, readPressure: () => "normal", readCpuIdle: () => 0, readLoad: () => Number(readFileSync(${JSON.stringify(join(root, "load"))}, "utf8")), signal: abort.signal, ${deadline ? `scheduleRuntimeDeadline: (expire, milliseconds) => { if(milliseconds !== ${(runtimeLimitSeconds ?? 90) * 1000}) throw new Error("Wrong deadline"); process.stdin.once("data", expire); return () => { process.stdin.removeListener("data", expire); process.stdin.pause(); }; },` : ""} onQueued: () => console.log(JSON.stringify({queued: true})) });
+      const receipt = await runHeavyCommand(${JSON.stringify({ argv: [process.execPath, "-e", source], class: className, waitSeconds, owner, requester: owner, directory, legacyLockPath, deferred, timingSensitive, ...(runtimeLimitSeconds === undefined ? {} : { runtimeLimitSeconds }) }).slice(0, -1)}, waitForCapacityRetry: async (_timeout, _signal, onWaiting) => { onWaiting?.(); await Bun.sleep(10); }, readPressure: () => "normal", readCpuIdle: () => 0, readLoad: () => Number(readFileSync(${JSON.stringify(join(root, "load"))}, "utf8")), signal: abort.signal, ${deadline ? `scheduleRuntimeDeadline: (expire, milliseconds) => { if(milliseconds !== ${(runtimeLimitSeconds ?? 90) * 1000}) throw new Error("Wrong deadline"); process.stdin.once("data", expire); return () => { process.stdin.removeListener("data", expire); process.stdin.pause(); }; },` : ""} onQueued: () => console.log(JSON.stringify({queued: true})) });
       console.log(JSON.stringify(receipt)); process.exitCode = receipt.exitCode;`;
     const processHandle = spawn(process.execPath, ["--no-env-file", "-e", script], {
       cwd,
@@ -566,7 +572,9 @@ test("deferred declarations validate the whole shape and require an explicit arg
     }
     writeFileSync(
       path,
-      JSON.stringify({ heavyRun: { deferredCommands: [["mise", "run", "check"]] } }),
+      JSON.stringify({
+        heavyRun: { deferredCommands: [["mise", "run", "check"]] },
+      }),
     );
     expect(deferredHeavyCommand(["mise", "run", "check", "--json"], f.root)).toBe(true);
     expect(deferredHeavyCommand(["mise", "run", "signoff"], f.root)).toBe(false);
@@ -614,7 +622,10 @@ test("child failures retain the original exit code and cancellation frees the gr
     const active = f.start("signal");
     await f.started("signal");
     active.processHandle.kill("SIGTERM");
-    expect(await active.result).toMatchObject({ status: "cancelled", exitCode: 1 });
+    expect(await active.result).toMatchObject({
+      status: "cancelled",
+      exitCode: 1,
+    });
     expect((await f.start("after-signal", false).result).exitCode).toBe(0);
   } finally {
     await f.clean();
@@ -680,7 +691,12 @@ test("stale recovery validates PID identity and keeps descendants after their le
   reapHostCapacity(state, [descendant]);
   expect(state.host.active).not.toBeNull();
   reapHostCapacity(state, [
-    { ...identity, pgid: 100, state: "S", startedAt: "Tue Oct 13 12:00:00 2026" },
+    {
+      ...identity,
+      pgid: 100,
+      state: "S",
+      startedAt: "Tue Oct 13 12:00:00 2026",
+    },
   ]);
   expect(state.host.active).toBeNull();
 });
@@ -702,11 +718,7 @@ function ticket(id: string, requester?: string): HostJob {
 
 test("responsiveness admits busy hosts, holds critical pressure, and preserves the starvation escape", () => {
   const job = { ...ticket("pressure"), class: "checks" as const };
-  const admit = (
-    now: number,
-    active: HostJob[],
-    pressure: "normal" | "warning" | "critical" | "unknown",
-  ) =>
+  const admit = (now: number, active: HostJob[], pressure: MemoryPressure) =>
     heavyLoadAdmission(
       job,
       active,
@@ -718,6 +730,12 @@ test("responsiveness admits busy hosts, holds critical pressure, and preserves t
   for (const pressure of ["normal", "warning", "unknown"] as const)
     expect(admit(1, [], pressure).held).toBe(false);
   expect(admit(1, [], "critical").held).toBe(true);
+  expect(admit(1, [], "swapping").held).toBe(true);
+  expect(describeLoadHold(admit(1, [], "swapping"))).toBe("swapping");
+  expect(parseSwapouts("Pages free:  16594.\nSwapouts:   10763755.\n")).toBe(10763755);
+  expect(swapOutRate({ swapouts: 0, at: 0 }, { swapouts: 10_000, at: 10_000 })).toBe(1000);
+  expect(swapOutRate({ swapouts: 0, at: 0 }, { swapouts: 10_000, at: 1000 })).toBeUndefined();
+  expect(swapOutRate(undefined, { swapouts: 10_000, at: 10_000 })).toBeUndefined();
   expect(admit(HEAVY_LOAD_POLICY.maxWaitMs, [], "critical").held).toBe(false);
   expect(admit(HEAVY_LOAD_POLICY.maxWaitMs, [ticket("active")], "critical").held).toBe(true);
   expect(parseMemoryPressure("4")).toBe("critical");
@@ -795,7 +813,11 @@ test("load admission preserves FIFO, recovers at the threshold, and admits overd
   expect(host.active.map((job) => job.reservationId)).toEqual(["first"]);
   releaseConcurrentCapacity(host, "first");
   expect(claim(second)).toBe(true);
-  const third = { ...ticket("third", "session"), class: "checks" as const, queuedAt: now };
+  const third = {
+    ...ticket("third", "session"),
+    class: "checks" as const,
+    queuedAt: now,
+  };
   expect(claim(third)).toBe(false);
   load = HEAVY_LOAD_POLICY.threshold;
   expect(claim(third)).toBe(true);
@@ -992,6 +1014,11 @@ test("CLI rejects bad input and status has one line or a versioned JSON receipt"
       packagePath,
       JSON.stringify({ heavyRun: { deferredCommands: [argv.slice(0, 2)] } }),
     );
+    const invalidTimed = await run(["--timing-sensitive", "--json", "--", ...argv]);
+    expect(invalidTimed.code).toBe(2);
+    rmSync(join(JSON.parse(invalidTimed.output).log, ".."), {
+      recursive: true,
+    });
     const deferred = await run(["--json", "--", ...argv]);
     expect(deferred.code).toBe(0);
     expect(JSON.parse(deferred.output)).toMatchObject({
@@ -1001,14 +1028,18 @@ test("CLI rejects bad input and status has one line or a versioned JSON receipt"
 
     // A declared self-queuing runner can itself be launched by a deferred runner.
     // Its leaf steps still reserve normally, since their argv are not declared.
-    const inherited = await run(["--json", "--", ...argv], { HEAVY_RUN_DEFERRED: "1" });
+    const inherited = await run(["--json", "--", ...argv], {
+      HEAVY_RUN_DEFERRED: "1",
+    });
     expect(inherited.code).toBe(0);
     expect(JSON.parse(inherited.output)).toMatchObject({
       reservationMode: "deferred",
       acquiredAt: null,
     });
 
-    const nested = await run(["--json", "--", ...argv], { HEAVY_RUN_RESERVATION_ID: "held" });
+    const nested = await run(["--json", "--", ...argv], {
+      HEAVY_RUN_RESERVATION_ID: "held",
+    });
     expect(nested.code).toBe(2);
     const nestedReceipt = JSON.parse(nested.output);
     expect(nestedReceipt.error).toContain("Nested heavy-run");
@@ -1019,7 +1050,9 @@ test("CLI rejects bad input and status has one line or a versioned JSON receipt"
     expect(badConfig.code).toBe(2);
     expect(badConfig.errors.trim().split("\n")).toHaveLength(1);
     expect(badConfig.errors).toContain("Invalid heavy-run configuration");
-    rmSync(join(badConfig.errors.trim().split("; log: ")[1], ".."), { recursive: true });
+    rmSync(join(badConfig.errors.trim().split("; log: ")[1], ".."), {
+      recursive: true,
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -1128,7 +1161,13 @@ test("multiple stale leases are recovered independently without reaping survivin
     host,
     [
       { ...jobs[1].holder, pgid: 101, state: "S" },
-      { pid: 103, pgid: 102, state: "S", startedAt: "later", command: "compiler" },
+      {
+        pid: 103,
+        pgid: 102,
+        state: "S",
+        startedAt: "later",
+        command: "compiler",
+      },
     ],
     [],
   );
@@ -1417,7 +1456,9 @@ test("shared capacity never overtakes a requester's blocked concurrent-v1 head t
   const v1 = ticket("v1", "same");
   v1.class = "checks";
   claimConcurrentCapacity(host, v1, 0, true);
-  const later = Object.assign(ticket("later", "same"), { clientVersion: CURRENT_HEAVY_CLIENT });
+  const later = Object.assign(ticket("later", "same"), {
+    clientVersion: CURRENT_HEAVY_CLIENT,
+  });
   later.class = "checks";
   const legacy = ticket("legacy", "legacy");
   legacy.class = "checks";
@@ -1456,7 +1497,7 @@ function frozenConcurrentClient(root: string, version: 1 | 2 | 3 = 2): string {
         ),
         "utf8",
       ),
-    ).replace(/HEAVY_CAPACITY = \d+/, "HEAVY_CAPACITY = 3"),
+    ).replace(/HEAVY_CAPACITY = [^;]+;/, "HEAVY_CAPACITY = 3;"),
   );
   if (version === 3)
     writeFileSync(
@@ -1604,7 +1645,13 @@ test("express history uses the last ten exact argv runs in the canonical project
   ).toBe(true);
   expect(qualifies(quick.map((entry) => ({ ...entry, argv: undefined })))).toBe(true);
   expect(
-    qualifies(quick.map((entry) => ({ ...entry, argv: undefined, command: "x".repeat(300) }))),
+    qualifies(
+      quick.map((entry) => ({
+        ...entry,
+        argv: undefined,
+        command: "x".repeat(300),
+      })),
+    ),
   ).toBe(false);
 });
 
@@ -1711,7 +1758,10 @@ test("express leases consume no slots and benchmarks do not block express admiss
     expect(claimConcurrentCapacity(host, check(id), 1, false)).toBe(true);
   }
   expect(claimConcurrentCapacity(host, check("overflow"), 2, false)).toBe(false);
-  const bench = { ...ticket("benchmark", "benchmark"), clientVersion: CURRENT_HEAVY_CLIENT };
+  const bench = {
+    ...ticket("benchmark", "benchmark"),
+    clientVersion: CURRENT_HEAVY_CLIENT,
+  };
   expect(claimConcurrentCapacity(host, bench, 2, false)).toBe(false);
   expect(claimConcurrentCapacity(host, check("later-express", true), 3, false)).toBe(true);
   for (const job of host.active) releaseConcurrentCapacity(host, job.reservationId);
@@ -1768,7 +1818,9 @@ test("an explicit cap also kills an otherwise uncapped full check", async () => 
   const f = fixture();
   writeFileSync(
     join(f.root, "package.json"),
-    JSON.stringify({ heavyRun: { uncappedCommands: [[process.execPath, "-e"]] } }),
+    JSON.stringify({
+      heavyRun: { uncappedCommands: [[process.execPath, "-e"]] },
+    }),
   );
   try {
     const run = f.start(
@@ -1849,7 +1901,9 @@ for (const key of ["deferredCommands", "uncappedCommands"] as const) {
     `;
       writeFileSync(
         packagePath,
-        JSON.stringify({ heavyRun: { [key]: [[process.execPath, "-e", source]] } }),
+        JSON.stringify({
+          heavyRun: { [key]: [[process.execPath, "-e", source]] },
+        }),
       );
       expect(
         await f.start(
@@ -1870,3 +1924,79 @@ for (const key of ["deferredCommands", "uncappedCommands"] as const) {
     }
   });
 }
+
+test("timing-sensitive steps serialize across requesters without blocking ordinary checks", async () => {
+  const f = fixture(true);
+  const timed = (owner: string) =>
+    f.start(
+      owner,
+      true,
+      30,
+      0,
+      false,
+      undefined,
+      "checks",
+      undefined,
+      false,
+      undefined,
+      undefined,
+      true,
+    );
+  try {
+    const first = timed("first");
+    await f.started("first");
+    const second = timed("second");
+    await f.queuedOwner("second");
+    const ordinary = f.start("ordinary");
+    await f.started("ordinary");
+    expect(
+      f
+        .state()
+        .host.active.map((job: HostJob) => job.owner)
+        .sort(),
+    ).toEqual(["first", "ordinary"]);
+    expect(existsSync(join(f.root, "second-started"))).toBe(false);
+    f.release("first");
+    await f.started("second");
+    f.release("second");
+    f.release("ordinary");
+    expect(
+      (await Promise.all([first.result, second.result, ordinary.result])).every(
+        (r) => r.exitCode === 0,
+      ),
+    ).toBe(true);
+    expect(f.state().host.active).toEqual([]);
+  } finally {
+    await f.clean();
+  }
+});
+
+test("timing-sensitive admission respects active timing leases, express markers and requester FIFO", () => {
+  const host = emptyConcurrentCapacity();
+  const first = {
+    ...ticket("first", "first"),
+    clientVersion: CURRENT_HEAVY_CLIENT,
+    timingSensitive: true,
+  };
+  const second: HostJob & { clientVersion: typeof CURRENT_HEAVY_CLIENT } = {
+    ...ticket("second", "second"),
+    clientVersion: CURRENT_HEAVY_CLIENT,
+    timingSensitive: true,
+    reservationMode: "express" as const,
+  };
+  expect(claimConcurrentCapacity(host, first, 0, false)).toBe(true);
+  expect(claimConcurrentCapacity(host, second, 1, false)).toBe(false);
+  delete second.reservationMode;
+  const later = {
+    ...ticket("later", "second"),
+    clientVersion: CURRENT_HEAVY_CLIENT,
+  };
+  expect(claimConcurrentCapacity(host, later, 1, false)).toBe(false);
+  const ordinary = {
+    ...ticket("ordinary", "ordinary"),
+    clientVersion: CURRENT_HEAVY_CLIENT,
+  };
+  expect(claimConcurrentCapacity(host, ordinary, 1, false)).toBe(true);
+  releaseConcurrentCapacity(host, "first");
+  expect(claimConcurrentCapacity(host, second, 2, false)).toBe(true);
+});

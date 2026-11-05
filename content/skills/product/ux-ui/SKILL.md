@@ -5,6 +5,7 @@ description: Use before UI changes, design reviews, or visual option comparisons
 
 ## Design workflow
 
+- Follow $product-taste for the owner's judgment on what to propose, cut, and accept.
 - Inspect the goal, complete journey, platform conventions, design system, realistic content, and states.
 - Follow the established system, theme, and visual character, including when adding components, tokens, or patterns for authorized work.
 - Draw every piece of app UI in an HTML page with the project's mockup kit when one exists, including flow diagrams and case lists. Never use
@@ -26,6 +27,7 @@ description: Use before UI changes, design reviews, or visual option comparisons
 - Keep the page focused on options. Give each two plain sentences: what users see and why to pick it. Use short labels only for secondary detail.
   For feature proposals, summarize options in the proposal and link the full page.
 - For requested revisions, create a new HTML file; preserve the previous one.
+- When the owner rejects a design, rethink it with different approaches instead of patching it.
 
 ## Building a picked option
 
@@ -44,6 +46,9 @@ After each revision, inspect the rendered result and correct:
 - Layout and text sizing problems using $verification; keep buttons and labels readable through wrapping or reflow.
 
 Use purposeful icons, restrained color, and proportionate visual detail.
+
+Share progress as renders of the real app look, often; status text and concept art do not count. Nothing reaches the owner half-done: run
+a strong design pass and an adversarial review first, and judge visuals by eye, since automated scores and models do not certify taste.
 
 ## Animation
 

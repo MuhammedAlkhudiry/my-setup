@@ -40,6 +40,11 @@ function credentials() {
   }
 }
 
+/** The ops bot token for signing in over MTProto; never print or log it. */
+export function opsBotToken(): string {
+  return credentials().token;
+}
+
 /** User ids of the ops bot and the owner it messages; the token's numeric prefix is the bot's user id. */
 export function opsBot(): { botId: number; ownerId: number } {
   const { token, owner_chat_id } = credentials();

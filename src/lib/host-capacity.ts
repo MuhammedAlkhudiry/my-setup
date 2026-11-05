@@ -1,5 +1,7 @@
 import { spawnSync } from "node:child_process";
-import { availableParallelism } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
+import { availableParallelism, tmpdir } from "node:os";
+import { join } from "node:path";
 import type { QueueState } from "./device-queue";
 import {
   groupIsAlive,
@@ -10,9 +12,12 @@ import {
 
 export type HeavyClass = "checks" | "benchmark" | "build";
 
-export type MemoryPressure = "normal" | "warning" | "critical" | "unknown";
+export type MemoryPressure = "normal" | "warning" | "critical" | "swapping" | "unknown";
 
-export function parseMemoryPressure(level: string, report = ""): MemoryPressure {
+export function parseMemoryPressure(
+  level: string,
+  report = "",
+): Exclude<MemoryPressure, "swapping"> {
   const known = ({ "1": "normal", "2": "warning", "4": "critical" } as const)[
     level.trim() as "1" | "2" | "4"
   ];
@@ -22,7 +27,49 @@ export function parseMemoryPressure(level: string, report = ""): MemoryPressure 
       /(?:memory pressure(?: level| state)?|system-wide memory pressure)\s*[:=]\s*(normal|warn(?:ing)?|critical)\b/i,
     )?.[1]
     ?.toLowerCase();
-  return state === "warn" ? "warning" : ((state as MemoryPressure | undefined) ?? "unknown");
+  return state === "warn"
+    ? "warning"
+    : ((state as Exclude<MemoryPressure, "swapping"> | undefined) ?? "unknown");
+}
+
+/** Swap-outs per second that mean the host is thrashing; macOS can report normal pressure meanwhile. */
+export const SWAP_OUT_LIMIT = 500;
+
+export interface SwapSample {
+  swapouts: number;
+  at: number;
+}
+
+export function parseSwapouts(report: string): number | undefined {
+  const count = report.match(/^Swapouts:\s+(\d+)/m)?.[1];
+  return count === undefined ? undefined : Number(count);
+}
+
+/** Rate since the previous sample, when it is recent enough to describe the host now. */
+export function swapOutRate(previous: SwapSample | undefined, current: SwapSample) {
+  if (!previous) return undefined;
+  const seconds = (current.at - previous.at) / 1000;
+  return seconds >= 2 && seconds <= 300 && current.swapouts >= previous.swapouts
+    ? (current.swapouts - previous.swapouts) / seconds
+    : undefined;
+}
+
+function readSwapOutRate(probe: (command: string, args: string[]) => string) {
+  const swapouts = parseSwapouts(probe("/usr/bin/vm_stat", []));
+  if (swapouts === undefined) return undefined;
+  const path = join(tmpdir(), "heavy-run-swap-sample.json");
+  let previous: SwapSample | undefined;
+  try {
+    previous = JSON.parse(readFileSync(path, "utf8")) as SwapSample;
+  } catch {}
+  const current = { swapouts, at: Date.now() };
+  const rate = swapOutRate(previous, current);
+  // Keep the older sample until it can produce a rate, so rapid polls still measure a real interval.
+  if (rate !== undefined || !previous || current.at - previous.at > 300_000)
+    try {
+      writeFileSync(path, JSON.stringify(current));
+    } catch {}
+  return rate;
 }
 
 /** Bounded probes run outside the queue lock; unavailable metrics never stall admission. */
@@ -32,9 +79,11 @@ export function readMemoryPressure(): MemoryPressure {
     spawnSync(command, args, { encoding: "utf8", timeout: 1000 }).stdout ?? "";
   const level = probe("/usr/sbin/sysctl", ["-n", "kern.memorystatus_vm_pressure_level"]);
   const known = parseMemoryPressure(level);
-  return known === "unknown"
-    ? parseMemoryPressure(level, probe("/usr/bin/memory_pressure", []))
-    : known;
+  const pressure =
+    known === "unknown" ? parseMemoryPressure(level, probe("/usr/bin/memory_pressure", [])) : known;
+  if (pressure === "critical") return pressure;
+
+  return (readSwapOutRate(probe) ?? 0) > SWAP_OUT_LIMIT ? "swapping" : pressure;
 }
 
 /** CPU idle from the decayed per-process averages `ps -A -o %cpu=` reports. */
@@ -45,7 +94,10 @@ export function parseCpuIdle(report: string, cores = availableParallelism()): nu
 
 export function readCpuIdle(): number | undefined {
   if (process.platform === "win32") return undefined;
-  const result = spawnSync("ps", ["-A", "-o", "%cpu="], { encoding: "utf8", timeout: 1000 });
+  const result = spawnSync("ps", ["-A", "-o", "%cpu="], {
+    encoding: "utf8",
+    timeout: 1000,
+  });
   return result.status === 0 ? parseCpuIdle(result.stdout) : undefined;
 }
 
@@ -56,6 +108,8 @@ export interface HostJob {
   /** Absent on tickets owned by already-running pre-upgrade callers. */
   requester?: string;
   class: HeavyClass;
+  /** Shares one host-wide lane with other timing-capped steps. */
+  timingSensitive?: boolean;
   argv: string[];
   /** Tracked for load admission and process cleanup, without consuming a capacity slot. */
   reservationMode?: "express";

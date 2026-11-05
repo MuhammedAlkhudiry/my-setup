@@ -17,6 +17,14 @@ const deviceFileSchema = z.object({
   claudePoolUrl: z.url({ protocol: /^https?$/ }).optional(),
   // SSH hosts of spare Macs, such as "small-mac". Install on this Mac copies the setup checkout to each and installs it there.
   mirrors: z.array(z.string().regex(/^[a-z0-9][a-z0-9.-]*$/)).optional(),
+  mergeQueue: z
+    .object({
+      signoffHosts: z
+        .array(z.enum(["big-mac", "small-mac", "main-mac"]))
+        .min(1)
+        .optional(),
+    })
+    .optional(),
 });
 
 type DeviceFile = z.infer<typeof deviceFileSchema>;
@@ -52,6 +60,11 @@ export function readRemoteClaudePoolUrl(home: string): string | undefined {
 /** Spare Macs that mirror this Mac's setup checkout. */
 export function readSetupMirrors(home: string): string[] {
   return readDeviceFile(home).mirrors ?? [];
+}
+
+/** Opt-in only; Windows never dispatches Mac sign-offs. */
+export function readSignoffHosts(home: string): string[] | undefined {
+  return process.platform === "darwin" ? readDeviceFile(home).mergeQueue?.signoffHosts : undefined;
 }
 
 /** Keeps only the remote skills this profile installs, dropping sources left with none. */

@@ -6,6 +6,7 @@ import { basename, dirname, join, relative, resolve } from "node:path";
 import { S3Client } from "bun";
 
 import { runCf } from "../lib/cf-auth";
+import { accessHeaders, isAccessDenied, readShareAccess } from "../lib/share-access";
 
 // Cloudflare setup this command relies on: the R2 bucket has a lifecycle rule that deletes
 // objects after RETENTION_DAYS, and SHARE_HOST is its custom domain behind Cloudflare Access.
@@ -467,6 +468,68 @@ export async function shareHtml(input: string, options: ShareOptions): Promise<v
   );
   if (endpoint)
     console.log('Writable for 7 days. When the user says "see", run `share-html feedback`.');
+}
+
+/** Where a share URL's file lands under `out`, or undefined when it lies outside the page's prefix. */
+export function localPathFor(url: URL, prefix: string, out: string): string | undefined {
+  const pathname = decodeURIComponent(url.pathname);
+  if (url.host !== SHARE_HOST || !pathname.startsWith(`/${prefix}/`)) return undefined;
+  const parts = pathname.slice(prefix.length + 2).split("/");
+  if (parts.some((part) => part === "" || part === "." || part === "..")) return undefined;
+  return join(out, ...parts);
+}
+
+/** Saves a published page and the same-page assets it references, sending the agents' Access service token. */
+export async function getPage(ref: string, options: { out?: string }): Promise<void> {
+  const prefix = prefixFromRef(ref);
+  if (!prefix) throw new Error(`${ref} is not a ${SHARE_HOST} page URL or prefix`);
+  const start = new URL(/^https?:\/\//.test(ref) ? ref : pageUrl(prefix));
+  if (start.pathname.endsWith("/")) start.pathname += "index.html";
+
+  const headers = accessHeaders(readShareAccess());
+  const out = resolve(options.out ?? (await mkdtemp(join(tmpdir(), `share-html-${prefix}-`))));
+  const saved: string[] = [];
+  const missing: string[] = [];
+  const queue = [start];
+  const seen = new Set([start.href]);
+
+  for (let url = queue.shift(); url; url = queue.shift()) {
+    const path = localPathFor(url, prefix, out);
+    if (!path) continue;
+    const response = await fetch(url, { headers, redirect: "manual" });
+    if (isAccessDenied(response)) {
+      throw new Error(
+        `Cloudflare Access refused the agents' service token for ${url.href} (HTTP ${response.status}); run doctor`,
+      );
+    }
+    if (!response.ok) {
+      if (url === start) throw new Error(`${url.href} returned HTTP ${response.status}`);
+      missing.push(`${url.pathname} (HTTP ${response.status})`);
+      continue;
+    }
+
+    const body = new Uint8Array(await response.arrayBuffer());
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, body);
+    saved.push(path);
+
+    if (!/\.(?:html?|css)$/i.test(url.pathname)) continue;
+    for (const reference of findRelativeReferences(new TextDecoder().decode(body))) {
+      const next = new URL(reference, url);
+      next.search = "";
+      if (!seen.has(next.href)) {
+        seen.add(next.href);
+        queue.push(next);
+      }
+    }
+  }
+
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify({ url: start.href, dir: out, files: saved, missing }));
+    return;
+  }
+  console.log(`${saved[0]} (${saved.length} files saved in ${out})`);
+  for (const item of missing) console.log(`missing: ${item}`);
 }
 
 /** Prints the feedback a writable page saved, for the agent to act on. */

@@ -5,6 +5,11 @@
 Check `cf auth whoami`; log in again only when it reports `"authenticated": false`. Run `cf auth login` in the background, ask the user to approve
 the browser device flow, then recheck. Use $cli-tools for Cloudflare operations, including Zero Trust Access applications.
 
+Agents read `share-html` pages with the Access service token "share-html agents (read)" in
+`$SERVICE_CREDENTIALS_HOME/cloudflare/share-html-access.json` (`client_id`, `client_secret`, `expires_at`; never print the secret). The
+"Shared HTML" Access application accepts it through the Service Auth policy "Agents service token (read pages)"; the owner's "Owner only"
+sign-in stays first. Install copies the file from the main Mac to the spare Macs; `doctor` checks that it still passes Access.
+
 ## Laravel Forge
 
 Herd's `forge` CLI is already signed in; `forge server:current` confirms the organization and server. Its API token sits in

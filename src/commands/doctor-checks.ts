@@ -7,6 +7,8 @@
 import { agentOutput } from "../lib/agent-output";
 import { cfAuthProblem } from "../lib/cf-auth";
 import { readMergeQueue } from "../lib/merge-queue";
+import { shareAccessProblem } from "../lib/share-access";
+import { SHARE_HOST } from "./share-html";
 import { workerShellArguments, WORKER_TOOL_PROBE } from "../lib/merge-queue-environment";
 
 import {
@@ -303,19 +305,13 @@ if (remotePoolUrl) {
     });
   }
 
-  // Codex reaches the same pool with the client key as its API key.
-  const codexConfig = existsSync(join(HOME, ".codex/config.toml"))
-    ? readFileSync(join(HOME, ".codex/config.toml"), "utf8")
-    : "";
+  // Codex signs in to ChatGPT on this Mac, not through the pool, for its built-in image tool (owner, 2026-11-04).
   const codexLogin = execaSync("codex", ["login", "status"], { reject: false, all: true });
-  if (
-    !codexConfig.includes(`openai_base_url = "${remotePoolUrl}/v1"`) ||
-    !/API key/i.test(codexLogin.all ?? "")
-  ) {
+  if (!/ChatGPT/i.test(codexLogin.all ?? "")) {
     findings.push({
       level: "required",
-      label: "Codex pool",
-      detail: "Codex is not signed in to the remote pool; run mise run install",
+      label: "Codex sign-in",
+      detail: "Codex is not signed in to ChatGPT; run codex logout, then codex login --device-auth",
     });
   }
 
@@ -550,6 +546,13 @@ if (freeGib < MIN_FREE_GIB) {
 // share-html refreshes cf's OAuth token near its expiry, so the sign-in must be refreshable.
 const cfAuth = process.env.CLOUDFLARE_API_TOKEN ? undefined : cfAuthProblem();
 if (cfAuth) findings.push({ level: "required", label: "Cloudflare sign-in", detail: cfAuth });
+
+// Agents read published pages back with `share-html get`, which signs in to Cloudflare Access with a service token.
+if (PROFILE.allowedCommands.includes("share-html")) {
+  const shareAccess = await shareAccessProblem(SHARE_HOST);
+  if (shareAccess)
+    findings.push({ level: "required", label: "share-html read access", detail: shareAccess });
+}
 
 const ssdLinks = [
   { path: join(HOME, ".android/avd"), label: "Android emulators offline" },

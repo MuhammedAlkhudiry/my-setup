@@ -6,12 +6,18 @@ description: Use whenever creating HTML for the user.
 Publish every page with `share-html` and share its link, even when the host offers its own HTML preview or render tools, unless a skill
 such as $align asks for an in-thread render.
 
+PR status cards are the exception: render them in the thread with `html_render` from [pr-cards.html](assets/pr-cards.html), one `<article>`
+per PR, keeping its styles; check with `html_preview` first.
+
 ## Design
 
 Make each page a joy to read that respects the reader's limited attention. Lead with visuals, choosing the best one for each point,
 without overdoing it; plain text is fine where it says the thing best. Design for the subject and reader; you have full freedom of
 layout, style, and interaction. Only these hold:
 
+- The owner scans and never reads a wall of text. The first screen answers the question: at most three one-line findings and the one
+  visual that proves them. After that, each section is a visual with a caption of one or two lines. Keep the visible page under about
+  300 words. Methods, caveats, and raw tables go in collapsed `<details>` sections or are left out.
 - Always use a dark theme.
 - It reads well on a phone and on a laptop; check screenshots at both widths, and exercise interactive states, before sharing.
 - On a laptop, use a native desktop layout across the window, such as multi-column grids and side-by-side panels, that collapses to one
@@ -29,4 +35,6 @@ layout, style, and interaction. Only these hold:
   act on the answers. Wire the returned URL to the feedback button as the script header describes. Never print the webhook URL in chat;
   delete the schedule once the decisions are settled.
 - When the owner says "see my choices", first read `share-html feedback --json` for that page.
+- Read a published page, such as to review your own demo, with `share-html get <url> [--out <dir>]`; it saves the page and its assets.
+  Plain fetches and browsers without the owner's sign-in only reach the Cloudflare sign-in page.
 - Repair missing Cloudflare sign-in with $service-access. If the host is not behind Cloudflare Access, stop; never publish another way.

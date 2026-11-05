@@ -4,7 +4,8 @@ import { parseMemoryPressure } from "../lib/host-capacity";
 
 /**
  * Mac resource watcher. `run` is the scheduled pass and `guard` the minute-by-minute CPU guard, each started by its own
- * LaunchAgent; `status`, `resolve`, `prune`, and `review` are for people.
+ * LaunchAgent; `status`, `resolve`, `prune`, and `review` are for people. The guard also stops forgotten recordings and
+ * runs `device-queue reap`, and on main-mac messages the Housekeeper one `leftover-reaper:` line when either stops something.
  *
  * Each run frees disk with the fixed storage rules, takes a snapshot, and opens or closes threshold alerts, all without AI.
  * `review` asks Claude for a read-only diagnosis of a fresh snapshot and stores nothing.
@@ -13,7 +14,7 @@ import { parseMemoryPressure } from "../lib/host-capacity";
 import { agentOutput } from "../lib/agent-output";
 import { existsSync, readFileSync, statfsSync, writeFileSync } from "node:fs";
 import { appendFile, mkdir, open, rm } from "node:fs/promises";
-import { cpus, loadavg } from "node:os";
+import { cpus, hostname, loadavg } from "node:os";
 import { join } from "node:path";
 
 import { execa } from "execa";
@@ -52,6 +53,15 @@ import {
   thresholdAlerts,
   writeJson,
 } from "../lib/mac-watcher";
+import { queueNotifier } from "../lib/merge-queue-notify";
+import {
+  RECORDING_REAPER,
+  type StoppedDevice,
+  describeOwner,
+  formatDuration,
+  reaperMessage,
+  staleRecordings,
+} from "../lib/recording-reaper";
 import { pruneStorage, summarizePrune } from "../lib/storage-prune";
 import { timedCommand } from "../lib/timed-command";
 
@@ -494,16 +504,63 @@ async function startedAt(pid: number): Promise<string | undefined> {
   return result.exitCode === 0 ? result.stdout.trim().replace(/\s+/g, " ") : undefined;
 }
 
-/** Stops a process, rechecking its identity before each signal so a reused pid is never hit; false when it was gone. */
-async function stopProcess(row: ProcessRow): Promise<boolean> {
-  if ((await startedAt(row.pid)) !== row.started) return false;
-  process.kill(row.pid, "SIGTERM");
-  await Bun.sleep(5_000);
-  if ((await startedAt(row.pid)) === row.started) process.kill(row.pid, "SIGKILL");
-  return true;
+/** Waits up to `ms` for the process to exit; true when it is gone. */
+async function exited(row: ProcessRow, ms: number): Promise<boolean> {
+  for (const deadline = Date.now() + ms; Date.now() < deadline; await Bun.sleep(500))
+    if ((await startedAt(row.pid)) !== row.started) return true;
+  return (await startedAt(row.pid)) !== row.started;
 }
 
-/** Stops leftover agent tooling that stayed hot or idle, and watcher runs stuck past their time limit. */
+/**
+ * Stops a process, rechecking its identity before each signal so a reused pid is never hit. `graceful` sends SIGINT
+ * first and waits for the process to finish its work, such as writing a recording's file. Returns the signal that
+ * ended it, or undefined when it was already gone.
+ */
+async function stopProcess(
+  row: ProcessRow,
+  graceful?: { finalizeMs: number },
+): Promise<NodeJS.Signals | undefined> {
+  if ((await startedAt(row.pid)) !== row.started) return undefined;
+  if (graceful) {
+    process.kill(row.pid, "SIGINT");
+    if (await exited(row, graceful.finalizeMs)) return "SIGINT";
+  }
+  process.kill(row.pid, "SIGTERM");
+  if (await exited(row, 5_000)) return "SIGTERM";
+  process.kill(row.pid, "SIGKILL");
+  return "SIGKILL";
+}
+
+/** Runs the device queue's scheduled reap; a failure is logged and leaves devices for the next pass. */
+async function reapDevices(): Promise<StoppedDevice[]> {
+  const result = await timedCommand(
+    process.execPath,
+    [join(ROOT_DIR, "src/commands/device-queue-cli.ts"), "reap", "--json"],
+    { timeout: 150_000 },
+  );
+  try {
+    if (result.failed) throw new Error(result.stderr || result.shortMessage);
+    return (JSON.parse(result.stdout) as { stopped: StoppedDevice[] }).stopped;
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] device reap failed: ${error instanceof Error ? error.message : error}`);
+    return [];
+  }
+}
+
+/** Only main-mac's T3 holds the Housekeeper thread; spare Macs log their stops without messaging. */
+async function notifyHousekeeper(host: string, message: string): Promise<void> {
+  if (host !== "main-mac") return;
+  try {
+    await queueNotifier(ROOT_DIR)(message);
+  } catch (error) {
+    console.error(`[${new Date().toISOString()}] Housekeeper message failed: ${error instanceof Error ? error.message : error}`);
+  }
+}
+
+/**
+ * Stops leftover agent tooling that stayed hot or idle, watcher runs stuck past their time limit, recordings left
+ * running, and devices that held no lease past the device queue's grace.
+ */
 async function guardOnce(): Promise<void> {
   const uid = process.getuid?.() ?? 0;
   const now = Date.now();
@@ -527,8 +584,22 @@ async function guardOnce(): Promise<void> {
       `[${new Date(now).toISOString()}] stopped pid ${row.pid} -- ${STUCK_RUN_NOTE} for ${Math.round(row.ageSeconds / 60)} min${note ? `, in step "${note.step}" since ${note.since}` : ""}\n`,
     );
   }
-
   await writeJson(paths.guardState, next);
+
+  const recordings = [];
+  for (const recording of staleRecordings(rows, uid)) {
+    const stoppedBy = await stopProcess(recording.row, RECORDING_REAPER);
+    if (!stoppedBy) continue;
+    recordings.push({ ...recording, stoppedBy });
+    await appendFile(
+      paths.guardLog,
+      `[${new Date(now).toISOString()}] stopped pid ${recording.row.pid} -- ${recording.kind} running ${formatDuration(recording.row.ageSeconds * 1000)}, ${describeOwner(recording.owner)}, ${stoppedBy}: ${shortCommand(recording.row.command)}\n`,
+    );
+  }
+
+  const host = (await run("scutil", ["--get", "LocalHostName"])).trim() || hostname();
+  const message = reaperMessage(host, await reapDevices(), recordings);
+  if (message) await notifyHousekeeper(host, message);
 }
 
 function printStatus(): void {

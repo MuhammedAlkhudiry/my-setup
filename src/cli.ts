@@ -11,6 +11,7 @@ import { execa } from "execa";
 
 import { install } from "./commands/install";
 import { readSetupMirrors } from "./lib/device";
+import { CREDENTIALS_ROOT, SPARE_MAC_CREDENTIAL_FILES } from "../config/credentials";
 
 agentOutput("my-setup", {
   summary: (output) => output.trim().split("\n").at(-1) || "my-setup: ok",
@@ -55,7 +56,15 @@ function startSetupMirrors(): void {
       join(ROOT_DIR, "shell", "mirror-setup.zsh"),
       ...hosts,
     ],
-    { detached: true, stdio: ["ignore", output, output] },
+    {
+      detached: true,
+      stdio: ["ignore", output, output],
+      env: {
+        ...process.env,
+        MIRROR_CREDENTIALS_ROOT: join(homedir(), CREDENTIALS_ROOT),
+        MIRROR_CREDENTIALS: SPARE_MAC_CREDENTIAL_FILES.join(" "),
+      },
+    },
   ).unref();
   console.log(`my-setup mirror: syncing ${hosts.join(", ")} in the background; log: ${log}`);
 }

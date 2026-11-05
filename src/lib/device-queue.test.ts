@@ -15,6 +15,7 @@ import {
   reapQueue,
   releaseLease,
   simulatorDeviceType,
+  simulatorTarget,
   updateHeadroom,
 } from "./device-queue";
 
@@ -350,4 +351,49 @@ test("a missing simulator falls back to the closest iPhone its runtime supports"
   expect(simulatorDeviceType(main, runtime("iPhone Duo"))).toBe("type.iPhone-Duo");
   expect(simulatorDeviceType(small, runtime("iPhone Duo"))).toBe("type.iPhone-Duo");
   expect(simulatorDeviceType(main, runtime())).toBeUndefined();
+});
+
+test("a pool simulator goes on the newest runtime that supports its device type, not the newest runtime", () => {
+  const type = (name: string) => ({ identifier: `type.${name.replaceAll(" ", "-")}`, name, productFamily: "iPhone" });
+  const runtime = (version: string, ...names: string[]) => ({
+    identifier: `ios-${version}`,
+    version,
+    platform: "iOS",
+    isAvailable: true,
+    supportedDeviceTypes: names.map(type),
+  });
+  const runtimes = [
+    runtime("26.4", "iPhone 17 Pro"),
+    runtime("27.1", "iPhone Duo"),
+    runtime("27.0", "iPhone 17 Pro", "iPhone SE (3rd generation)"),
+  ];
+  const main = { kind: "main", deviceType: "type.iPhone-17-Pro" };
+  const small = { kind: "small", deviceType: "type.iPhone-SE-(3rd-generation)" };
+
+  expect(simulatorTarget(main, runtimes)).toMatchObject({ runtime: { version: "27.0" }, deviceType: "type.iPhone-17-Pro" });
+  expect(simulatorTarget(small, runtimes)?.runtime.version).toBe("27.0");
+  // No runtime has the configured type: the newest runtime's closest iPhone stands in.
+  expect(simulatorTarget({ kind: "main", deviceType: "type.iPhone-99" }, runtimes)).toMatchObject({
+    runtime: { version: "27.1" },
+    deviceType: "type.iPhone-Duo",
+  });
+  expect(simulatorTarget(main, [])).toBeUndefined();
+});
+
+test("with a grace, a device beyond the warm ones stays until it has held no lease that long", () => {
+  const state = emptyQueueState();
+  const fleet = devices(["kept", true], ["extra", true]);
+  state.unleasedSince = { kept: NOW, extra: NOW - 1 };
+  const graced = { ...THREE_SLOTS, graceMs: DEVICE_QUEUE.unleasedGraceMs };
+
+  expect(reapQueue(state, fleet, NOW, alive, new Map(), graced)).toEqual([]);
+  expect(
+    reapQueue(state, fleet, NOW - 1 + DEVICE_QUEUE.unleasedGraceMs, alive, new Map(), graced),
+  ).toMatchObject([
+    {
+      device: { id: "extra" },
+      reason: "enough warm devices are available",
+      unleasedMs: DEVICE_QUEUE.unleasedGraceMs,
+    },
+  ]);
 });

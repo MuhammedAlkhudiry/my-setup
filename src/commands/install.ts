@@ -41,8 +41,8 @@ import { renderCodexRules } from "../../config/permissions";
 import {
   codexManagedSectionValues,
   codexManagedTopLevelValues,
-  CODEX_REMOTE_POOL_TOP_LEVEL_KEYS,
-  codexRemotePoolValues,
+  CODEX_RETIRED_POOL_SECTION_KEYS,
+  CODEX_RETIRED_POOL_TOP_LEVEL_KEYS,
   renderCodexMcpServersToml,
 } from "../lib/codex-config";
 import { replaceDirectory, ensureParentDir } from "../lib/fs";
@@ -487,6 +487,21 @@ function removeTomlTopLevelKey(configToml: string, key: string): string {
   return lines.join("\n");
 }
 
+function removeTomlSectionKey(configToml: string, sectionName: string, key: string): string {
+  const lines = configToml.split(/\r?\n/);
+  const sectionIndex = lines.findIndex((line) => line.trim() === `[${sectionName}]`);
+  if (sectionIndex === -1) return configToml;
+
+  const keyPattern = new RegExp(`^\\s*${key}\\s*=`);
+  for (let i = sectionIndex + 1; i < lines.length && !/^\s*\[/.test(lines[i]); i++) {
+    if (keyPattern.test(lines[i])) {
+      lines.splice(i, 1);
+      return lines.join("\n");
+    }
+  }
+  return configToml;
+}
+
 function upsertTomlTopLevelKey(configToml: string, key: string, value: string): string {
   const lines = configToml.split(/\r?\n/);
   const firstSectionIndex = lines.findIndex((line) => /^\s*\[/.test(line));
@@ -555,39 +570,14 @@ async function mergeCodexConfigAsync(): Promise<void> {
     merged = upsertTomlSectionKey(merged, section, key, value);
   }
 
-  const remotePool = await readRemoteCodexPool();
-  if (remotePool) {
-    const { topLevel, sections } = codexRemotePoolValues(remotePool.url, remotePool.clientKey);
-    for (const [key, value] of topLevel) merged = upsertTomlTopLevelKey(merged, key, value);
-    for (const [section, key, value] of sections) {
-      merged = upsertTomlSectionKey(merged, section, key, value);
-    }
-  } else {
-    for (const key of CODEX_REMOTE_POOL_TOP_LEVEL_KEYS) merged = removeTomlTopLevelKey(merged, key);
+  for (const key of CODEX_RETIRED_POOL_TOP_LEVEL_KEYS) merged = removeTomlTopLevelKey(merged, key);
+  for (const [section, key] of CODEX_RETIRED_POOL_SECTION_KEYS) {
+    merged = removeTomlSectionKey(merged, section, key);
   }
 
-  // The remote pool's client key lands in the config, so keep it private.
   await writeFile(CODEX_PATHS.config, merged, { mode: 0o600 });
   await chmod(CODEX_PATHS.config, 0o600);
-  if (remotePool) await signInCodexToRemotePool(remotePool.clientKey);
   print.success("Codex config merged");
-}
-
-async function readRemoteCodexPool(): Promise<{ url: string; clientKey: string } | undefined> {
-  const url = readRemoteClaudePoolUrl(HOME);
-  if (!url) return undefined;
-
-  const clientKey = (await readFile(claudePoolPaths(HOME).clientKey, "utf-8")).trim();
-  return { url, clientKey };
-}
-
-// Codex sends its requests to the pool with the client key as its API key; the pool holds the ChatGPT sign-ins.
-async function signInCodexToRemotePool(clientKey: string): Promise<void> {
-  const status = await execa("codex", ["login", "status"], { reject: false, all: true });
-  if (status.exitCode === 0 && /API key/i.test(status.all ?? "")) return;
-
-  await execa("codex", ["login", "--with-api-key"], { input: clientKey });
-  print.success("Codex signed in to the remote pool");
 }
 
 async function mergeCodexMcpConfigAsync(profile: DeviceProfile): Promise<void> {

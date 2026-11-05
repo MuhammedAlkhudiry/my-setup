@@ -312,3 +312,73 @@ test("acquire retries a timed-out probe and treats a device already off as shut 
     rmSync(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+test("reap stops only an unleased device past the warm ones and the grace, and never a leased one", async () => {
+  const root = mkdtempSync(join(tmpdir(), "device-reap-test-"));
+  const bin = join(root, "bin");
+  mkdirSync(bin);
+  mkdirSync(join(root, "device-queue"));
+  idleHost(bin);
+  const sims = ["old", "fresh-1", "fresh-2", "fresh-3", "leased"];
+  writeFileSync(
+    join(bin, "xcrun"),
+    `#!${process.execPath}
+    import { appendFileSync } from "node:fs";
+    const args = process.argv.slice(2);
+    if (args[1] === "list") console.log(JSON.stringify({devices:{runtime:${JSON.stringify(sims)}.map((udid) => ({udid, name: udid, state: "Booted"}))}}));
+    if (args[1] === "shutdown") appendFileSync(${JSON.stringify(join(root, "shutdowns"))}, args[2] + "\\n");`,
+    { mode: 0o700 },
+  );
+  writeFileSync(join(bin, "adb"), `#!${process.execPath}\nconsole.log("List of devices attached");`, {
+    mode: 0o700,
+  });
+  const now = Date.now();
+  const minutesAgo = (minutes: number) => now - minutes * 60_000;
+  writeFileSync(
+    join(root, "device-queue/state.json"),
+    JSON.stringify({
+      leases: {
+        leased: {
+          id: "leased",
+          platform: "ios",
+          name: "leased",
+          owner: "live thread",
+          agentPid: process.pid,
+          acquiredAt: minutesAgo(120),
+          renewedAt: minutesAgo(120),
+        },
+      },
+      tickets: {},
+      unleasedSince: {
+        old: minutesAgo(20),
+        "fresh-1": minutesAgo(1),
+        "fresh-2": minutesAgo(2),
+        "fresh-3": minutesAgo(3),
+      },
+    }),
+  );
+
+  try {
+    const child = Bun.spawn([process.execPath, cli, "reap", "--json"], {
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        ANDROID_HOME: join(root, "sdk"),
+        XDG_STATE_HOME: root,
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    expect(await child.exited).toBe(0);
+    const receipt = JSON.parse(await new Response(child.stdout).text());
+
+    // Two warm devices stay with open lanes; fresh-3 is beyond them but still inside the 10-minute grace.
+    expect(receipt.stopped).toMatchObject([
+      { id: "old", platform: "ios", reason: "enough warm devices are available" },
+    ]);
+    expect(receipt.stopped[0].unleasedMs).toBeGreaterThanOrEqual(20 * 60_000);
+    expect(await Bun.file(join(root, "shutdowns")).text()).toBe("old\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);

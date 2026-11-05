@@ -82,7 +82,9 @@ export async function signoffDiagnostics(
   const expand = async (text: string, depth = 0): Promise<string> => {
     text = stripAnsi(text);
     if (depth >= 8 || cache.size >= 64) return text;
-    const paths = [...text.matchAll(/\blog(?:=|:\s*)(\/[^\s;]+)/g)].map((match) => match[1]!);
+    const paths = [...text.matchAll(/(?:\blog(?:=|:\s*)|"log"\s*:\s*")(\/[^\s";]+)/g)].map(
+      (match) => match[1]!,
+    );
     for (const path of new Set(paths)) {
       if (cache.has(path)) continue;
       cache.set(path, "");
@@ -93,7 +95,9 @@ export async function signoffDiagnostics(
     return text;
   };
   const expanded = await expand(output);
-  const stages = [...expanded.matchAll(/^FAIL\s+(\S+)\s+log=(\S+)/gm)];
+  // Receipts identify the leaf checks, even when a wrapper reports FAIL signoff.
+  const receipt = parseSignoffReceipt(expanded);
+  const stages = [...(receipt?.failures ?? expanded).matchAll(/^FAIL\s+(\S+)\s+log=(\S+)/gm)];
   const failures: CandidateRun["failures"] = [];
   for (const match of stages.length ? stages : [["", "signoff", fallbackLog]]) {
     const name = match[1]!;
@@ -137,7 +141,11 @@ export async function signoffDiagnostics(
       budgetOnly:
         reason === "slow-test budget" &&
         /Tests:.*\bpassed\b/.test(text) &&
-        !/Tests:.*\bfailed\b|\bFAILED\b|::error(?! title=PHP test timing regression)/.test(text),
+        /::error title=PHP test timing regression::/.test(text) &&
+        !/Tests:?[^\n]*\bfailed\b|\bFAIL(?:ED)?\b|AssertionError|^\s*[×✕]|::error(?! title=PHP test timing regression::)/m.test(
+          text,
+        ) &&
+        !/coverage.{0,80}(?:below|fail|threshold|minimum)/i.test(text),
     });
   }
   return {
@@ -147,8 +155,52 @@ export async function signoffDiagnostics(
   };
 }
 
+/** One check's line in a sign-off receipt (`mise run signoff -- --json`). */
+export interface SignoffCheck {
+  task: string;
+  status: "passed" | "failed" | "skipped";
+  seconds: number;
+  reused: boolean;
+  log: string | null;
+}
+
+/**
+ * Reads the receipt `--json` prints as its last JSON line. Its failures become the `FAIL <name> log=<path>` lines the
+ * default output prints, so diagnostics read both forms alike.
+ */
+export function parseSignoffReceipt(output: string) {
+  for (const line of output.trim().split("\n").reverse()) {
+    if (!line.startsWith("{")) continue;
+    try {
+      const receipt = JSON.parse(line);
+      if (typeof receipt?.version !== "number" || !Array.isArray(receipt.checks)) continue;
+
+      const checks = receipt.checks as SignoffCheck[];
+      const errors = (receipt.errors ?? []) as { item: string; log: string }[];
+      const failures = [
+        ...checks
+          .filter((check) => check.status === "failed")
+          .map((check) => `FAIL ${check.task} log=${check.log}`),
+        ...errors.map((error) => `FAIL ${error.item} log=${error.log}`),
+      ];
+      return { receipt: line, checks, failures: failures.join("\n") };
+    } catch {
+      continue;
+    }
+  }
+  return undefined;
+}
+
 export async function candidateSignoff(options: {
-  run: (attempt: number) => Promise<{ ok: boolean; output: string; log?: string }>;
+  run: (attempt: number) => Promise<{
+    ok: boolean;
+    output: string;
+    log?: string;
+    checks?: CandidateRun["checks"];
+    receipt?: string;
+  }>;
+  /** Every changed path is docs only, so sign-off starts without waiting for load under the limit. */
+  docsOnly?: boolean;
   requireClean: () => Promise<void>;
   log: (line: string) => Promise<void>;
   runLog: string;
@@ -164,6 +216,7 @@ export async function candidateSignoff(options: {
   for (let attempt = 1; attempt <= 2; attempt++) {
     const admitted = await admitSignoff({
       ...policy,
+      ...(options.docsOnly ? { maxLoad: Infinity } : {}),
       ...options.admission,
       log: options.log,
     });
@@ -177,7 +230,7 @@ export async function candidateSignoff(options: {
     );
     try {
       await options.log(
-        `sign-off run ${attempt} start: load=${admitted.load.toFixed(2)}, threshold=${policy.maxLoad}`,
+        `sign-off run ${attempt} start: load=${admitted.load.toFixed(2)}, threshold=${options.docsOnly ? "none (docs only)" : policy.maxLoad}`,
       );
       result = await options.run(attempt);
     } finally {
@@ -201,6 +254,8 @@ export async function candidateSignoff(options: {
       peakLoad,
       log: runLog,
       failures: diagnostics.failures,
+      ...(result.checks ? { checks: result.checks } : {}),
+      ...(result.receipt ? { receipt: result.receipt } : {}),
     };
     runs.push(run);
     await options.log(`sign-off result: ${JSON.stringify(run)}`);

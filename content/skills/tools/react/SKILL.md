@@ -7,6 +7,8 @@ Follow consistent project patterns over these defaults.
 
 - Order components: hooks grouped by purpose → calculated values → handlers → early returns → JSX.
 - Load client-side server data through the project's query library. Use its cache directly; do not copy it into local state.
+- Render API values as returned; derive no business values (counts, statuses, permissions, prices) on the client. Format for display
+  and keep only short-lived UI state locally. Local-first editors the project names are exempt.
 - Read global state in the consuming component through a selector, not props. Select only needed fields; use `useShallow` for object/array results.
 - Pass objects as single props instead of separate fields.
 - With React Compiler, avoid habitual `useMemo`, `useCallback`, and `memo`.
@@ -18,7 +20,8 @@ Follow consistent project patterns over these defaults.
 - Generate and commit API types and fetch functions from OpenAPI; enforce drift checks in CI. Do not use generated hooks or keys.
 - Keep `queryOptions`/`mutationOptions` factories with hierarchical keys in `<feature>.queries.ts`. Components and cache reads use these factories,
   never inline keys.
-- Declare invalidations in `meta.invalidates`; handle them in one global `MutationCache` handler.
+- Declare invalidations in `meta.invalidates`; handle them in one global `MutationCache` handler. After a write, store the
+  server's returned data or invalidate; never compute new cache state in an updater, except allowlisted optimistic updates.
 - Take server-rendered page data, such as Inertia data, from page props.
 
 ## React Native

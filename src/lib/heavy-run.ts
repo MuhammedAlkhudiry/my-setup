@@ -68,11 +68,17 @@ export function heavyLoadAdmission(
   // macOS load also counts processes stuck in I/O or idle wait, so it holds only on a busy CPU.
   const cpuIdle = load > HEAVY_LOAD_POLICY.threshold ? readIdle() : undefined;
   const cpuBusy = cpuIdle !== undefined && cpuIdle < HEAVY_LOAD_POLICY.minCpuIdle;
-  const overloaded = memoryPressure === "critical" || cpuBusy;
+  const overloaded = memoryPressure === "critical" || memoryPressure === "swapping" || cpuBusy;
   const held =
     overloaded && (now - job.queuedAt < HEAVY_LOAD_POLICY.maxWaitMs || active.length > 0);
 
-  return { load, threshold: HEAVY_LOAD_POLICY.threshold, cpuIdle, memoryPressure, held };
+  return {
+    load,
+    threshold: HEAVY_LOAD_POLICY.threshold,
+    cpuIdle,
+    memoryPressure,
+    held,
+  };
 }
 
 export function describeLoadHold({
@@ -83,6 +89,7 @@ export function describeLoadHold({
 }: ReturnType<typeof heavyLoadAdmission>) {
   return [
     memoryPressure === "critical" && "critical memory pressure",
+    memoryPressure === "swapping" && "swapping",
     cpuIdle !== undefined &&
       cpuIdle < HEAVY_LOAD_POLICY.minCpuIdle &&
       `load ${load.toFixed(1)} > ${threshold} with ${Math.round(cpuIdle)}% CPU idle`,
@@ -229,6 +236,7 @@ export interface HeavyOptions {
   readCpuIdle?: () => number | undefined;
   /** Only for explicitly opted-in runners that reserve each heavy step. */
   deferred?: boolean;
+  timingSensitive?: boolean;
   /** Explicit cap for a non-deferred gate or build; ordinary checks cannot exceed their 90-second cap. */
   runtimeLimitSeconds?: number;
   /** Timer dependency for deterministic deadline tests; the production deadline is fixed. */
@@ -287,7 +295,9 @@ function recordRun(directory: string, entry: HeavyHistoryEntry): void {
 
   if (statSync(path).size > 2_000_000) {
     const runs = readFileSync(path, "utf8").trimEnd().split("\n");
-    writeFileSync(path, `${runs.slice(-HISTORY_RUNS).join("\n")}\n`, { mode: 0o600 });
+    writeFileSync(path, `${runs.slice(-HISTORY_RUNS).join("\n")}\n`, {
+      mode: 0o600,
+    });
   }
 }
 
@@ -387,6 +397,9 @@ export async function runHeavyCommand(
   options: HeavyOptions,
   scheduler: HeavyScheduler = legacyScheduler,
 ): Promise<HeavyReceipt> {
+  if (options.timingSensitive && options.deferred)
+    throw new Error("Timing-sensitive reservations must wrap a heavy step, not a deferred runner");
+
   const uncapped =
     options.class === "build" ||
     uncappedHeavyCommand(options.argv) ||
@@ -427,6 +440,7 @@ export async function runHeavyCommand(
   const project = heavyProject(process.cwd());
   const express =
     !options.deferred &&
+    !options.timingSensitive &&
     scheduler.express === true &&
     expressHeavyCommand(
       readHeavyHistory(heavyHistoryPath(directory)),
@@ -443,6 +457,7 @@ export async function runHeavyCommand(
     owner: options.owner,
     requester: options.requester ?? heavyRequester(),
     class: options.class,
+    ...(options.timingSensitive ? { timingSensitive: true } : {}),
     argv: options.argv,
     queuedAt,
     acquiredAt: null,

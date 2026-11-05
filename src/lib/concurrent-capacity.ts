@@ -1,8 +1,10 @@
+import { totalmem } from "node:os";
 import { prepareConcurrentTurns } from "./concurrent-turns";
 import type { HostJob } from "./host-capacity";
 import { groupIsAlive, matchesProcess, type ProcessRow } from "./process-identity";
 
-export const HEAVY_CAPACITY = 10;
+// One checks job per 4 GB of RAM: a 16 GB Mac running ten swapped until sign-offs timed out without failing.
+export const HEAVY_CAPACITY = Math.max(2, Math.min(10, Math.floor(totalmem() / 4 / 2 ** 30)));
 
 export interface ConcurrentJob extends HostJob {
   clientVersion?: "concurrent-v2" | "concurrent-v3" | "concurrent-v4";
@@ -65,6 +67,8 @@ export function claimConcurrentCapacity(
   if (blocked) return false;
 
   const allActive = [...host.active, ...otherActive];
+  if (job.timingSensitive && allActive.some((ticket) => ticket.timingSensitive)) return false;
+
   if (job.reservationMode === "express") {
     if (!admit(job, allActive)) return false;
 

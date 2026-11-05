@@ -2,6 +2,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { candidateSignoff } from "./merge-queue-signoff";
 import {
   processRepository,
   QueueEnvironmentError,
@@ -564,8 +565,9 @@ test("a PR merged outside the queue also has its worktree removed", async () => 
   expect(removed).toEqual([1]);
   expect(f.state().entries[0]!.status).toBe("merged");
 });
-test("an idle worker signs off every area of main once a day after the nightly hour, recording failures", async () => {
+test("an idle worker signs off every area of main once a day after the nightly hour, recording and reporting failures", async () => {
   const f = await fixture(0);
+  const messages = listen(f);
   const runs: string[] = [];
   let ok = true;
   f.backend.nightly = async (base) => {
@@ -609,6 +611,9 @@ test("an idle worker signs off every area of main once a day after the nightly h
     log: "nightly.log",
     error: expect.stringContaining("backend:test"),
   });
+  expect(messages).toEqual([
+    "merge-queue: owner/repo nightly full sign-off of main main0 failed: backend:test (log=/backend.log). Log: nightly.log. Fix main in a PR; the queue keeps merging.",
+  ]);
 
   await updateMergeQueue((state) => {
     state.nightly!["owner/repo"].status = "running";
@@ -647,12 +652,13 @@ test("the nightly sign-off waits while PRs are ready to merge", async () => {
 });
 function listen(f: Awaited<ReturnType<typeof fixture>>) {
   const messages: string[] = [];
-  f.backend.notify = async (message) => {
-    messages.push(message);
+  // Owner messages carry their thread, so tests show who each message went to.
+  f.backend.notify = async (message, owner) => {
+    messages.push(owner?.thread ? `[${owner.thread}] ${message}` : message);
   };
   return messages;
 }
-test("the Housekeeper hears about failed PRs and deploys, never about waiting entries", async () => {
+test("owners hear about their failed and merged PRs, the Housekeeper about deploys, nobody about waiting entries", async () => {
   const f = await fixture(2);
   const messages = listen(f);
   f.backend.signed = async () => false;
@@ -666,8 +672,9 @@ test("the Housekeeper hears about failed PRs and deploys, never about waiting en
   });
   await processRepository("owner/repo", f.backend, f.directory);
   expect(messages).toEqual([
-    "merge-queue: owner/repo#2 failed: Candidate sign-off failed. Log: /signoff.log. Owning thread: owning-thread on main-mac.",
+    "[owning-thread] merge-queue: owner/repo#2 failed: Candidate sign-off failed. Log: /signoff.log. You own this PR: fix it, push, and run merge-queue add again; tell the Housekeeper only if you cannot.",
     "merge-queue: owner/repo: PRs #1 merged; main is merge1; deployed merge1. Run the post-merge checks on it.",
+    "[owning-thread] merge-queue: owner/repo#1 merged in main merge1, deployed merge1. Run your change's own post-merge check: what you changed, on production or the next build. The Housekeeper runs the batch health checks.",
   ]);
 
   messages.length = 0;
@@ -760,7 +767,230 @@ test("a message that fails to send never breaks the pass", async () => {
   expect(f.merged).toEqual([1]);
   expect(f.deploys).toEqual(["merge1"]);
   expect(f.state().entries.map((entry) => entry.status)).toEqual(["merged", "failed"]);
-  expect(sends).toBe(2);
-  expect(errors.every((error) => error.includes("Housekeeper message not sent: t3 not running"))).toBe(true);
-  expect(errors).toHaveLength(2);
+  // The failure, the batch deploy, and the merged PR's owner.
+  expect(sends).toBe(3);
+  expect(errors.every((error) => error.includes("message not sent: t3 not running"))).toBe(true);
+  expect(errors).toHaveLength(3);
+});
+const failedRuns = [
+  {
+    attempt: 1,
+    startLoad: 1,
+    endLoad: 1,
+    log: "/run-1.log",
+    failures: [{ name: "family-tree:arch", log: "/arch.log", reason: "check failure" }],
+  },
+];
+test("a main the queue did not merge gets a full sign-off before a batch builds on it", async () => {
+  const f = await fixture(1);
+  const fullRuns: string[] = [];
+  const since: (string | undefined)[] = [];
+  f.backend.nightly = async (base, options) => {
+    fullRuns.push(base);
+    since.push(options?.since);
+    return { ok: true, log: "/full.log" };
+  };
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(fullRuns).toEqual([]);
+  expect(f.state().main!["owner/repo"]).toMatchObject({
+    sha: "merge1",
+    status: "trusted",
+    via: "queue",
+  });
+
+  await updateMergeQueue((state) => {
+    state.entries.push({
+      repo: "owner/repo",
+      pr: 2,
+      head: "head2",
+      status: "queued",
+      enqueuedAt: "now",
+    });
+  }, f.directory);
+  f.remote.set(2, { ...f.remote.get(1)!, state: "OPEN", headRefOid: "head2", mergeCommit: null });
+  const base = f.backend.base;
+  f.backend.base = async () => (f.merged.length === 1 ? "direct" : base());
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(fullRuns).toEqual(["direct"]);
+  // Only the areas changed since the trusted main the queue merged.
+  expect(since).toEqual(["merge1"]);
+  expect(f.merged).toEqual([1, 2]);
+  expect(f.state().main!["owner/repo"]).toMatchObject({ sha: "merge2", via: "queue" });
+});
+test("a failing main holds the queue, tells the Housekeeper once, and a PR that fixes it lands", async () => {
+  const f = await fixture(2);
+  const messages = listen(f);
+  await updateMergeQueue((state) => {
+    state.main = { "owner/repo": { sha: "trusted", status: "trusted", via: "queue", at: "now" } };
+  }, f.directory);
+  let fullRuns = 0;
+  f.backend.nightly = async (_base, options) => {
+    expect(options).toEqual({ since: "trusted" });
+    fullRuns++;
+    return { ok: false, log: "/full.log", runs: failedRuns };
+  };
+  const tried: string[] = [];
+  f.backend.candidate = async (batch, _base, _checks, options) => {
+    expect(options).toEqual({ since: "trusted" });
+    tried.push(batch.map((entry) => entry.pr).join());
+    if (batch[0]!.pr !== 2) return { ok: false, log: "/candidate.log", runs: [] };
+
+    const result = await candidateSignoff({
+      runLog: "/candidate.log",
+      admission: { readLoad: () => 1, lock: () => () => {} },
+      log: async () => {},
+      requireClean: async () => {},
+      readLog: async () =>
+        "Tests: 4174 passed\n::error title=PHP test timing regression::5.24s exceeds 5.00s",
+      run: async () => ({
+        ok: false,
+        output: JSON.stringify({
+          version: 1,
+          command: "signoff",
+          checks: [{ task: "family-tree:pest", status: "failed", log: "/pest.log" }],
+        }),
+      }),
+    });
+    expect(result.runs[0]!.warning).toContain("slow-test budget only");
+    return { ...result, log: "/candidate.log" };
+  };
+
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(fullRuns).toBe(1);
+  expect(tried).toEqual(["1"]);
+  expect(f.merged).toEqual([]);
+  expect(f.state().entries.map((entry) => entry.status)).toEqual(["queued", "queued"]);
+  expect(f.state().main!["owner/repo"]).toMatchObject({
+    sha: "main0",
+    status: "failed",
+    tried: ["1 head1"],
+    since: "trusted",
+  });
+  expect(messages).toEqual([
+    "merge-queue: owner/repo main main0, which the queue did not merge, fails the sign-off of the areas changed since trusted main trusted: family-tree:arch (log=/arch.log). Log: /full.log. The queue holds: queued PRs stay queued, and each gets one sign-off of the areas changed since trusted main trusted on top of this main; the first that passes lands and lifts the hold. After a flaky failure, run merge-queue retry-main owner/repo.",
+    "[owning-thread] merge-queue: owner/repo#1 fails the sign-off of the areas changed since trusted main trusted on top of held main main0: unknown checks. It stays queued; a new head or merge-queue retry-main owner/repo gives it another try. You own this PR: fix it, push, and run merge-queue add again; tell the Housekeeper only if you cannot.",
+  ]);
+
+  messages.length = 0;
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(fullRuns).toBe(1);
+  expect(tried).toEqual(["1", "2"]);
+  expect(f.merged).toEqual([2]);
+  expect(f.state().main!["owner/repo"]).toMatchObject({
+    sha: "merge2",
+    status: "trusted",
+    via: "signoff",
+  });
+  expect(messages[0]).toBe(
+    "merge-queue: owner/repo#2 passed the sign-off of the areas changed since trusted main trusted on top of held main main0 and landed as merge2; the queue is processing again.",
+  );
+
+  f.backend.candidate = async () => ({ ok: true, log: "/candidate.log" });
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(f.merged).toEqual([2, 1]);
+  expect(fullRuns).toBe(1);
+});
+test("a held main's fix candidate cut short by the environment keeps its try for the next pass", async () => {
+  const f = await fixture(1);
+  await updateMergeQueue((state) => {
+    state.main = {
+      "owner/repo": {
+        sha: "main0",
+        status: "failed",
+        at: "now",
+        error: "Full sign-off of main failed",
+        tried: [],
+      },
+    };
+  }, f.directory);
+  f.backend.candidate = async () => {
+    throw new Error("ssh: connection to big-mac closed");
+  };
+
+  await expect(processRepository("owner/repo", f.backend, f.directory)).rejects.toThrow(
+    "connection to big-mac closed",
+  );
+
+  expect(f.state().main!["owner/repo"]!.tried).toEqual([]);
+  expect(f.state().entries.map((entry) => entry.status)).toEqual(["queued"]);
+});
+test("a held queue with nothing new to try waits quietly, and resumes once main passes", async () => {
+  const f = await fixture(1);
+  const messages = listen(f);
+  await updateMergeQueue((state) => {
+    state.main = {
+      "owner/repo": {
+        sha: "main0",
+        status: "failed",
+        at: "now",
+        error: "Full sign-off of main failed",
+        tried: ["1 head1"],
+      },
+    };
+  }, f.directory);
+  let ok = false;
+  let fullRuns = 0;
+  f.backend.nightly = async () => {
+    fullRuns++;
+    return ok ? { ok: true, log: "/full.log" } : { ok: false, log: "/full.log", runs: failedRuns };
+  };
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(f.candidates).toEqual([]);
+  expect(fullRuns).toBe(0);
+  expect(messages).toEqual([]);
+
+  // `merge-queue retry-main` marks the record running and keeps its error.
+  await updateMergeQueue((state) => {
+    state.main!["owner/repo"]!.status = "running";
+  }, f.directory);
+  ok = true;
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(fullRuns).toBe(1);
+  expect(f.merged).toEqual([1]);
+  expect(messages[0]).toBe(
+    "merge-queue: owner/repo main main0 passed the full sign-off; the queue is processing again.",
+  );
+});
+test("a candidate reuses a PR's own sign-off only on a trusted main, and the entry records it", async () => {
+  const f = await fixture(2);
+  const reuse: (boolean | undefined)[] = [];
+  f.backend.nightly = async () => ({ ok: true, log: "/full.log" });
+  f.backend.candidate = async (batch, _base, _checks, options) => {
+    reuse.push(options?.reuse);
+    return batch.length === 1
+      ? { ok: true, log: "/candidate.log", reusedFrom: batch[0]!.head }
+      : { ok: true, log: "/candidate.log", runs: [], areas: ["backend"] };
+  };
+  // An outside main first gets its full sign-off; the batch then builds on a trusted main.
+  await updateMergeQueue((state) => {
+    state.main = { "owner/repo": { sha: "elsewhere", status: "trusted", via: "queue", at: "now" } };
+    state.entries.pop();
+  }, f.directory);
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(reuse).toEqual([true]);
+  expect(f.state().entries[0]).toMatchObject({ status: "merged", signoffReusedFrom: "head1" });
+
+  // Without a nightly sign-off the queue keeps no main record, so nothing marks main as trusted.
+  delete f.backend.nightly;
+  await updateMergeQueue((state) => {
+    state.main = {};
+    state.entries.push({ ...f.entries[1]!, status: "queued" });
+  }, f.directory);
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(reuse).toEqual([true, false]);
+
+  // A narrowed sign-off records the areas it checked again on each landed entry.
+  await updateMergeQueue((state) => {
+    state.entries.push(
+      { ...f.entries[1]!, pr: 3, status: "queued" },
+      { ...f.entries[1]!, pr: 4, status: "queued" },
+    );
+  }, f.directory);
+  for (const pr of [3, 4])
+    f.remote.set(pr, { ...f.remote.get(2)!, state: "OPEN", mergeCommit: null });
+  await processRepository("owner/repo", f.backend, f.directory);
+  expect(f.state().entries.filter((entry) => entry.pr > 2)).toMatchObject([
+    { status: "merged", signoffAreas: ["backend"] },
+    { status: "merged", signoffAreas: ["backend"] },
+  ]);
 });

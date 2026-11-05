@@ -6,7 +6,7 @@ description: Use to rate an existing codebase; use $code-review for a diff.
 ## Scope
 
 Assess the whole codebase without editing. Route fixes to $simplify or a normal task, dependencies to $dependency-upgrade, and lint/format/test
-setup to $verification.
+setup to $verification. When the owner asks for an exhaustive report, run the rated areas as $exhaustive dimensions over every source file.
 
 ## Assessment and recommendations
 

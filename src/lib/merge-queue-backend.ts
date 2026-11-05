@@ -1,16 +1,19 @@
+import { readSignoffHosts } from "./device";
+import { dispatchSignoff, type SignoffRequest } from "./merge-queue-hosts";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { execa } from "execa";
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
 import { WORKER_TOOL_PROBE } from "./merge-queue-environment";
-import { candidateSignoff, type signoffPolicy } from "./merge-queue-signoff";
+import { candidateSignoff, parseSignoffReceipt, type signoffPolicy } from "./merge-queue-signoff";
 import { mergeMainIntoBranch } from "./merge-queue-update";
 import {
   mergeQueueDirectory,
   QueueEnvironmentError,
   QueueTransientError,
+  type CandidateRun,
   type PullRequest,
   type QueueBackend,
 } from "./merge-queue";
@@ -34,6 +37,7 @@ type CommandRunner = (
     cwd?: string;
     reject?: boolean;
     all?: boolean;
+    input?: string;
     timeout?: number;
     env?: Record<string, string>;
   },
@@ -42,6 +46,8 @@ export function githubBackend(
   repo: string,
   execute: CommandRunner = execa,
   signoffOptions: {
+    hosts?: string[] | null;
+    preparedCandidate?: Pick<SignoffRequest, "sha" | "bundle">;
     policy?: ReturnType<typeof signoffPolicy>;
     admission?: Parameters<typeof candidateSignoff>[0]["admission"];
     readLog?: (path: string) => Promise<string>;
@@ -58,6 +64,7 @@ export function githubBackend(
   const clone = join(root, "repo");
   const worktree = join(root, "candidate");
   const updateWorktree = join(root, "update");
+  const unprepared = join(root, "unprepared");
   const logPath = async (suffix = "") => {
     const logs = join(mergeQueueDirectory(), "logs");
     await mkdir(logs, { recursive: true });
@@ -69,6 +76,27 @@ export function githubBackend(
     if (existsSync(clone)) return;
     await run("git", ["clone", "--shared", "--no-checkout", project.canonicalRoot, clone], root);
     await run("git", ["remote", "set-url", "origin", project.remoteUrl], clone);
+  };
+  // A directory in the canonical clone's Git dir, which its task worktrees share, linked into the candidate clone.
+  const linkCanonical = async (
+    name: string,
+    run: (name: string, args: string[], cwd?: string) => Promise<string>,
+    replaceLocal = false,
+  ) => {
+    const path = join(clone, ".git", name);
+    const local = await lstat(path).catch(() => undefined);
+    if (local?.isSymbolicLink() || (local && !replaceLocal)) return;
+
+    const common = await run("git", [
+      "-C",
+      project.canonicalRoot,
+      "rev-parse",
+      "--path-format=absolute",
+      "--git-common-dir",
+    ]);
+    await mkdir(join(common, name), { recursive: true });
+    if (local) await rm(path, { recursive: true, force: true });
+    await symlink(join(common, name), path);
   };
   const recover = async () => {
     const probe = await execute("/bin/zsh", ["-f", "-c", WORKER_TOOL_PROBE], {
@@ -107,6 +135,13 @@ export function githubBackend(
     }
     await rm(marker, { force: true });
   };
+  const signedSha = async (sha: string) => {
+    const status = JSON.parse(await gh(["api", `repos/${repo}/commits/${sha}/status`]));
+    return status.statuses.some(
+      (item: { context: string; state: string }) =>
+        item.context === "signoff" && item.state === "success",
+    );
+  };
   const backend: QueueBackend = {
     recover,
     inspect: async (entry) => {
@@ -139,13 +174,7 @@ export function githubBackend(
         throw new Error("Incomplete changed-file list; refusing queue validation");
       return pr as PullRequest;
     },
-    signed: async (entry) => {
-      const status = JSON.parse(await gh(["api", `repos/${repo}/commits/${entry.head}/status`]));
-      return status.statuses.some(
-        (item: { context: string; state: string }) =>
-          item.context === "signoff" && item.state === "success",
-      );
-    },
+    signed: (entry) => signedSha(entry.head),
     base: async () => JSON.parse(await gh(["api", `repos/${repo}/git/ref/heads/main`])).object.sha,
     removeWorktree: (entry) =>
       removeMergedWorktree({
@@ -216,18 +245,7 @@ export function githubBackend(
       };
       await ensureClone(run);
       // Share the canonical clone's recorded resolutions, so a conflict resolved once in a task worktree replays here.
-      const rrCache = join(clone, ".git/rr-cache");
-      if (!existsSync(rrCache)) {
-        const common = await run("git", [
-          "-C",
-          project.canonicalRoot,
-          "rev-parse",
-          "--path-format=absolute",
-          "--git-common-dir",
-        ]);
-        await mkdir(join(common, "rr-cache"), { recursive: true });
-        await symlink(join(common, "rr-cache"), rrCache);
-      }
+      await linkCanonical("rr-cache", run);
       if (!existsSync(updateWorktree)) {
         await run("git", ["worktree", "prune"]);
         await run("git", ["worktree", "add", "--detach", updateWorktree, "origin/main"]);
@@ -273,10 +291,11 @@ export function githubBackend(
         if (!existsSync(worktree)) throw new Error("No candidate worktree to deploy from");
         await step("git", ["fetch", "origin", "+refs/heads/main:refs/remotes/origin/main"]);
         await step("git", ["merge-base", "--is-ancestor", sha, "origin/main"]);
-        // A batch's main SHA has the verified candidate's tree; prepare again only when it differs.
+        // Tree equality reuses local prepare only; a remote sign-off never prepared this worktree.
         const prepared =
+          !existsSync(unprepared) &&
           (await step("git", ["rev-parse", "HEAD^{tree}"])) ===
-          (await step("git", ["rev-parse", `${sha}^{tree}`]));
+            (await step("git", ["rev-parse", `${sha}^{tree}`]));
         await step("git", ["reset", "--hard", sha]);
         await step("git", ["clean", "-fd"]);
         await step("mise", ["trust"]);
@@ -286,6 +305,7 @@ export function githubBackend(
             ["--class", "checks", "--wait", "3600", "--", "mise", "run", "prepare"],
             3_900_000,
           );
+        await rm(unprepared, { force: true });
         // Run only a deploy task the merged main defines; older mains have just the SSH deploy.
         const tasks = new Set(
           (
@@ -322,15 +342,20 @@ export function githubBackend(
         return { ok: false, log, error: String(error) };
       }
     },
-    candidate: async (entries, base, checks) => {
-      // No entries: the nightly full sign-off of plain main.
+    candidate: async (entries, base, checks, options) => {
+      // No entries: the sign-off of plain main, of every area or, with `since`, of the areas changed since that trusted main.
+      // `full` signs off every area of a PR candidate; `since` the areas changed since a trusted main, while main is held.
       const nightly = !entries.length;
+      let since = options?.since;
+      let full = !since && (nightly || Boolean(options?.full));
+      let areas = options?.areas;
       await recover();
       await mkdir(root, { recursive: true, mode: 0o700 });
       const log = await logPath();
       let output = "";
       let baselinePrepared = false;
       let checkingPr = false;
+      let releaseHost: (() => void) | undefined;
       const command = async (command: string, args: string[], cwd = clone) => {
         output += `$ ${command} ${args.join(" ")}\n`;
         await writeFile(log, output, { mode: 0o600 });
@@ -387,23 +412,13 @@ export function githubBackend(
           .filter((path) => /(?:^|\/)public\/(?:css|js|fonts)\/filament\//.test(path));
         if (paths.length) await run("git", ["restore", "--worktree", "--", ...paths], worktree);
       };
-      try {
-        await ensureClone(run);
-        await run("git", ["fetch", "origin", "+refs/heads/main:refs/remotes/origin/main"]);
-        if ((await run("git", ["rev-parse", "origin/main"])) !== base)
-          throw new Error("main changed before candidate construction");
-        if (!existsSync(worktree)) {
-          await run("git", ["worktree", "prune"]);
-          await run("git", ["worktree", "add", "--detach", worktree, base]);
+      const queueGit = ["-c", "user.name=Merge Queue", "-c", "user.email=merge-queue@localhost"];
+      // Squash-merges each entry onto the worktree's HEAD, in order; resolves to the PR that conflicts, if any.
+      const construct = async () => {
+        if (signoffOptions.preparedCandidate) {
+          await run("git", ["reset", "--hard", signoffOptions.preparedCandidate.sha], worktree);
+          return;
         }
-        await run("git", ["reset", "--hard", base], worktree);
-        await run("git", ["clean", "-fd"], worktree);
-        await requireClean("before candidate construction");
-        await run("mise", ["trust"], worktree);
-        await prepare();
-        baselinePrepared = true;
-        await restorePublishedAssets();
-        await requireClean("after plain main prepare");
         for (const entry of entries) {
           await run("git", ["fetch", "origin", `refs/pull/${entry.pr}/head`]);
           if ((await run("git", ["rev-parse", "FETCH_HEAD"])) !== entry.head)
@@ -412,10 +427,7 @@ export function githubBackend(
             await run(
               "git",
               [
-                "-c",
-                "user.name=Merge Queue",
-                "-c",
-                "user.email=merge-queue@localhost",
+                ...queueGit,
                 "-c",
                 "commit.gpgsign=false",
                 "merge",
@@ -426,15 +438,12 @@ export function githubBackend(
               worktree,
             );
           } catch {
-            return { ok: false, log, conflict: entry.pr };
+            return entry.pr;
           }
           await run(
             "git",
             [
-              "-c",
-              "user.name=Merge Queue",
-              "-c",
-              "user.email=merge-queue@localhost",
+              ...queueGit,
               "commit",
               "--allow-empty",
               "--no-verify",
@@ -445,30 +454,238 @@ export function githubBackend(
             worktree,
           );
         }
-        // Sign-off checks the exact committed candidate.
-        checkingPr = true;
-        if (!nightly) {
+      };
+      // Docs only: the project's areas.sh selects no area for the batch's paths beyond what it selects for a lone doc.
+      const docsOnlyChange = async (base: string) => {
+        const script = join(worktree, "scripts/areas.sh");
+        if (!existsSync(script)) return false;
+        const paths = (
+          await run("git", ["diff", "--name-only", "--no-renames", base, "HEAD"], worktree)
+        )
+          .split("\n")
+          .filter(Boolean);
+        if (!paths.length) return false;
+        const areas = async (input: string[]) => {
+          const result = await execute(script, [], {
+            cwd: worktree,
+            reject: false,
+            input: input.join("\n"),
+          });
+          if (result.failed) return undefined;
+          return result.stdout.split("\n").filter((line) => line.endsWith("=true"));
+        };
+        const [batch, docs] = await Promise.all([areas(paths), areas(["docs/index.md"])]);
+        return Boolean(batch && docs && batch.every((area) => docs.includes(area)));
+      };
+      // The signed PR head, if any, whose tree equals the constructed candidate's.
+      const signedTree = async () => {
+        const tree = await run("git", ["rev-parse", "HEAD^{tree}"], worktree);
+        for (const sha of new Set(
+          entries.flatMap((entry) => [entry.head, entry.signedHead ?? entry.head]),
+        ))
+          if ((await run("git", ["rev-parse", `${sha}^{tree}`])) === tree && (await signedSha(sha)))
+            return sha;
+      };
+      // The areas some PR and the rest of the candidate both changed since that PR's signed base, from the project's own
+      // areas.sh. Every other area matches a tree that a PR's sign-off or a trusted main's already checked; areas.sh
+      // selects an area for every path its checks read. Undefined when the project cannot narrow its sign-off this way.
+      const overlapAreas = async () => {
+        const script = join(worktree, "scripts/areas.sh");
+        const checkScript = await readFile(join(worktree, "scripts/check.ts"), "utf8").catch(
+          () => "",
+        );
+        if (!existsSync(script) || !checkScript.includes('"--areas"')) return;
+
+        const areasOf = async (from: string, to: string) => {
+          const paths = await run("git", ["diff", "--name-only", "--no-renames", from, to]);
+          if (!paths) return new Set<string>();
+          const result = await execute(script, [], { cwd: worktree, reject: false, input: paths });
+          if (result.failed) throw new Error("areas.sh failed");
+          return new Set(
+            result.stdout
+              .split("\n")
+              .filter((line) => line.endsWith("=true"))
+              .map((line) => line.slice(0, line.indexOf("="))),
+          );
+        };
+        const sides: { pr: Set<string>; main: Set<string> }[] = [];
+        for (const entry of entries) {
+          const signed = entry.signedHead ?? entry.head;
+          const signedBase = await run("git", ["merge-base", signed, base]);
+          sides.push({
+            pr: await areasOf(signedBase, signed),
+            main: await areasOf(signedBase, base),
+          });
+        }
+
+        const overlap = new Set<string>();
+        sides.forEach((side, index) => {
+          const others = new Set([
+            ...side.main,
+            ...sides.flatMap((other, at) => (at === index ? [] : [...other.pr])),
+          ]);
+          for (const area of side.pr) if (others.has(area)) overlap.add(area);
+        });
+        return [...overlap].sort();
+      };
+      try {
+        await ensureClone(run);
+        // Share the check passes task worktrees remember, keyed on tree and base, so identical code is not checked twice.
+        await linkCanonical("check-stamps", run, true).catch(
+          (error) => (output += `check stamps not shared: ${String(error)}\n`),
+        );
+        if (signoffOptions.preparedCandidate) {
+          const present = await command("git", ["cat-file", "-e", `${base}^{commit}`]);
+          if (present.failed) await run("git", ["fetch", "origin", base]);
+          if (signoffOptions.preparedCandidate.sha !== base) {
+            await run("git", [
+              "fetch",
+              signoffOptions.preparedCandidate.bundle,
+              "refs/heads/merge-queue-transfer",
+            ]);
+            if (
+              (await run("git", ["rev-parse", "FETCH_HEAD"])) !==
+              signoffOptions.preparedCandidate.sha
+            )
+              throw new QueueEnvironmentError("Transferred candidate SHA mismatch");
+          }
+          await run("git", ["update-ref", "refs/remotes/origin/main", base]);
+        } else await run("git", ["fetch", "origin", "+refs/heads/main:refs/remotes/origin/main"]);
+        if ((await run("git", ["rev-parse", "origin/main"])) !== base)
+          throw new Error("main changed before candidate construction");
+        if (since && (await command("git", ["merge-base", "--is-ancestor", since, base])).failed) {
+          output += `trusted main ${since} is not an ancestor of ${base}; signing off every area\n`;
+          since = undefined;
+          full = true;
+        }
+        if (!existsSync(worktree)) {
+          await run("git", ["worktree", "prune"]);
+          await run("git", ["worktree", "add", "--detach", worktree, base]);
+        }
+        await run("git", ["reset", "--hard", base], worktree);
+        await run("git", ["clean", "-fd"], worktree);
+        await requireClean("before candidate construction");
+        // A candidate whose tree equals a signed PR head's was already signed off as is: `mise run signoff` merges main
+        // in first, so a lone PR on unchanged main usually matches. Trees, not SHAs: the queue's squash commit differs.
+        // Otherwise, on a trusted main, only areas both a PR and the rest of the candidate changed need checking again.
+        if (options?.reuse && !full) {
+          let reused: string | undefined;
+          if ((await construct()) === undefined) {
+            reused = await signedTree();
+            if (!reused && !checks?.length && !areas)
+              areas = await overlapAreas().catch((error) => {
+                output += `area overlap unknown, signing off every changed area: ${String(error)}\n`;
+                return undefined;
+              });
+          }
+          await run("git", ["reset", "--hard", base], worktree);
+          await run("git", ["clean", "-fd"], worktree);
+          if (reused) {
+            output += `sign-off reused: candidate tree matches signed ${reused}\n`;
+            await writeFile(log, output, { mode: 0o600 });
+            return { ok: true, log, reusedFrom: reused };
+          }
+          if (areas && !areas.length) {
+            output +=
+              "sign-off reused: no area changed by both a PR and the rest of the candidate since its signed base\n";
+            await writeFile(log, output, { mode: 0o600 });
+            return { ok: true, log, areas };
+          }
+          if (areas)
+            output += `sign-off narrowed to areas changed on both sides: ${areas.join(", ")}\n`;
+        }
+        const hosts =
+          signoffOptions.hosts === null || signoffOptions.preparedCandidate
+            ? undefined
+            : (signoffOptions.hosts ?? readSignoffHosts(homedir()));
+        if (hosts?.length) {
+          await writeFile(unprepared, "Remote sign-off requires local prepare before deploy\n");
+          const conflict = await construct();
+          if (conflict !== undefined) return { ok: false, log, conflict };
+          const sha = await run("git", ["rev-parse", "HEAD"], worktree);
+          const bundle = join(root, "transfer.bundle");
+          const result = await dispatchSignoff({
+            hosts,
+            execute,
+            log,
+            reserveLocal: (release) => {
+              releaseHost = release;
+            },
+            request: async () => {
+              if (sha !== base) {
+                await run("git", ["update-ref", "refs/heads/merge-queue-transfer", sha]);
+                await run("git", [
+                  "bundle",
+                  "create",
+                  bundle,
+                  `${base}..refs/heads/merge-queue-transfer`,
+                ]);
+              }
+              return {
+                repo,
+                base,
+                sha,
+                bundle: sha === base ? "" : (await readFile(bundle)).toString("base64"),
+                entries,
+                checks,
+                full,
+                ...(since ? { since } : {}),
+                ...(areas ? { areas } : {}),
+              };
+            },
+          }).finally(() => rm(bundle, { force: true }));
+          if (result) return { ...result, ...(areas ? { areas } : {}) };
+          await run("git", ["reset", "--hard", base], worktree);
+          await run("git", ["clean", "-fd"], worktree);
+        }
+        const conflict = await construct();
+        if (conflict !== undefined) return { ok: false, log, conflict };
+        // One prepare, of the exact committed candidate that sign-off checks.
+        await run("mise", ["trust"], worktree);
+        try {
+          await prepare();
+        } catch (error) {
+          // A candidate that fails to prepare is its PRs' failure only when plain main prepares.
+          if (nightly || error instanceof QueueEnvironmentError) throw error;
+          await run("git", ["reset", "--hard", base], worktree);
+          await run("git", ["clean", "-fd"], worktree);
           await run("mise", ["trust"], worktree);
           await prepare();
           await restorePublishedAssets();
+          await requireClean("after plain main prepare");
+          baselinePrepared = true;
+          checkingPr = true;
+          throw error;
         }
+        baselinePrepared = true;
+        checkingPr = true;
+        await restorePublishedAssets();
         await requireClean("before verification");
+        await rm(unprepared, { force: true });
         const candidateHead = await run("git", ["rev-parse", "HEAD"], worktree);
 
-        // A batch checks only the areas it changes since `base`; the nightly run checks every area of plain main.
+        // A batch checks only the areas it changes since `base`; a full run checks every area.
         // A sign-off without these flags checks the changes since origin/main, which the clone fetched as `base`.
         const checkScript = await readFile(join(worktree, "scripts/check.ts"), "utf8").catch(
           () => "",
         );
-        const scope = nightly
-          ? checkScript.includes('"--full"')
-            ? ["--full"]
-            : []
-          : checkScript.includes('"--base"')
-            ? ["--base", base]
-            : [];
+        const supports = (flag: string) => checkScript.includes(`"${flag}"`);
+        const scope =
+          full || (since && !supports("--base"))
+            ? supports("--full")
+              ? ["--full"]
+              : []
+            : areas?.length && supports("--areas")
+              ? ["--areas", areas.join(",")]
+              : supports("--base")
+                ? ["--base", since ?? base]
+                : [];
+        const receipts = supports("--json");
+        const docsOnly = !full && (await docsOnlyChange(since ?? base));
+        if (docsOnly) output += "docs-only batch: sign-off starts without the load wait\n";
         const result = await candidateSignoff({
           ...signoffOptions,
+          docsOnly,
           runLog: log,
           log: async (line) => {
             output += `${line}\n`;
@@ -486,12 +703,20 @@ export function githubBackend(
             if (checks?.length) {
               // Bisection: rerun only the checks the full batch failed, each as its own heavy step.
               let combined = "";
+              const timed: NonNullable<CandidateRun["checks"]> = [];
               for (const name of checks) {
+                const started = performance.now();
                 const check = await command(
                   "heavy-run",
                   ["--class", "checks", "--wait", "3600", "--", "mise", "run", name],
                   worktree,
                 );
+                timed.push({
+                  name,
+                  status: check.failed ? "failed" : "passed",
+                  seconds: Math.round((performance.now() - started) / 100) / 10,
+                  reused: false,
+                });
                 const checkLog = `${log}.run-${attempt}-${name.replaceAll(":", "-")}.log`;
                 await writeFile(checkLog, check.all ?? check.stdout, {
                   mode: 0o600,
@@ -502,6 +727,7 @@ export function githubBackend(
                 ok: !combined,
                 output: combined,
                 log: `${log}.run-${attempt}.log`,
+                checks: timed,
               };
             }
             if ((await run("git", ["rev-parse", "HEAD"], worktree)) !== candidateHead)
@@ -520,32 +746,50 @@ export function githubBackend(
                 "--",
                 "--no-post",
                 ...scope,
-                ...(attempt === 2 ? ["--fresh"] : []),
+                ...(receipts ? ["--json"] : []),
+                // The retry reuses the passes the first run remembered for this exact code, so it reruns only what failed.
               ],
               worktree,
             );
             const runLog = `${log}.run-${attempt}.log`;
-            await writeFile(runLog, result.all ?? result.stdout, {
-              mode: 0o600,
-            });
+            const text = result.all ?? result.stdout;
+            await writeFile(runLog, text, { mode: 0o600 });
+            const parsed = receipts ? parseSignoffReceipt(result.stdout) : undefined;
+            if (!parsed) return { ok: !result.failed, output: text, log: runLog };
+
+            const receipt = `${log}.run-${attempt}.receipt.json`;
+            await writeFile(receipt, `${parsed.receipt}\n`, { mode: 0o600 });
             return {
               ok: !result.failed,
-              output: result.all ?? result.stdout,
+              // The receipt replaces the FAIL lines; diagnostics read them back from it.
+              output: `${text}\n${parsed.failures}`,
               log: runLog,
+              receipt,
+              checks: parsed.checks.map(({ task, status, seconds, reused }) => ({
+                name: task,
+                status,
+                seconds: Math.round(seconds * 10) / 10,
+                reused,
+              })),
             };
           },
         });
+        if (hosts?.length) for (const run of result.runs) run.host = "main-mac";
         const failing = result.runs.map((run) =>
           [...new Set(run.failures.map((failure) => failure.name))].sort().join(" "),
         );
+        const narrowed = areas ? { areas } : {};
+        // A main sign-off, or a candidate on a held main, must pass on its own; main's breakage is no excuse.
         if (
           result.ok ||
+          full ||
           nightly ||
+          options?.since ||
           failing.length !== 2 ||
           !failing[0] ||
           failing[0] !== failing[1]
         )
-          return { ...result, log };
+          return { ...result, log, ...narrowed };
 
         // The same checks failing twice on main too are main's breakage, not the batch's; land it.
         const names = failing[0].split(" ");
@@ -559,14 +803,15 @@ export function githubBackend(
             ["--class", "checks", "--wait", "3600", "--", "mise", "run", name],
             worktree,
           );
-          if (!onMain.failed) return { ...result, log };
+          if (!onMain.failed) return { ...result, log, ...narrowed };
           brokenOnMain.add(`${base} ${name}`);
         }
         output += `Landing: ${names.join(", ")} also fail on main ${base}\n`;
         await writeFile(log, output, { mode: 0o600 });
-        return { ...result, ok: true, log, brokenOnMain: names };
+        return { ...result, ok: true, log, brokenOnMain: names, ...narrowed };
       } catch (error) {
         // Infrastructure errors must not falsely blame every PR during bisection.
+        if (signoffOptions.preparedCandidate && error instanceof QueueTransientError) throw error;
         if (checkingPr && !(error instanceof QueueEnvironmentError)) {
           try {
             await requireClean("when sign-off failed");
@@ -585,9 +830,11 @@ export function githubBackend(
           return { ok: false, log };
         if (error instanceof QueueTransientError) throw error;
         throw new QueueEnvironmentError(`environment broken: ${String(error)}; ${log}`);
+      } finally {
+        releaseHost?.();
       }
     },
   };
-  backend.nightly = (base) => backend.candidate([], base);
+  backend.nightly = (base, options) => backend.candidate([], base, undefined, options);
   return backend;
 }

@@ -8,10 +8,12 @@ import { deferredHeavyCommand, heavyStatus, runHeavyCommand } from "../lib/heavy
 import { describeLoadHold } from "../lib/heavy-run";
 import type { HeavyClass } from "../lib/host-capacity";
 
-const help = `Usage: heavy-run [--class checks|benchmark|build] [--wait <seconds>] [--runtime-limit <seconds>] [--owner <title>] [--json] [--verbose] -- <argv...>
+const help = `Usage: heavy-run [--class checks|benchmark|build] [--timing-sensitive] [--wait <seconds>] [--runtime-limit <seconds>] [--owner <title>] [--json] [--verbose] -- <argv...>
        heavy-run status [--json] [--verbose]
 
 Up to ten checks/build/benchmark jobs share the host. Benchmark timings can be noisy; compare repeated runs or medians. Class defaults to checks;
+--timing-sensitive serializes timing-capped steps with each other on this host; other checks stay concurrent.
+It must wrap a heavy step, not a deferred runner, and never uses express admission.
 wait defaults to 540 seconds. New jobs wait only for critical memory pressure or
 1-minute load above six times the core count, with a five-minute starvation escape. Light work does not need a reservation.
 Exit codes: 0 child succeeded, 1 failed/cancelled, 2 invalid input, 75 wait timeout, 124 runtime cap exceeded.
@@ -53,6 +55,7 @@ try {
     console.log(help);
   } else {
     let className: HeavyClass = "checks";
+    let timingSensitive = false;
     let waitSeconds = Number(process.env.HEAVY_RUN_WAIT_SECONDS ?? 540);
     if (!Number.isFinite(waitSeconds) || waitSeconds < 0)
       throw new Error("HEAVY_RUN_WAIT_SECONDS must be a finite nonnegative number");
@@ -64,6 +67,10 @@ try {
       const flag = flags[i];
       if (seen.has(flag)) throw new Error(`Repeated option: ${flag}`);
       seen.add(flag);
+      if (!statusMode && flag === "--timing-sensitive") {
+        timingSensitive = true;
+        continue;
+      }
       if (flag === "--json" || flag === "--verbose") continue;
       if (!statusMode && ["--class", "--wait", "--runtime-limit", "--owner"].includes(flag)) {
         const value = flags[++i];
@@ -115,6 +122,10 @@ try {
           "Nested heavy-run would wait for its own host slot; wrap only the outer command",
         );
       const deferred = deferredHeavyCommand(argv);
+      if (timingSensitive && deferred)
+        throw new Error(
+          "Timing-sensitive reservations must wrap a heavy step, not a deferred runner",
+        );
       validated = true;
       const receipt = await runHeavyCommand({
         argv,
@@ -123,6 +134,7 @@ try {
         owner,
         signal: abort.signal,
         deferred,
+        timingSensitive,
         ...(runtimeLimitSeconds === undefined ? {} : { runtimeLimitSeconds }),
         ...(verbose ? { onOutput: (output: string) => process.stderr.write(output) } : {}),
       });

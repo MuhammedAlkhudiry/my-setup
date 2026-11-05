@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   admitSignoff,
   candidateSignoff,
+  parseSignoffReceipt,
   signoffDiagnostics,
   signoffPolicy,
 } from "./merge-queue-signoff";
@@ -228,4 +229,98 @@ test("a batch whose only failure is the per-test timing budget lands with a warn
   expect(slow.runs).toHaveLength(1);
   expect(slow.runs[0]!.warning).toContain("slow-test budget only");
   expect((await sign("/broken.log")).ok).toBe(false);
+});
+
+test("the --json receipt yields per-check timing and FAIL lines for diagnostics", () => {
+  const receipt = JSON.stringify({
+    version: 1,
+    checks: [
+      { task: "backend:test", status: "failed", seconds: 81.5, reused: false, log: "/backend.log" },
+      { task: "docs:check", status: "passed", seconds: 0, reused: true, log: null },
+    ],
+    errors: [{ item: "status-post", log: "/post.log" }],
+  });
+  const parsed = parseSignoffReceipt(`heavy-run: waiting\n${receipt}\n`);
+  expect(parsed?.receipt).toBe(receipt);
+  expect(parsed?.checks.map((check) => check.task)).toEqual(["backend:test", "docs:check"]);
+  expect(parsed?.failures).toBe(
+    "FAIL backend:test log=/backend.log\nFAIL status-post log=/post.log",
+  );
+  expect(parseSignoffReceipt("signoff passed: 3 checks")).toBeUndefined();
+});
+
+for (const scenario of ["pest timing", "vitest assertion", "mixed", "pest assertion"] as const) {
+  test(`a receipt with ${scenario} preserves the landing policy`, async () => {
+    const timing =
+      "Tests: 4174 passed\n::error title=PHP test timing regression::5.24s exceeds 5.00s";
+    const logs: Record<string, string> = {
+      "/pest.log": scenario === "pest assertion" ? `${timing}\nFAILED a test assertion` : timing,
+      "/vitest.log":
+        "× lays out as fast as the baseline\nAssertionError: expected 5 to be less than 4\nTests: 1 passed",
+    };
+    const tasks =
+      scenario === "vitest assertion"
+        ? ["vitest"]
+        : scenario === "mixed"
+          ? ["pest", "vitest"]
+          : ["pest"];
+    const output = JSON.stringify({
+      version: 1,
+      command: "signoff",
+      checks: tasks.map((task) => ({
+        task: `family-tree:${task}`,
+        status: "failed",
+        seconds: 5,
+        reused: false,
+        log: `/${task}.log`,
+      })),
+      errors: [],
+    });
+    const result = await candidateSignoff({
+      runLog: "/candidate.log",
+      admission: { readLoad: () => 1, lock: () => () => {} },
+      log: async () => {},
+      requireClean: async () => {},
+      readLog: async (path) => logs[path] ?? "Log unavailable",
+      run: async () => ({ ok: false, output }),
+    });
+    expect(result.ok).toBe(scenario === "pest timing");
+    expect(result.runs[0]!.failures.map((failure) => failure.name)).toEqual(
+      tasks.map((task) => `family-tree:${task}`),
+    );
+    if (scenario === "pest timing")
+      expect(result.runs[0]!.warning).toContain("family-tree:pest log=/pest.log");
+  });
+}
+
+test("a docs-only sign-off starts at once under any load, and its run keeps the receipt", async () => {
+  const lines: string[] = [];
+  const result = await candidateSignoff({
+    runLog: "/candidate.log",
+    docsOnly: true,
+    policy: { maxLoad: 4, waitSeconds: 1 },
+    admission: {
+      readLoad: () => 40,
+      lock: () => () => {},
+      pause: async () => {
+        throw new Error("docs-only sign-off must not wait for load");
+      },
+    },
+    log: async (line) => {
+      lines.push(line);
+    },
+    requireClean: async () => {},
+    run: async () => ({
+      ok: true,
+      output: "",
+      receipt: "/candidate.log.run-1.receipt.json",
+      checks: [{ name: "docs:check", status: "passed", seconds: 0.4, reused: false }],
+    }),
+  });
+  expect(result.ok).toBe(true);
+  expect(result.runs[0]).toMatchObject({
+    receipt: "/candidate.log.run-1.receipt.json",
+    checks: [{ name: "docs:check", seconds: 0.4 }],
+  });
+  expect(lines[0]).toContain("threshold=none (docs only)");
 });

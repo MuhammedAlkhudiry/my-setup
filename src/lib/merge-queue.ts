@@ -2,7 +2,7 @@ import { flock } from "./flock";
 import { closeSync, mkdirSync, openSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { shorten } from "./merge-queue-notify";
+import { type QueueOwner, shorten } from "./merge-queue-notify";
 import type { UpdateResult } from "./merge-queue-update";
 
 export const mergeQueueDirectory = () =>
@@ -11,6 +11,7 @@ export const MERGE_QUEUE_LABEL = "com.my-setup.merge-queue";
 export class QueueEnvironmentError extends Error {}
 export class QueueTransientError extends QueueEnvironmentError {}
 export interface CandidateRun {
+  host?: string;
   attempt: number;
   startLoad: number;
   endLoad: number;
@@ -27,6 +28,10 @@ export interface CandidateRun {
   warning?: string;
   /** Why this failed run earned the one retry, such as load above the admission threshold. */
   retried?: string;
+  /** Each check's status, seconds and reuse, from the sign-off receipt or the timed bisection steps. */
+  checks?: { name: string; status: string; seconds: number; reused: boolean }[];
+  /** The sign-off's `--json` receipt, saved next to the run log. */
+  receipt?: string;
 }
 export interface QueueEntry {
   repo: string;
@@ -34,6 +39,13 @@ export interface QueueEntry {
   head: string;
   /** Set when `head` is the queue's merge of main into this signed head; that sign-off covers it. */
   signedHead?: string;
+  /** The signed PR head whose tree equals the candidate's, so the queue landed it on that sign-off without rerunning it. */
+  signoffReusedFrom?: string;
+  /**
+   * The areas the queue's sign-off checked again: those some PR and the rest of its candidate both changed since that PR's
+   * signed base. Empty when none did, so the PRs' own sign-offs and the trusted main's covered the candidate.
+   */
+  signoffAreas?: string[];
   thread?: string;
   /** The spare Mac the owning thread runs on; unset for main-mac's own threads. */
   host?: string;
@@ -81,6 +93,28 @@ export interface NightlyRecord {
   log?: string;
   runs?: CandidateRun[];
 }
+/**
+ * The main SHA a repository's batches may build on. Batches sign off only the areas they change, so a main the queue did not
+ * merge itself, such as a merge on GitHub or a direct push, gets a full sign-off first; a failure holds that repository's queue.
+ */
+export interface MainRecord {
+  sha: string;
+  /** `running` after a crash reruns the full sign-off. */
+  status: "trusted" | "running" | "failed";
+  /** trusted only: the queue merged it, a full sign-off passed, or it was main when the worker first recorded one. */
+  via?: "queue" | "signoff" | "adopted";
+  at: string;
+  error?: string;
+  log?: string;
+  runs?: CandidateRun[];
+  /** failed only: `<pr> <head>` candidates that already had their one sign-off on top of this main. */
+  tried?: string[];
+  /**
+   * running and failed only: the last trusted main this one descends from. Areas no change touched since then keep its
+   * sign-off, so main and the PRs on top of a held main sign off only the areas changed since it; unset signs off every area.
+   */
+  since?: string;
+}
 /** Local hour after which a worker pass with nothing to merge runs the day's full sign-off. */
 export const NIGHTLY_HOUR = 3;
 export interface MergeQueueState {
@@ -98,6 +132,7 @@ export interface MergeQueueState {
   /** The latest merged main SHA each repository's worker deploys, and how that went. */
   deploys?: Record<string, DeployRecord>;
   nightly?: Record<string, NightlyRecord>;
+  main?: Record<string, MainRecord>;
   entries: QueueEntry[];
   history: QueueHistory[];
 }
@@ -167,8 +202,10 @@ export function settledEntry(
 
   const merged = `merged as ${entry.mergedMainSha ?? "unknown SHA"}`;
   if (!deploy) return { exitCode: 0, summary: merged };
-  if (entry.deployedSha) return { exitCode: 0, summary: `${merged}; deployed ${entry.deployedSha}` };
-  if (entry.deployError) return { exitCode: 1, summary: `${merged}; deploy failed: ${entry.deployError}` };
+  if (entry.deployedSha)
+    return { exitCode: 0, summary: `${merged}; deployed ${entry.deployedSha}` };
+  if (entry.deployError)
+    return { exitCode: 1, summary: `${merged}; deploy failed: ${entry.deployError}` };
   return undefined;
 }
 export interface PullRequest {
@@ -187,47 +224,65 @@ export interface QueueBackend {
   inspect(entry: QueueEntry): Promise<PullRequest>;
   signed(entry: QueueEntry): Promise<boolean>;
   base(): Promise<string>;
-  /** `checks` limits verification to those checks, for bisecting a batch whose sign-off ran. */
+  /**
+   * `checks` limits verification to those checks, for bisecting a batch whose sign-off ran; `full` signs off every area,
+   * and `since` every area changed since that trusted main, for a candidate on top of a held main. `reuse`, set only on a
+   * trusted main, lets a candidate whose tree equals a signed PR head's land on that sign-off, and otherwise narrows its
+   * sign-off to the areas both a PR and the rest of the candidate changed. `areas` passes that narrowing on to a spare Mac.
+   */
   candidate(
     entries: QueueEntry[],
     base: string,
     checks?: string[],
+    options?: { full?: boolean; reuse?: boolean; since?: string; areas?: string[] },
   ): Promise<{
     ok: boolean;
     log: string;
     conflict?: number;
     runs?: CandidateRun[];
+    /** The signed PR head whose sign-off covers this candidate's identical tree. */
+    reusedFrom?: string;
+    /** The areas the sign-off checked, when narrowed to those changed on both sides; empty when it ran none. */
+    areas?: string[];
   }>;
   merge(entry: QueueEntry): Promise<void>;
   /** Merges main into the PR branch and pushes it without force. */
   update?(entry: QueueEntry): Promise<UpdateResult>;
   deploy(sha: string): Promise<DeployResult>;
-  /** Signs off every area of main at `base`, posting nothing. */
-  nightly?(base: string): Promise<{
+  /** Signs off every area of main at `base`, or with `since` the areas changed since that trusted main, posting nothing. */
+  nightly?(
+    base: string,
+    options?: { since?: string },
+  ): Promise<{
     ok: boolean;
     log: string;
     runs?: CandidateRun[];
   }>;
   /** Removes the merged PR's own task worktree when nothing in it can be lost; returns the removed path. */
   removeWorktree?(entry: QueueEntry): Promise<string | undefined>;
-  /** Messages the Housekeeper about an event that needs action; only main-mac's worker sets it. */
-  notify?(message: string): Promise<void>;
+  /** Messages a PR's owning thread, or the Housekeeper without an owner, about an event that needs action; only main-mac's worker sets it. */
+  notify?(message: string, owner?: QueueOwner): Promise<void>;
 }
 /** Transient spells, such as GitHub recalculating mergeability, usually clear within seconds; report only stubborn ones. */
 export const TRANSIENT_NOTIFY_ATTEMPTS = 5;
 /** A message that fails to send is logged and dropped: notifying must never break or hold up the worker. */
-async function tell(backend: QueueBackend, message: string) {
+async function tell(backend: QueueBackend, message: string, owner?: QueueOwner) {
   if (!backend.notify) return;
   try {
-    await backend.notify(message);
+    await backend.notify(message, owner);
   } catch (error) {
     console.error(
-      `merge-queue: Housekeeper message not sent: ${error instanceof Error ? error.message : String(error)}; message: ${message}`,
+      `merge-queue: message not sent: ${error instanceof Error ? error.message : String(error)}; message: ${message}`,
     );
   }
 }
+/** Owning threads fix their own failures; the Housekeeper only hears when no owner could be reached. */
+const OWNER_FIX =
+  "You own this PR: fix it, push, and run merge-queue add again; tell the Housekeeper only if you cannot.";
 const prList = (prs: number[]) =>
-  prs.length ? `PRs ${prs.map((pr) => `#${pr}`).join(", ")}` : "no queued PRs (main moved outside the queue)";
+  prs.length
+    ? `PRs ${prs.map((pr) => `#${pr}`).join(", ")}`
+    : "no queued PRs (main moved outside the queue)";
 export function validatePr(pr: PullRequest) {
   if (pr.mergeable === "UNKNOWN")
     throw new QueueTransientError("GitHub is recalculating PR mergeability");
@@ -256,7 +311,7 @@ const runDetails = (runs?: CandidateRun[]) => {
   const details = runs
     ?.map(
       (run) =>
-        `run ${run.attempt}: ${run.failures.map((failure) => `${failure.name}: ${failure.reason}; log=${failure.log}`).join("; ")}; candidate log=${run.log}`,
+        `run ${run.attempt}${run.host ? ` on ${run.host}` : ""}: ${run.failures.map((failure) => `${failure.name}: ${failure.reason}; log=${failure.log}`).join("; ")}; candidate log=${run.log}`,
     )
     .join(" | ");
   return details ? `: ${details}` : "";
@@ -270,14 +325,18 @@ export async function passingBatch(
   fail: (entry: QueueEntry, reason: string, log: string, runs?: CandidateRun[]) => Promise<void>,
   prefix: QueueEntry[] = [],
   checks?: string[],
+  options?: { reuse?: boolean },
 ): Promise<QueueEntry[]> {
   if (!entries.length) return prefix;
-  const result = await backend.candidate([...prefix, ...entries], base, checks);
+  const result = await backend.candidate([...prefix, ...entries], base, checks, options);
   // Landing entries keep the runs that passed them, so a retried or warned run stays visible.
   if (result.ok)
-    return [...prefix, ...entries].map((entry) =>
-      result.runs ? { ...entry, runs: result.runs } : entry,
-    );
+    return [...prefix, ...entries].map((entry) => ({
+      ...entry,
+      ...(result.runs ? { runs: result.runs } : {}),
+      ...(result.reusedFrom ? { signoffReusedFrom: result.reusedFrom } : {}),
+      ...(result.areas ? { signoffAreas: result.areas } : {}),
+    }));
   if (result.conflict !== undefined) {
     const culprit = entries.find((entry) => entry.pr === result.conflict);
     if (!culprit) throw new Error("Previously passing prefix now conflicts");
@@ -289,6 +348,7 @@ export async function passingBatch(
       fail,
       prefix,
       checks,
+      options,
     );
   }
   if (entries.length === 1) {
@@ -313,8 +373,9 @@ export async function passingBatch(
     fail,
     prefix,
     narrowed,
+    options,
   );
-  return passingBatch(entries.slice(middle), base, backend, fail, passing, narrowed);
+  return passingBatch(entries.slice(middle), base, backend, fail, passing, narrowed, options);
 }
 function queueDeploy(state: MergeQueueState, repo: string, sha: string, pr: number) {
   state.deploys ??= {};
@@ -401,10 +462,22 @@ async function deployMerged(repo: string, backend: QueueBackend, directory: stri
         ? `merge-queue: ${merged}; deploy skipped: ${shorten(result.skipped!)}.`
         : `merge-queue: ${merged}; deploy failed: ${shorten(result.error ?? "deploy failed")}. Log: ${result.log || "none"}. After fixing, run merge-queue retry-deploy ${repo}.`,
   );
+  if (status === "failed") return;
+
+  // The Housekeeper checks the batch's deploy, migrations, jobs, and Sentry; each owner checks the change it made.
+  const owners = readMergeQueue(directory).entries.filter(
+    (entry) => entry.repo === repo && pending.prs.includes(entry.pr) && entry.thread,
+  );
+  for (const entry of owners)
+    await tell(
+      backend,
+      `merge-queue: ${repo}#${entry.pr} merged in main ${pending.sha}${status === "deployed" ? `, deployed ${result.deployedSha ?? pending.sha}` : ", deploy skipped"}. Run your change's own post-merge check: what you changed, on production or the next build. The Housekeeper runs the batch health checks.`,
+      entry,
+    );
 }
 const localDate = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-/** Runs the day's full sign-off of main once, after NIGHTLY_HOUR; failures are recorded for status, never retried. */
+/** Runs the day's full sign-off of main once, after NIGHTLY_HOUR; a failure is recorded and sent to the Housekeeper, never retried. */
 async function nightlySignoff(repo: string, backend: QueueBackend, directory: string, now: Date) {
   const date = localDate(now);
   if (
@@ -443,7 +516,82 @@ async function nightlySignoff(repo: string, backend: QueueBackend, directory: st
       log: result.log || undefined,
       runs: result.runs,
     };
+    // A passing full sign-off makes that main a safe base; a failing nightly does not hold the queue.
+    if (result.ok) trust(state, repo, sha, "signoff");
   }, directory);
+  // Pull requests sign off only smoke journeys, so the nightly run is where slow and full checks catch regressions.
+  if (!result.ok)
+    await tell(
+      backend,
+      `merge-queue: ${repo} nightly full sign-off of main ${sha} failed: ${shorten(error ?? failingChecks(result.runs))}. Log: ${result.log || "none"}. Fix main in a PR; the queue keeps merging.`,
+    );
+}
+const failingChecks = (runs?: CandidateRun[]) => {
+  const last = runs?.at(-1);
+  const on = last?.host ? ` on ${last.host}` : "";
+  return (
+    last?.failures.map((failure) => `${failure.name}${on} (log=${failure.log})`).join(", ") ||
+    "unknown checks"
+  );
+};
+function trust(state: MergeQueueState, repo: string, sha: string, via: MainRecord["via"]) {
+  state.main ??= {};
+  state.main[repo] = { sha, status: "trusted", via, at: new Date().toISOString() };
+}
+/** What a held-main sign-off covers, for messages. */
+const heldScope = (since?: string) =>
+  since ? `sign-off of the areas changed since trusted main ${since}` : "full sign-off";
+/** Resolves to the failed record while `base` holds the queue, or undefined once a batch may build on it. */
+async function heldMain(repo: string, base: string, backend: QueueBackend, directory: string) {
+  if (!backend.nightly) return;
+  const current = readMergeQueue(directory).main?.[repo];
+  // The first record trusts the main found then, as the queue did before it kept one.
+  if (!current)
+    return void (await updateMergeQueue((state) => trust(state, repo, base, "adopted"), directory));
+  if (current.sha === base && current.status === "trusted") return;
+  if (current.sha === base && current.status === "failed") return current;
+
+  // Areas unchanged since the last trusted main keep its sign-off; a main the queue never trusted signs off every area.
+  const since = current.status === "trusted" ? current.sha : current.since;
+  await updateMergeQueue((state) => {
+    state.main ??= {};
+    state.main[repo] = {
+      sha: base,
+      status: "running",
+      at: new Date().toISOString(),
+      ...(since ? { since } : {}),
+    };
+  }, directory);
+  const result = await backend.nightly(base, since ? { since } : undefined);
+  if (result.ok) {
+    await updateMergeQueue((state) => trust(state, repo, base, "signoff"), directory);
+    // `merge-queue retry-main` reruns a failed record and keeps its error.
+    if (current.error)
+      await tell(
+        backend,
+        `merge-queue: ${repo} main ${base} passed the ${heldScope(since)}; the queue is processing again.`,
+      );
+    return;
+  }
+
+  const failed: MainRecord = {
+    sha: base,
+    status: "failed",
+    at: new Date().toISOString(),
+    error: `${since ? "Sign-off of main's changed areas" : "Full sign-off of main"} failed${runDetails(result.runs)}`,
+    log: result.log || undefined,
+    runs: result.runs,
+    tried: [],
+    ...(since ? { since } : {}),
+  };
+  await updateMergeQueue((state) => {
+    state.main![repo] = failed;
+  }, directory);
+  await tell(
+    backend,
+    `merge-queue: ${repo} main ${base}, which the queue did not merge, fails the ${heldScope(since)}: ${shorten(failingChecks(result.runs))}. Log: ${result.log || "none"}. The queue holds: queued PRs stay queued, and each gets one ${heldScope(since)} on top of this main; the first that passes lands and lifts the hold. After a flaky failure, run merge-queue retry-main ${repo}.`,
+  );
+  return failed;
 }
 export async function processRepository(
   repo: string,
@@ -467,7 +615,8 @@ export async function processRepository(
       patch.status === "failed"
         ? tell(
             backend,
-            `merge-queue: ${repo}#${entry.pr} failed: ${shorten(patch.error ?? "unknown error")}. Log: ${patch.log ?? "none"}. Owning thread: ${entry.thread ?? "none"} on ${entry.host ?? "main-mac"}.`,
+            `merge-queue: ${repo}#${entry.pr} failed: ${shorten(patch.error ?? "unknown error")}. Log: ${patch.log ?? "none"}. ${OWNER_FIX}`,
+            entry,
           )
         : undefined,
     );
@@ -503,7 +652,10 @@ export async function processRepository(
       delete state.environment?.[repo];
     }, directory);
     if (cleared.notified)
-      await tell(backend, `merge-queue: ${repo} environment recovered; the queue is processing again.`);
+      await tell(
+        backend,
+        `merge-queue: ${repo} environment recovered; the queue is processing again.`,
+      );
   };
   try {
     const broken = readMergeQueue(directory).environment?.[repo];
@@ -605,19 +757,69 @@ export async function processRepository(
       return await recovered();
     }
     const base = await backend.base();
-    const passing = await passingBatch(ready, base, backend, async (entry, error, log, runs) => {
-      if (error !== CANDIDATE_CONFLICT || !backend.update)
-        return change(entry, "failed", {
-          status: "failed",
-          failedAt: new Date().toISOString(),
-          error,
-          log,
-          runs,
-        });
-      // Already containing main, it conflicts only with an earlier PR in this batch; retry once that lands.
-      if ((await update(entry, error)) === "current")
-        await change(entry, "waiting-for-sibling", {});
-    });
+    const held = await heldMain(repo, base, backend, directory);
+    // While main is held, a PR lands only when main with it passes every area changed since the last trusted main; that is
+    // how a fix lifts the hold.
+    const fix = held && ready.find((entry) => !held.tried?.includes(`${entry.pr} ${entry.head}`));
+    if (held && !fix) return await recovered();
+    let fixed: QueueEntry | undefined;
+    if (fix) {
+      const attempt = `${fix.pr} ${fix.head}`;
+      await updateMergeQueue((state) => {
+        state.main![repo]!.tried = [...(held!.tried ?? []), attempt];
+      }, directory);
+      let result: Awaited<ReturnType<QueueBackend["candidate"]>>;
+      try {
+        result = await backend.candidate(
+          [fix],
+          base,
+          undefined,
+          held.since ? { since: held.since } : { full: true },
+        );
+      } catch (error) {
+        // A sign-off cut short by the environment is not the PR's one try on a held main; the next pass runs it again.
+        await updateMergeQueue((state) => {
+          const record = state.main?.[repo];
+          if (record) record.tried = (record.tried ?? []).filter((tried) => tried !== attempt);
+        }, directory);
+        throw error;
+      }
+      if (!result.ok) {
+        await tell(
+          backend,
+          `merge-queue: ${repo}#${fix.pr} fails the ${heldScope(held.since)} on top of held main ${base}: ${shorten(failingChecks(result.runs))}. It stays queued; a new head or merge-queue retry-main ${repo} gives it another try. ${OWNER_FIX}`,
+          fix,
+        );
+        return await recovered();
+      }
+      fixed = { ...fix, runs: result.runs };
+    }
+    // Reusing a PR's own sign-off is safe only on a main the queue trusts; an outside merge gets its full sign-off first.
+    const mainRecord = readMergeQueue(directory).main?.[repo];
+    const reuse = mainRecord?.sha === base && mainRecord.status === "trusted";
+    const passing = fixed
+      ? [fixed]
+      : await passingBatch(
+          ready,
+          base,
+          backend,
+          async (entry, error, log, runs) => {
+            if (error !== CANDIDATE_CONFLICT || !backend.update)
+              return change(entry, "failed", {
+                status: "failed",
+                failedAt: new Date().toISOString(),
+                error,
+                log,
+                runs,
+              });
+            // Already containing main, it conflicts only with an earlier PR in this batch; retry once that lands.
+            if ((await update(entry, error)) === "current")
+              await change(entry, "waiting-for-sibling", {});
+          },
+          [],
+          undefined,
+          { reuse },
+        );
     // Freeze membership before publishing any merge. A changed/removed member invalidates the combined result.
     for (const entry of passing) {
       const pr = await backend.inspect(entry);
@@ -650,13 +852,20 @@ export async function processRepository(
         mergedAt: merged.mergedAt ?? new Date().toISOString(),
         mergedMainSha: expectedBase,
         runs: entry.runs,
+        signoffReusedFrom: entry.signoffReusedFrom,
+        signoffAreas: entry.signoffAreas,
       });
-      await updateMergeQueue(
-        (state) => queueDeploy(state, repo, expectedBase, entry.pr),
-        directory,
-      );
+      await updateMergeQueue((state) => {
+        queueDeploy(state, repo, expectedBase, entry.pr);
+        trust(state, repo, expectedBase, fixed ? "signoff" : "queue");
+      }, directory);
       landed.push(entry);
     }
+    if (fixed)
+      await tell(
+        backend,
+        `merge-queue: ${repo}#${fixed.pr} passed the ${heldScope(held!.since)} on top of held main ${base} and landed as ${expectedBase}; the queue is processing again.`,
+      );
     await recovered();
     await deployMerged(repo, backend, directory);
     for (const entry of landed) await removeMergedWorktree(entry, backend, directory);
@@ -668,8 +877,7 @@ export async function processRepository(
         const transient = error instanceof QueueTransientError;
         const previous = state.environment[repo];
         const attempts = (previous?.attempts ?? 0) + 1;
-        const notified =
-          previous?.notified || !transient || attempts >= TRANSIENT_NOTIFY_ATTEMPTS;
+        const notified = previous?.notified || !transient || attempts >= TRANSIENT_NOTIFY_ATTEMPTS;
         state.environment[repo] = {
           cause: error.message,
           attempts,
