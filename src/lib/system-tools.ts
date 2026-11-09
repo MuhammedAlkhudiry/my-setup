@@ -346,8 +346,8 @@ export const SYSTEM_TOOL_GROUPS = [
           args: ["info", "--cask", "codex"],
         },
         update: {
-          commands: ["brew upgrade --cask codex"],
-          note: "When codex resolves to ~/.local/bin/codex (the standalone install), run codex update instead.",
+          commands: ["brew upgrade --cask codex", "brew upgrade --cask chatgpt"],
+          note: "When codex resolves to ~/.local/bin/codex (the standalone install), run codex update instead. Always upgrade the chatgpt cask (the Codex desktop app) too: it bundles the Chrome plugin Codex browser work uses, which must stay in step with the auto-updating ChatGPT Chrome extension, or every navigation fails with \"reading 'timeoutMs'\". Open the app once afterwards so it refreshes ~/.codex/plugins/cache/openai-bundled.",
         },
       },
       {

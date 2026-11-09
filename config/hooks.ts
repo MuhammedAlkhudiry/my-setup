@@ -11,6 +11,7 @@ const RETIRED_HOOK_COMMANDS = [/^rtk hook (claude|codex)$/, /\/device-queue-hook
 
 /** The first device pool guard matched commands too loosely and blocked read-only pipelines. */
 const RETIRED_GUARD_MARKER = "# my-setup:device-pool";
+/** Matches current guards and the retired rm-target and sleep-poll guards, so installs drop every earlier copy. */
 const MANAGED_GUARD = /\/(device-pool|rm-target|telegram-me|sleep-poll|setup-readonly)-guard\.zsh$/;
 
 /** Removes the retired my-setup hooks, keeping unrelated handlers and dropping events left empty. */
@@ -36,10 +37,8 @@ export function removeRetiredHooks(existing: unknown): z.infer<typeof hooksSchem
 /**
  * Removes retired and earlier managed hooks, then adds the current managed Claude hooks. Agents lease simulators and
  * emulators from the device pool, so a Bash command that creates or clones one is blocked with the command to run instead.
- * Claude Code asks a person to approve rm on a variable or command-output target even in bypass mode, so that is blocked
- * with the literal-path form to run instead. Sending a Telegram draft as the owner before they approve it, or reading their
- * Telegram session from the Keychain, is blocked too, and so is waiting by sleep-and-check polling, with ending the turn or
- * one wait-for as the alternative. On spare Macs, Edit, Write and shell writes into the read-only setup copy are blocked with
+ * Sending a Telegram draft as the owner before they approve it, or reading their Telegram session from the Keychain, is
+ * blocked too. On spare Macs, Edit, Write and shell writes into the read-only setup copy are blocked with
  * the inbox command that sends the change to the Housekeeper instead.
  */
 export function mergeClaudeHooks(
@@ -47,12 +46,7 @@ export function mergeClaudeHooks(
   setupRoot: string,
 ): z.infer<typeof hooksSchema> {
   const hooks = removeRetiredHooks(existing);
-  const guards = [
-    "device-pool-guard.zsh",
-    "rm-target-guard.zsh",
-    "telegram-me-guard.zsh",
-    "sleep-poll-guard.zsh",
-  ].map((script) => ({
+  const guards = ["device-pool-guard.zsh", "telegram-me-guard.zsh"].map((script) => ({
     matcher: "Bash",
     hooks: [{ type: "command", command: `${setupRoot}/shell/${script}` }],
   }));

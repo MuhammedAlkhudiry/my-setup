@@ -22,7 +22,8 @@ layout, style, and interaction. Only these hold:
 - It reads well on a phone and on a laptop; check screenshots at both widths, and exercise interactive states, before sharing.
 - On a laptop, use a native desktop layout across the window, such as multi-column grids and side-by-side panels, that collapses to one
   column on a phone; never a phone-width column centered on a wide screen.
-- When the page asks the owner to choose, let them pick on the page and send the answers (see Publish).
+- When the page asks the owner to choose, let them pick on the page and send the answers (see Publish). Keep the option selector
+  fixed on screen, such as a sticky bar, so switching options never needs scrolling.
 - Keep it self-contained: inline CSS and scripts, relative or inline assets, and no `localhost`, `.test`, or `file://` links. Use
   `dir="rtl"` for Arabic.
 

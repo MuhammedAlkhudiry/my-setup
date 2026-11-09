@@ -25,6 +25,10 @@ export const MODELS = {
       alias: "claude-opus-4-5",
     },
   },
+  // Claude subagent models that skills name, such as $improve-agent-setup's episode readers.
+  claudeSubagents: {
+    reader: "claude-haiku-5-5",
+  },
   // Models Raycast AI lists under its "Claude pool" provider, in picker order.
   raycast: {
     sonnet: { id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" },

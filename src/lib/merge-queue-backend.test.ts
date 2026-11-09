@@ -18,11 +18,11 @@ import { githubBackend as createBackend } from "./merge-queue-backend";
 const githubBackend: typeof createBackend = (repo, execute, options = {}) =>
   createBackend(repo, execute, { hosts: null, ...options });
 
-test("candidate construction, uncapped gate, conflict and crash cleanup without remote writes", async () => {
+test("candidate construction, gate, conflict and crash cleanup without remote writes", async () => {
   const root = mkdtempSync(join(tmpdir(), "merge-queue-backend-test-"));
   const previous = process.env.XDG_STATE_HOME;
   process.env.XDG_STATE_HOME = root;
-  const calls: { command: string; args: string[]; uncapped?: string }[] = [];
+  const calls: { command: string; args: string[]; tag?: string }[] = [];
   let conflict = false;
   let prepareFailure = 0;
   let prepareAlwaysFails = false;
@@ -36,7 +36,11 @@ test("candidate construction, uncapped gate, conflict and crash cleanup without 
   const backend = githubBackend(
     "MuhammedAlkhudiry/harium-project",
     async (command, args, options) => {
-      calls.push({ command, args, uncapped: options.env?.HEAVY_RUN_UNCAPPED });
+      calls.push({
+        command,
+        args,
+        tag: options.env?.VERIFY_RUN_TAG,
+      });
       if (args.includes("prepare")) prepares++;
       if (command === "git" && args[0] === "reset") dirty = "";
       if (args.includes("prepare") && dirtyOnPrepare) dirty = dirtyOnPrepare;
@@ -98,10 +102,8 @@ test("candidate construction, uncapped gate, conflict and crash cleanup without 
     expect(await backend.candidate([entry], "base")).toMatchObject({
       ok: true,
     });
-    const signoff = calls.find(
-      (row) => row.command === "heavy-run" && row.args.includes("signoff"),
-    );
-    expect(signoff).toMatchObject({ uncapped: "1" });
+    const signoff = calls.find((row) => row.command === "mise" && row.args.includes("signoff"));
+    expect(signoff).toBeDefined();
     expect(signoff!.args).toContain("--no-post");
     const worktree = calls.find(
       (row) => row.command === "git" && row.args[0] === "worktree" && row.args[1] === "add",
@@ -121,6 +123,8 @@ test("candidate construction, uncapped gate, conflict and crash cleanup without 
     expect(await backend.nightly!("base")).toMatchObject({ ok: true });
     const nightly = calls.slice(beforeNightly);
     expect(nightly.find((call) => call.args.includes("signoff"))!.args).toContain("--full");
+    expect(nightly.find((call) => call.args.includes("signoff"))!.tag).toBe("nightly");
+    expect(signoff!.tag).toBeUndefined();
     expect(nightly.filter((call) => call.args.includes("--base"))).toHaveLength(0);
     expect(nightly.filter((call) => call.args.includes("prepare"))).toHaveLength(1);
     const beforeFull = calls.length;
@@ -397,7 +401,7 @@ test("check-only candidates run just the named checks, not sign-off", async () =
       ok: true,
     });
     expect(calls.some((call) => call.includes("run signoff"))).toBe(false);
-    expect(calls).toContain("heavy-run --class checks --wait 3600 -- mise run scripts:test-images");
+    expect(calls).toContain("mise run scripts:test-images");
     expect(await backend.candidate([entry], "base", ["desktop:test"])).toMatchObject({
       ok: false,
       runs: [{ failures: [{ name: "desktop:test" }] }],
@@ -502,7 +506,7 @@ test("reuse, docs-only admission and sign-off receipts", async () => {
                 : "head";
       if (command === "git" && args[0] === "diff" && args.includes("--no-renames"))
         stdout = changed;
-      if (args.includes("signoff")) stdout = `heavy-run: slot\n${JSON.stringify(receipt)}`;
+      if (args.includes("signoff")) stdout = `mise signoff\n${JSON.stringify(receipt)}`;
       return { stdout, all: stdout };
     },
     {
@@ -651,7 +655,7 @@ test("remote worker verifies the transferred commit and treats candidate and mai
       false,
     );
     expect(
-      calls.some((call) => call.command === "heavy-run" && call.args.includes("signoff")),
+      calls.some((call) => call.command === "mise" && call.args.includes("signoff")),
     ).toBe(true);
     missingBase = true;
     await backend.candidate([], "base");

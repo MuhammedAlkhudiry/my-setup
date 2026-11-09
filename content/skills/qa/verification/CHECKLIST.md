@@ -4,13 +4,13 @@ Keep `docs/runbooks/checklist.md` to about 30 lines of confirmed project command
 
 ```text
 # Before reporting: the areas this branch changed, in parallel
-heavy-run --class checks -- mise run check
+mise run check
 
 # After the final PR push: changed-area checks and a GitHub signoff status
-heavy-run --class checks -- mise run signoff
+mise run signoff
 
 # Before a release: every area
-heavy-run --class checks -- mise run premerge
+mise run premerge
 
 # One test file
 cd app && bunx jest <path>
@@ -19,11 +19,10 @@ cd app && bunx jest <path>
 mise run api:check
 ```
 
+Where spare Macs take sign-offs, agents run `verify signoff`, which runs the project's sign-off on the least-loaded one.
+
 - Replace examples using project configuration and installed help. Use `#` comments for groups/conditions; put explanations in task descriptions.
-- Wrap heavy commands at the outer level; opted-in cooperating runners reserve each heavy step. Run individual test files and light checks
-  directly. Deferred runners and their heavy steps are uncapped; declare other gate prefixes in `heavyRun.uncappedCommands` for the same exemption.
-  Ad-hoc checks/benchmarks must finish within 90 seconds: split or speed them up. Builds are exempt. See $verification.
-  Benchmarks share the host with other jobs; timings can be noisy, so compare repeated runs or medians.
+- Benchmarks share the Mac with other agents' jobs; timings can be noisy, so compare repeated runs or medians. See $verification.
 - Provide one gate for changed areas, running independent checks in parallel and fixing formatting; one full command for all areas and CI checks;
   and an iterate command per test runner, using impact analysis when available, such as Pest `--tia` or Jest `--findRelatedTests`.
 - Limit PR CI to changed areas. Exclude end-to-end journeys, mutation testing, coverage, and paid evals.

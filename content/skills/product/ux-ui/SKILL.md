@@ -20,8 +20,8 @@ description: Use before UI changes, design reviews, or visual option comparisons
 ## Requested options
 
 - Default to five substantially different options plus several **Wild** options beyond the brief's design constraints.
-- Use a new HTML preview or visualization with $html-artifacts, unless options were requested in the app/site. Include an option switcher
-  and allow multiple selections both on the page and in chat. Loop animations when useful for comparison.
+- Use a new HTML preview or visualization with $html-artifacts, unless options were requested in the app/site. Include an option switcher,
+  fixed on screen so it never scrolls away, and allow multiple selections both on the page and in chat. Loop animations when useful for comparison.
 - For a single selection without an implementation request, acknowledge it and ask whether to integrate. For multiple selections or selected
   parts, combine them into new options.
 - Keep the page focused on options. Give each two plain sentences: what users see and why to pick it. Use short labels only for secondary detail.
@@ -49,6 +49,11 @@ Use purposeful icons, restrained color, and proportionate visual detail.
 
 Share progress as renders of the real app look, often; status text and concept art do not count. Nothing reaches the owner half-done: run
 a strong design pass and an adversarial review first, and judge visuals by eye, since automated scores and models do not certify taste.
+
+## UI review gate
+
+Before a PR that changes what users see is marked ready, pass the [UI review gate](references/ui-review-gate.md): a running-app
+screenshot matrix and a fresh Claude reviewer's verdict.
 
 ## Animation
 

@@ -155,6 +155,13 @@ Propose medium or large changes that move users onto the buyer path, one line ea
 Name the 3 parts most fragile, confusing, or likely to block next year's features. Explain why and how to improve each.
 ```
 
+**Implicit state machines**
+
+```text
+Find every implicit state machine in the app: status columns, flag combinations, nullable timestamps, and client state that encode a lifecycle.
+Map each one's states and transitions; flag impossible or unreachable states, missing or unguarded transitions, and states different code reads differently.
+```
+
 ## Performance and cost
 
 **Running cost**

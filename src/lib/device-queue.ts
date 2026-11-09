@@ -1,7 +1,6 @@
 import { hostname } from "node:os";
 
 import { HOST_ANDROID_SLOTS } from "../../config/device-pool";
-import { emptyHostCapacity, type HostCapacity } from "./host-capacity";
 
 export type Platform = "ios" | "android";
 
@@ -70,6 +69,50 @@ export interface Device {
   booted: boolean;
   /** adb serial of a running emulator. */
   serial?: string;
+  /**
+   * A live agent-device session, such as a T3 Code device panel, holds it. agent-device refuses that device to every
+   * other session with DEVICE_IN_USE, so the queue neither hands it out nor shuts it down.
+   */
+  claimed?: boolean;
+}
+
+/** An agent-device claim file under `~/.agent-device/device-claims`, reduced to what decides whether it is live. */
+export interface DeviceClaim {
+  device: { id: string };
+  ownerPid: number;
+  ownerStartTime: string;
+  stateDir: string;
+  /** Set when its session closed and released the device; agent-device then treats the claim as free. */
+  abandonedAtMs?: number;
+}
+
+/** What `isClaimLive` needs to know about the claim's owner, read from the host. */
+export interface ClaimOwnerProbe {
+  /** `ps -o lstart=` of the pid, or undefined when it is not running. */
+  startTime: (pid: number) => string | undefined;
+  stateDirExists: (stateDir: string) => boolean;
+  /** The pid in `<stateDir>/daemon.json`, or undefined when there is none. */
+  daemonPid: (stateDir: string) => number | undefined;
+}
+
+/**
+ * agent-device's own rule: a claim is stale once its session abandoned it, its owner process died, its pid was reused, its
+ * state directory is gone, or a newer daemon took over the state directory. Every other claim still holds its device.
+ */
+export function isClaimLive(claim: DeviceClaim, probe: ClaimOwnerProbe): boolean {
+  if (claim.abandonedAtMs !== undefined) return false;
+  if (probe.startTime(claim.ownerPid)?.trim() !== claim.ownerStartTime.trim()) return false;
+  if (!probe.stateDirExists(claim.stateDir)) return false;
+
+  const daemon = probe.daemonPid(claim.stateDir);
+  return daemon === undefined || daemon === claim.ownerPid;
+}
+
+/** Marks devices a live claim holds; a claim names a simulator by UDID and an emulator by adb serial. */
+export function markClaimed(devices: Map<string, Device>, claimedIds: Iterable<string>): void {
+  const ids = new Set(claimedIds);
+  for (const device of devices.values())
+    device.claimed = ids.has(device.id) || (device.serial !== undefined && ids.has(device.serial));
 }
 
 /** A pool member: one of the fixed devices a project leases by kind. */
@@ -111,7 +154,6 @@ export interface Ticket {
 }
 
 export interface QueueState {
-  host: HostCapacity;
   leases: Record<string, Lease>;
   tickets: Record<string, Ticket>;
   unleasedSince: Record<string, number>;
@@ -157,7 +199,6 @@ export const emptyQueueState = (): QueueState => ({
   leases: {},
   tickets: {},
   unleasedSince: {},
-  host: emptyHostCapacity(),
 });
 
 /** The members a request may receive: the named kind, or every member that keeps the app's own language. */
@@ -237,7 +278,7 @@ export function reapQueue(
 ): Shutdown[] {
   const shutdowns: Shutdown[] = [];
   const reclaim = (device: Device | undefined, reason: string) => {
-    if (!device?.booted) return;
+    if (!device?.booted || device.claimed) return;
     shutdowns.push({ device, reason, unleasedMs: now - (state.unleasedSince[device.id] ?? now) });
     device.booted = false;
     delete state.unleasedSince[device.id];
@@ -330,7 +371,9 @@ export function decide(
   });
   if (mine) return grant(mine, false, true);
 
-  const free = request.candidates.filter((device) => !state.leases[device.id]);
+  const free = request.candidates.filter(
+    (device) => !state.leases[device.id] && !devices.get(device.id)?.claimed,
+  );
   const warm = free.find((device) => devices.get(device.id)?.booted);
   if (warm) return grant(warm, true, false);
 
@@ -364,12 +407,12 @@ export function decide(
     seenAt: now,
   };
   if (!free.length) {
-    const holders = candidates.map(
-      (device) => `${device.name} -> "${state.leases[device.id]?.owner}"`,
-    );
+    const holder = (id: string) =>
+      state.leases[id] ? `"${state.leases[id].owner}"` : "an open device session";
+    const holders = candidates.map((device) => `${device.name} -> ${holder(device.id)}`);
     return {
       granted: false,
-      report: `waiting: every matching device is leased (${holders.join(", ")})`,
+      report: `waiting: every matching device is in use (${holders.join(", ")})`,
     };
   }
   return {

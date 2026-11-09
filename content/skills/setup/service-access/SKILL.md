@@ -23,4 +23,11 @@ Maintain the project's `docs/ads.md`, creating it if missing:
 - **Conversions:** outcomes, events, source/destination, attribution, deduplication, qualification.
 - **Campaigns:** platform, IDs, name, relevance, status, objective, placement, app, budget, bids, dates, destination, observation time.
 - **Lead flow:** source, consent, CRM, deduplication, response owner, qualified-lead definition.
+- **Tracking:** per platform, what is tagged (UTM, click IDs, pixel and server events), blind spots, and measured coverage with its date.
 - **Gaps:** project relationships, access, unavailable data, follow-up.
+
+Never give a channel a stop, scale, or "bad" verdict before checking its coverage, and check a new ad's coverage before it passes about
+SAR 50 (or equivalent) spend. Coverage is the conversions the project attributes to the channel in its own data, such as stored UTM
+source, divided by the platform's click-based conversions for the same window; view-through results never count. Below 70%, call the
+channel unjudgeable and fix tracking first. When the platform counts an earlier step than the project's own record (a tap against an
+install), say the ratio is a floor.

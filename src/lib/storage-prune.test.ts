@@ -24,6 +24,13 @@ import {
   type TestDatabaseFacts,
   type WorktreeFacts,
   archiveWorktree,
+  avdSystemImages,
+  ndkVersionsIn,
+  ndksToDelete,
+  playwrightBuildDirs,
+  playwrightBuildsToDelete,
+  pruneToolCaches,
+  systemImagesToDelete,
   STORAGE_WORKTREE_PROJECTS,
   childrenInUse,
   codexReleasesToDelete,
@@ -59,10 +66,6 @@ test("only leases that name no checkout block dependency pruning everywhere", ()
   expect(dependencyPruneLeasesIdle(queue)).toBe(true);
 
   queue.leases.sim = { id: "sim", agentPid: 0 } as never;
-  expect(dependencyPruneLeasesIdle(queue)).toBe(false);
-  delete queue.leases.sim;
-
-  queue.host.active = { reservationId: "build" } as never;
   expect(dependencyPruneLeasesIdle(queue)).toBe(false);
 });
 
@@ -107,12 +110,12 @@ async function withStorageFixture(
   }
 }
 
-test("low-space rules start strictly below 30 GiB; the 14-day archive still runs above it", async () => {
+test("low-space rules start strictly below 60 GiB; the 14-day archive still runs above it", async () => {
   await withStorageFixture(async ({ home, rules, file }) => {
     await file(".codex/sessions/2026/09/01/old.jsonl", 15);
     await file(".codex/sessions/2026/09/28/recent.jsonl", 4);
     await file("Library/Caches/Google/Chrome/Default/Cache/Cache_Data/old", 4);
-    for (const freeBytes of [31 * 1024 ** 3, 30 * 1024 ** 3, undefined]) {
+    for (const freeBytes of [61 * 1024 ** 3, 60 * 1024 ** 3, undefined]) {
       const result = await pruneFileStorage({
         home,
         rules,
@@ -131,7 +134,7 @@ test("low-space rules start strictly below 30 GiB; the 14-day archive still runs
       rules,
       now,
       dryRun: true,
-      freeBytes: 30 * 1024 ** 3 - 1,
+      freeBytes: 60 * 1024 ** 3 - 1,
       openPaths: new Set(),
       archiveMounted: true,
     });
@@ -702,6 +705,9 @@ test("kept dirty or open-PR checkouts clear generated folders only after 60 idle
     expect((await idleNativeBuilds(root, time)).sort()).toEqual(
       [join(root, "node_modules"), join(root, "dist")].sort(),
     );
+    expect(await idleNativeBuilds(root, time, { dependencies: false })).toEqual([
+      join(root, "dist"),
+    ]);
     await utimes(
       join(root, "source.ts"),
       new Date(time - 60 * 60_000 + 1000),
@@ -946,4 +952,162 @@ test("the project path is read from a DerivedData info.plist", () => {
 
   expect(xcodeWorkspacePath(plist)).toBe("/Users/test/.t3/worktrees/app/R&D/ios/App.xcworkspace");
   expect(xcodeWorkspacePath("<dict></dict>")).toBeUndefined();
+});
+
+test("AVD configs, Gradle files, and browsers.json name what tool caches keep", () => {
+  expect(
+    avdSystemImages(
+      "hw.ramSize=4096\nimage.sysdir.1=system-images/android-36.1/google_apis_playstore/arm64-v8a/\n",
+    ),
+  ).toEqual(["system-images/android-36.1/google_apis_playstore/arm64-v8a"]);
+  expect(ndkVersionsIn('ndkVersion = "27.1.12297006"\nandroid.ndkVersion=26.1.10909125')).toEqual([
+    "27.1.12297006",
+    "26.1.10909125",
+  ]);
+  expect(ndkVersionsIn('{ "android": { "ndkVersion": "28.0.1" } }')).toEqual(["28.0.1"]);
+  expect(
+    playwrightBuildDirs({
+      browsers: [
+        { name: "chromium", revision: "1248" },
+        { name: "chromium-headless-shell", revision: "1248" },
+        { name: "webkit", revision: "2200", revisionOverrides: { "mac14-arm64": "2105" } },
+      ],
+    }),
+  ).toEqual([
+    "chromium-1248",
+    "chromium_headless_shell-1248",
+    "webkit-2200",
+    "webkit-2105",
+  ]);
+  expect(playwrightBuildDirs({ unexpected: true })).toEqual([]);
+});
+
+test("unused SDK parts and browser builds go only when old, unnamed, and not the newest", () => {
+  const entry = (path: string, ageDays: number) => ({ path, mtimeMs: now - ageDays * DAY });
+  const sdk = "/sdk";
+  const used = new Set(["system-images/android-36/google_apis/arm64-v8a"]);
+  const images = [
+    entry("/sdk/system-images/android-36/google_apis/arm64-v8a", 30),
+    entry("/sdk/system-images/android-35/google_apis/arm64-v8a", 30),
+    entry("/sdk/system-images/android-34/google_apis/arm64-v8a", 2),
+  ];
+  expect(systemImagesToDelete(images, { sdk, used, days: 7, now }).map((i) => i.path)).toEqual([
+    "/sdk/system-images/android-35/google_apis/arm64-v8a",
+  ]);
+  expect(systemImagesToDelete(images, { sdk, used: new Set(), days: 7, now })).toEqual([]);
+
+  const ndks = [
+    entry("/sdk/ndk/26.1.10909125", 30),
+    entry("/sdk/ndk/27.0.12077973", 30),
+    entry("/sdk/ndk/27.1.12297006", 30),
+    entry("/sdk/ndk/28.0.13004108", 30),
+    entry("/sdk/ndk/25.2.9519653", 1),
+  ];
+  const referenced = new Set(["27.1.12297006"]);
+  expect(ndksToDelete(ndks, { referenced, days: 7, now }).map((n) => n.path)).toEqual([
+    "/sdk/ndk/26.1.10909125",
+    "/sdk/ndk/27.0.12077973",
+  ]);
+  expect(ndksToDelete(ndks, { referenced: new Set(), days: 7, now })).toEqual([]);
+
+  const builds = [
+    entry("/pw/chromium-1228", 30),
+    entry("/pw/chromium-1243", 30),
+    entry("/pw/chromium-1248", 30),
+    entry("/pw/ffmpeg-1011", 30),
+    entry("/pw/ffmpeg-1013", 30),
+    entry("/pw/webkit-2100", 1),
+    entry("/pw/webkit-2200", 1),
+    entry("/pw/daemon", 30),
+  ];
+  const listed = new Set(["chromium-1243", "ffmpeg-1013"]);
+  expect(
+    playwrightBuildsToDelete(builds, { referenced: listed, days: 14, now }).map((b) => b.path),
+  ).toEqual(["/pw/chromium-1228", "/pw/ffmpeg-1011"]);
+  expect(playwrightBuildsToDelete(builds, { referenced: new Set(), days: 14, now })).toEqual([]);
+});
+
+test("tool caches prune old package entries, orphaned stores, and unused SDK and browser builds", async () => {
+  const home = await mkdtemp(join(tmpdir(), "storage-prune-tools-"));
+  const at = Date.now();
+  const age = async (path: string, days: number) => {
+    const full = join(home, path);
+    const time = new Date(at - days * DAY);
+    for (const entry of await readdir(full, { recursive: true }).catch(() => []))
+      await utimes(join(full, entry), time, time);
+    await utimes(full, time, time);
+  };
+  const put = async (path: string, content = "x") => {
+    await mkdir(join(home, path, ".."), { recursive: true });
+    await writeFile(join(home, path), content);
+  };
+
+  try {
+    await put(".bun/install/cache/old@1.0.0/package.json");
+    await put(".bun/install/cache/open@1.0.0/package.json");
+    await put(".bun/install/cache/fresh@1.0.0/package.json");
+    await put("Library/pnpm/store/v10/index");
+    await put("Library/Caches/Yarn/v6/index");
+    for (const dir of ["old@1.0.0", "open@1.0.0"]) await age(`.bun/install/cache/${dir}`, 30);
+
+    const sdk = "Library/Android/sdk";
+    await put(`${sdk}/system-images/android-36/google_apis/arm64-v8a/system.img`);
+    await put(`${sdk}/system-images/android-35/google_apis/arm64-v8a/system.img`);
+    await put(`${sdk}/ndk/27.0.12077973/source.properties`);
+    await put(`${sdk}/ndk/27.1.12297006/source.properties`);
+    await put(`${sdk}/ndk/28.0.13004108/source.properties`);
+    await age(`${sdk}/system-images`, 30);
+    await age(`${sdk}/ndk`, 30);
+    await put(".android/avd/Main.ini", `path=${join(home, ".android/avd/Main.avd")}\n`);
+    await put(
+      ".android/avd/Main.avd/config.ini",
+      "image.sysdir.1=system-images/android-36/google_apis/arm64-v8a/\n",
+    );
+
+    const checkout = join(home, "checkout");
+    await put(
+      "checkout/app/node_modules/react-native/gradle/libs.versions.toml",
+      'ndkVersion = "27.1.12297006"\n',
+    );
+    await put(
+      "checkout/node_modules/playwright-core/browsers.json",
+      JSON.stringify({ browsers: [{ name: "chromium", revision: "1243" }] }),
+    );
+    for (const build of ["chromium-1228", "chromium-1243", "chromium-1248"])
+      await put(`Library/Caches/ms-playwright/${build}/INSTALLATION_COMPLETE`);
+    await age("Library/Caches/ms-playwright", 30);
+
+    const openPaths = new Set([join(home, ".bun/install/cache/open@1.0.0/package.json")]);
+    const result = await pruneToolCaches({
+      home,
+      now: at,
+      dryRun: false,
+      openPaths,
+      checkouts: [checkout],
+      toolInstalled: (tool) => tool === "yarn",
+    });
+
+    expect(result.errors).toEqual([]);
+    expect(result.packageCachesPruned.entries).toBe(1);
+    expect(result.deleted.map((entry) => entry.path.slice(home.length + 1)).sort()).toEqual(
+      [
+        "Library/pnpm/store",
+        `${sdk}/system-images/android-35/google_apis/arm64-v8a`,
+        `${sdk}/ndk/27.0.12077973`,
+        "Library/Caches/ms-playwright/chromium-1228",
+      ].sort(),
+    );
+    expect(await readdir(join(home, ".bun/install/cache"))).toEqual(
+      expect.arrayContaining(["open@1.0.0", "fresh@1.0.0"]),
+    );
+    expect(await readdir(join(home, ".bun/install/cache"))).not.toContain("old@1.0.0");
+    expect(await readdir(join(home, sdk, "system-images"))).toEqual(["android-36"]);
+    expect((await readdir(join(home, sdk, "ndk"))).sort()).toEqual([
+      "27.1.12297006",
+      "28.0.13004108",
+    ]);
+    expect(await readdir(join(home, "Library/Caches/Yarn"))).toEqual(["v6"]);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });

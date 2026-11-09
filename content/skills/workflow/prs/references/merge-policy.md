@@ -1,0 +1,28 @@
+# Merge policy
+
+The only place that says who may merge a PR; other rules point here. A PR is **small** at 100 changed lines or fewer across 5 files or
+fewer, excluding generated and lock files; above either, it is mid or large.
+
+| PR                                                                                                                     | Who enqueues                     |
+| ---------------------------------------------------------------------------------------------------------------------- | -------------------------------- |
+| Mid or large, any type (owner, 2026-11-09)                                                                             | Owner approves that PR by number |
+| Feature, product change, or production refactor, even one the owner asked for                                          | Owner approves that PR by number |
+| DESIGN-APPROVAL commitment not yet approved; store build or release (STORE-RELEASES)                                   | Owner                            |
+| Small, and changes no app or server behavior (docs, agent instructions, tests, tooling)                                | The PR's own thread              |
+| Small, and only ad measurement (pixels, conversion events, UTMs)                                                       | The PR's own thread              |
+| Small Sentry or bug fix that touches no payments, stored data, or AI prompts and adds no behavior                      | The PR's own thread              |
+| Small feature or production change in `auto` mode                                                                      | The PR's own thread              |
+| Ops enqueuing for another or vanished thread: only small fixes (bug, test, broken tooling or docs) (owner, 2026-10-29) | Ops                              |
+
+- A blanket go such as "merge what's waiting for me" never covers a PR that needs the owner; each is named by number.
+- Every enqueue needs green sign-off on the head, no conflicts, no open feedback, and no pending owner decision. A UI PR also needs
+  checklist item 4's gate and a published demo page; prose such as "screenshots go to the Housekeeper" is not one.
+- A PR whose work has its own thread, including spare-Mac threads, gets its merge approval in that thread; the Housekeeper and Ops never
+  relay its ready report or ask for it (owner, 2026-11-05).
+- my-setup has no PRs: its changes stay uncommitted for the owner's review.
+- Label PRs awaiting the owner `needs-approval` where that label exists; drop it on approval.
+
+Run `merge-queue add <owner/repo> <pr> --thread <t3ThreadId>` and end your turn; never merge directly or wait. The worker signs
+off, merges, and deploys; your thread still owns the PR. On failure, fix, push, and enqueue again; on merge, check the changed flow
+on production or the next build. The Housekeeper's Ops keeper checks the batch's deploy and health, and takes over PRs whose thread is
+gone.

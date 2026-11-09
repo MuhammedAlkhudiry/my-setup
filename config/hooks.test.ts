@@ -52,12 +52,10 @@ test("installs the guard scripts once, replacing earlier copies and the retired 
       matcher: "Bash",
       hooks: [{ type: "command", command: "/setup/shell/device-pool-guard.zsh" }],
     },
-    { matcher: "Bash", hooks: [{ type: "command", command: "/setup/shell/rm-target-guard.zsh" }] },
     {
       matcher: "Bash",
       hooks: [{ type: "command", command: "/setup/shell/telegram-me-guard.zsh" }],
     },
-    { matcher: "Bash", hooks: [{ type: "command", command: "/setup/shell/sleep-poll-guard.zsh" }] },
     {
       matcher: "Edit|MultiEdit|Write|NotebookEdit|Bash",
       hooks: [{ type: "command", command: "/setup/shell/setup-readonly-guard.zsh" }],

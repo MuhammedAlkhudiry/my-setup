@@ -9,8 +9,10 @@ import {
   coldBootConfig,
   decide,
   emptyQueueState,
+  isClaimLive,
   keepTicket,
   laneLimits,
+  markClaimed,
   poolMembers,
   reapQueue,
   releaseLease,
@@ -206,7 +208,7 @@ test("a pool request waits while every matching device is leased, without blocki
 
   expect(decide(state, request("main", "two", 20), fleet, NOW + 1)).toMatchObject({
     granted: false,
-    report: expect.stringContaining("every matching device is leased"),
+    report: expect.stringContaining("every matching device is in use"),
   });
   expect(decide(state, request("other", "three", 30), fleet, NOW + 2).granted).toBe(true);
   releaseLease(state, "main", NOW + 3);
@@ -396,4 +398,56 @@ test("with a grace, a device beyond the warm ones stays until it has held no lea
       unleasedMs: DEVICE_QUEUE.unleasedGraceMs,
     },
   ]);
+});
+
+test("a device an open agent-device session holds is neither handed out nor shut down", () => {
+  const state = emptyQueueState();
+  const fleet = devices(["main", true], ["spare", false]);
+  fleet.get("main")!.claimed = true;
+
+  expect(decide(state, request(["main", "spare"], "qa"), fleet, NOW, 2)).toMatchObject({
+    granted: true,
+    id: "spare",
+  });
+  expect(decide(state, request("main", "other"), fleet, NOW, 2)).toEqual({
+    granted: false,
+    report: "waiting: every matching device is in use (main -> an open device session)",
+  });
+  expect(
+    reapQueue(state, fleet, NOW + DEVICE_QUEUE.warmIdleMs + 1, alive, new Map(), THREE_SLOTS),
+  ).toEqual([]);
+});
+
+test("a claim is live only while its owner, state directory, and daemon still match", () => {
+  const claim = {
+    device: { id: "emulator-5556" },
+    ownerPid: 7,
+    ownerStartTime: "Thu Nov  5 14:20:25 2026",
+    stateDir: "/s",
+  };
+  const probe = {
+    startTime: (pid: number) => (pid === 7 ? "Thu Nov  5 14:20:25 2026" : undefined),
+    stateDirExists: () => true,
+    daemonPid: () => 7,
+  };
+
+  expect(isClaimLive(claim, probe)).toBe(true);
+  expect(isClaimLive({ ...claim, ownerPid: 8 }, probe)).toBe(false);
+  expect(
+    isClaimLive(claim, {
+      ...probe,
+      startTime: () => "Fri Nov  6 09:00:00 2026",
+    }),
+  ).toBe(false);
+  expect(isClaimLive(claim, { ...probe, stateDirExists: () => false })).toBe(false);
+  expect(isClaimLive(claim, { ...probe, daemonPid: () => 9 })).toBe(false);
+  expect(isClaimLive({ ...claim, abandonedAtMs: 1 }, probe)).toBe(false);
+});
+
+test("a claim marks a simulator by UDID and an emulator by adb serial", () => {
+  const fleet = devices(["udid-1", true], ["Harium_Main", true, "android"], ["udid-2", true]);
+  fleet.get("Harium_Main")!.serial = "emulator-5556";
+  markClaimed(fleet, ["udid-1", "emulator-5556"]);
+
+  expect([...fleet.values()].map((device) => device.claimed)).toEqual([true, true, false]);
 });

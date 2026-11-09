@@ -19,8 +19,10 @@ the description.
 2. **Docs:** fix docs the change made wrong; record decisions and follow-ups through $project-docs.
 3. **Adversarial review, big or risky PRs only:** over about 400 changed lines or 15 files (minus generated and lock files), or
    touching persisted data, auth, payments, AI prompts, deploys, or security. A fresh Claude subagent, never Codex or the author, runs
-   $code-review on the diff, told the goal and to break it; Codex authors leave it to the Housekeeper. Fix confirmed findings; recheck
+   $code-review on the diff, told the goal and to break it; Codex authors leave it to the Housekeeper, which routes it to Ops. Fix confirmed findings; recheck
    with a fresh subagent only after security, data loss, wrong persisted data, or a broken user flow.
+4. **UI review gate, PRs that change what users see:** the screenshot matrix and a fresh Claude reviewer's pass per $ux-ui's UI review
+   gate, linked from the 🎬 Demo; no pass, not ready.
 
 <!-- profile:work -->
 
@@ -34,16 +36,10 @@ Report checklist results in a line.
 
 <!-- profile:personal -->
 
-## Merging without asking
+## Merge policy
 
-Enqueue a PR yourself when it changes no app or server behavior (docs, agent instructions, tests, tooling), only ad measurement
-(pixels, conversion events, UTMs), or fixes a Sentry issue without touching payments, stored data, or AI prompts or adding behavior.
-In `auto` mode, also enqueue features and production changes, except unapproved DESIGN-APPROVAL commitments. Each needs green
-sign-off on its head and no conflicts, open feedback, or owner decision; ask first for all else, even production refactors. Label
-PRs awaiting the owner `needs-approval` where that label exists; drop it on approval.
-Run `merge-queue add <owner/repo> <pr> --thread <t3ThreadId>` and end your turn; never merge directly or wait. The worker signs
-off, merges, and deploys; your thread still owns the PR. On failure, fix, push, and enqueue again; on merge, check the changed flow
-on production or the next build. The Housekeeper checks the batch's deploy and health, and takes over PRs whose thread is gone.
+[The merge policy](references/merge-policy.md) is the only place that says who may enqueue a PR: any PR over 100 changed lines or 5
+files, and every feature or product change, needs the owner's go by PR number. Read it before every enqueue or approval ask.
 
 <!-- /profile -->
 
@@ -56,8 +52,8 @@ Before other work, run the [post-merge steps](references/post-merge.md) that app
 <!-- /profile -->
 <!-- profile:personal -->
 
-The Housekeeper runs the [post-merge steps](references/post-merge.md) once per repository batch on its final main SHA: the queue's
-deploy, then migrations, jobs, and error tracking for changes that reach them. Never revert automatically.
+The Housekeeper's Ops keeper runs the [post-merge steps](references/post-merge.md) once per repository batch on its final main SHA:
+the queue's deploy, then migrations, jobs, and error tracking for changes that reach them. Never revert automatically.
 
 <!-- /profile -->
 

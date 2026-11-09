@@ -35,8 +35,8 @@ export const MAC_WATCHER = {
     maxFseventsdMemoryGib: 2,
     maxSystemDaemonMemoryGib: 4,
     /** Pruning/diagnostic floor; alerts use criticalDiskFreeGib. */
-    minDiskFreeGib: 20,
-    criticalDiskFreeGib: 10,
+    minDiskFreeGib: 60,
+    criticalDiskFreeGib: 40,
     /** Processes whose parent died, matching agent tooling, older than this, count as leaks. */
     orphanMinAgeMinutes: 60,
   },
@@ -66,7 +66,7 @@ export const MAC_WATCHER = {
     archiveRoot: "/Volumes/DevSSD/archive",
     /** Below this internal free space, closed sessions and browser cache files expire sooner. */
     lowSpace: {
-      freeGiB: 30,
+      freeGiB: 60,
       archiveFiles: [{ path: ".codex/sessions", days: 1, to: "codex-sessions" }],
       /** Only cache folders, never whole browser profiles, cookies, or login data. Paths may contain globs. */
       browserCaches: {
@@ -93,6 +93,37 @@ export const MAC_WATCHER = {
         projectGoneHours: 1,
       },
     ],
+    /**
+     * Package-manager caches. Each direct child untouched for `days` goes, and the next install downloads it again. A
+     * store in `orphanStores` goes whole once its tool is no longer installed.
+     */
+    packageCaches: {
+      days: 14,
+      paths: [
+        ".bun/install/cache",
+        "Library/Caches/CocoaPods/Pods/Release",
+        "Library/Caches/CocoaPods/Pods/External",
+        "Library/Caches/CocoaPods/Pods/Specs/Release",
+        "Library/Caches/CocoaPods/Pods/Specs/External",
+        "Library/Caches/ReactNative",
+        "Library/Caches/sentry-react-native",
+      ],
+      orphanStores: [
+        { path: "Library/pnpm/store", tool: "pnpm" },
+        { path: "Library/Caches/Yarn", tool: "yarn" },
+      ],
+    },
+    /**
+     * Android SDK parts untouched for `days`: system images no emulator's AVD config names, and NDKs no checkout's
+     * Gradle files, Expo config, or installed React Native names. With no AVD or no NDK reference found, nothing goes,
+     * and the newest NDK always stays.
+     */
+    androidSdk: { path: "Library/Android/sdk", days: 7 },
+    /**
+     * Playwright browser builds untouched for `days` that no checkout's, global tool's, or Playwright-linked
+     * playwright-core lists. The newest build of each browser always stays, and nothing goes when no reference is found.
+     */
+    playwright: { path: "Library/Caches/ms-playwright", days: 14 },
     /**
      * Leftovers that agent runs drop in `/private/tmp` and the per-user temp folder, such as demo renders, QA copies, and
      * package-install scratch folders. A direct child this user owns goes once it and its direct entries are untouched for
@@ -146,7 +177,7 @@ export const MAC_WATCHER = {
     /**
      * Installed packages and build output in idle agent worktrees and temporary checkouts, including open PRs and
      * uncommitted work, go after `idleHours` without an open file, process cwd, or changed file in the checkout. Device
-     * leases and heavy runs protect their checkout through their process's cwd; a lease with an unknown holder blocks all.
+     * leases protect their checkout through their process's cwd; a lease with an unknown holder blocks all.
      * Resuming work reinstalls dependencies and regenerates builds. Only git-ignored folders matching `ignored` or
      * `dependencies.dir` count; any tracked descendant protects its whole folder. Generated native projects, build output,
      * node_modules, and vendor are cleared together. Tracked files are never deleted.

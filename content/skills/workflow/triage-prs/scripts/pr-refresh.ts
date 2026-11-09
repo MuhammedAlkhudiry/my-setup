@@ -356,7 +356,7 @@ export function refresh(argv: string[]): { code: number; receipt: Record<string,
       if (state.phase === "checks" || state.phase === "push") {
         state.phase = "checks";
         persist();
-        stage("checks", ["heavy-run", "--class", "checks", "--", "mise", "run", "check"]);
+        stage("checks", ["mise", "run", "check"]);
         unchanged();
         state.phase = "push";
         persist();
@@ -380,33 +380,20 @@ export function refresh(argv: string[]): { code: number; receipt: Record<string,
       }
 
       unchanged();
-      const signed = stage(
-        "signoff",
-        ["heavy-run", "--class", "checks", "--json", "--", "mise", "run", "signoff", "--json"],
-        true,
-      );
+      const signed = stage("signoff", ["mise", "run", "signoff", "--json"], true);
       if (signed.result.error || signed.result.status !== 0) {
-        // heavy-run retains the child's structured receipt in its private log.
-        let behindMain = false;
-        try {
-          const queued = JSON.parse(signed.output);
-          const output = queued.log ? readFileSync(queued.log, "utf8") : signed.output;
-          behindMain = output.split("\n").some((line) => {
-            try {
-              const result = JSON.parse(line);
-              return (
-                result.command === "signoff" &&
-                result.errors?.some(
-                  (error: { item: string }) => error.item === "signoff-behind-main",
-                )
-              );
-            } catch {
-              return false;
-            }
-          });
-        } catch {
-          /* An unstructured failure must never cause a retry. */
-        }
+        // Only the structured receipt can cause a retry; an unstructured failure never does.
+        const behindMain = signed.output.split("\n").some((line) => {
+          try {
+            const result = JSON.parse(line);
+            return (
+              result.command === "signoff" &&
+              result.errors?.some((error: { item: string }) => error.item === "signoff-behind-main")
+            );
+          } catch {
+            return false;
+          }
+        });
         if (!behindMain || attempt === 2)
           throw new Stop(
             1,

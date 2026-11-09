@@ -24,11 +24,14 @@ import { DEVICE_POOL, type PoolDevice, SLIM_FLAGS } from "../../config/device-po
 import {
   DEVICE_QUEUE,
   type Device,
+  type DeviceClaim,
   type Headroom,
   type Platform,
   type SimRuntime,
   decide,
   alreadyShutDown,
+  isClaimLive,
+  markClaimed,
   coldBootConfig,
   keepTicket,
   laneLimits,
@@ -40,7 +43,7 @@ import {
 } from "../lib/device-queue";
 
 import { agentOutput } from "../lib/agent-output";
-import { parseCpuIdle } from "../lib/host-capacity";
+import { parseCpuIdle } from "../lib/host-load";
 import { queueDirectory, readQueueState, withQueueState as withState } from "../lib/queue-store";
 import { timedCommand } from "../lib/timed-command";
 
@@ -67,6 +70,8 @@ const EMULATOR = join(ANDROID_SDK, "emulator/emulator");
 // avdslim does not follow a symlinked AVD directory.
 const AVD_HOME = process.env.ANDROID_AVD_HOME || realPath(join(homedir(), ".android/avd"));
 const SIM_DEVICES = join(homedir(), "Library/Developer/CoreSimulator/Devices");
+const CLAIMS_DIR =
+  process.env.AGENT_DEVICE_CLAIMS_DIR?.trim() || join(homedir(), ".agent-device/device-claims");
 const POLL_MS = 10_000;
 const BOOT_TIMEOUT_MS = 5 * 60_000;
 const SLIM_TIMEOUT_MS = 10 * 60_000;
@@ -147,7 +152,38 @@ async function listDevices(): Promise<Map<string, Device>> {
       (await run(ADB, ["-s", serial, "emu", "avd", "name"], true)).split(/\r?\n/)[0]?.trim();
     if (avd) devices.set(avd, { id: avd, platform: "android", name: avd, booted: true, serial });
   }
+  markClaimed(devices, await liveClaimedIds());
   return devices;
+}
+
+/** Device ids a live agent-device session, such as a T3 Code device panel, still holds. */
+async function liveClaimedIds(): Promise<string[]> {
+  if (!existsSync(CLAIMS_DIR)) return [];
+  const claims = readdirSync(CLAIMS_DIR).flatMap((file) => {
+    try {
+      const claim = JSON.parse(readFileSync(join(CLAIMS_DIR, file), "utf8")) as DeviceClaim;
+      return claim.device?.id && claim.ownerPid ? [claim] : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const startTimes = new Map<number, string>();
+  for (const pid of new Set(claims.map((claim) => claim.ownerPid)))
+    startTimes.set(pid, (await run("ps", ["-o", "lstart=", "-p", String(pid)], true)).trim());
+
+  const probe = {
+    startTime: (pid: number) => startTimes.get(pid) || undefined,
+    stateDirExists: (stateDir: string) => existsSync(stateDir),
+    daemonPid: (stateDir: string): number | undefined => {
+      try {
+        return JSON.parse(readFileSync(join(stateDir, "daemon.json"), "utf8")).pid;
+      } catch {
+        return undefined;
+      }
+    },
+  };
+  return claims.filter((claim) => isClaimLive(claim, probe)).map((claim) => claim.device.id);
 }
 
 function isAlive(pid: number): boolean {
@@ -621,7 +657,7 @@ async function status(options: { json?: boolean }) {
     }
     for (const device of loose) {
       console.log(
-        `  unleased  ${device.name} ${device.id} (seen ${ago(state.unleasedSince[device.id] ?? now)})`,
+        `  unleased  ${device.name} ${device.id} (seen ${ago(state.unleasedSince[device.id] ?? now)})${device.claimed ? ", held by an open device session" : ""}`,
       );
     }
     queue.forEach((ticket, index) =>

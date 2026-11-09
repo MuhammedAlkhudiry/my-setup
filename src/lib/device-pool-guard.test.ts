@@ -27,7 +27,6 @@ const blocked: Array<[string, string]> = [
   ["cd /tmp && FOO=1 /usr/bin/xcrun simctl clone A B", "simctl clone"],
   ["xcrun --sdk iphonesimulator simctl create a b", "simctl create"],
   ["sudo xcrun simctl create a b", "simctl create"],
-  ["heavy-run --class build -- xcrun simctl create a b", "simctl create"],
   ["bash -c 'xcrun simctl create a b'", "simctl create"],
   ["udid=$(xcrun simctl create a b)", "simctl create"],
   ['echo "made $(xcrun simctl clone a b)"', "simctl clone"],

@@ -148,12 +148,12 @@ const SHARED_BIN_COMMANDS = [
   "store-build",
   "device-queue",
   "telegram-send",
-  "heavy-run",
-  "ci-runner",
   "merge-queue",
-  "wait-for",
+  "verify",
 ];
 const MAIN_MAC_BIN_COMMANDS = ["telegram-me", "mail-read"];
+/** Commands my-setup used to link into ~/bin; installs remove their links. */
+const RETIRED_BIN_COMMANDS = ["wait-for", "ci-runner", "heavy-run"];
 
 // =============================================================================
 // Individual Operations
@@ -628,6 +628,11 @@ async function installShared(profile: DeviceProfile): Promise<void> {
 
     await installManagedSymlink(sourcePath, destinationPath, `${command} command`);
     await chmod(sourcePath, 0o755);
+  }
+
+  for (const command of RETIRED_BIN_COMMANDS) {
+    const link = join(SHARED_PATHS.binDir, command);
+    if ((await lstat(link).catch(() => undefined))?.isSymbolicLink()) await unlink(link);
   }
 
   // The owner's Telegram session and synced mail live only on the main Mac; Macs using a remote pool are spare Macs.

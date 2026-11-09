@@ -299,12 +299,7 @@ export function githubBackend(
         await step("git", ["reset", "--hard", sha]);
         await step("git", ["clean", "-fd"]);
         await step("mise", ["trust"]);
-        if (!prepared)
-          await step(
-            "heavy-run",
-            ["--class", "checks", "--wait", "3600", "--", "mise", "run", "prepare"],
-            3_900_000,
-          );
+        if (!prepared) await step("mise", ["run", "prepare"], 3_900_000);
         await rm(unprepared, { force: true });
         // Run only a deploy task the merged main defines; older mains have just the SSH deploy.
         const tasks = new Set(
@@ -363,7 +358,11 @@ export function githubBackend(
           cwd,
           reject: false,
           all: true,
-          env: { HEAVY_RUN_UNCAPPED: "1", GIT_TERMINAL_PROMPT: "0" },
+          // `verify` tags the nightly full sign-off's run, so its history can be read apart from PR sign-offs.
+          env: {
+            GIT_TERMINAL_PROMPT: "0",
+            ...(nightly && full ? { VERIFY_RUN_TAG: "nightly" } : {}),
+          },
         });
         output += `${(result.all ?? "").replaceAll("\0", "\n")}\n`;
         await writeFile(log, output, { mode: 0o600 });
@@ -379,18 +378,12 @@ export function githubBackend(
       };
       const prepare = async () => {
         for (let attempt = 1; attempt <= 2; attempt++) {
-          const result = await command(
-            "heavy-run",
-            ["--class", "checks", "--wait", "3600", "--", "mise", "run", "prepare"],
-            worktree,
-          );
+          const result = await command("mise", ["run", "prepare"], worktree);
           if (!result.failed) return;
           const detail = result.all ?? result.stdout;
-          const fullLog = detail.match(/log: (\S+\/full\.log)/)?.[1];
-          const fullText = fullLog ? await readFile(fullLog, "utf8").catch(() => "") : "";
-          if (/timeout after \d+s|timed out|Exceeded timeout/i.test(`${detail}\n${fullText}`)) {
+          if (/timeout after \d+s|timed out|Exceeded timeout/i.test(detail)) {
             if (attempt === 1) continue;
-            throw new QueueTransientError(`prepare timed out twice; ${fullLog ?? log}`);
+            throw new QueueTransientError(`prepare timed out twice; ${log}`);
           }
           throw new Error(`Candidate prepare failed: ${detail.trim().slice(-1500)}; ${log}`);
         }
@@ -701,16 +694,12 @@ export function githubBackend(
           run: async (attempt) => {
             await requireClean("before sign-off attempt");
             if (checks?.length) {
-              // Bisection: rerun only the checks the full batch failed, each as its own heavy step.
+              // Bisection: rerun only the checks the full batch failed, each on its own.
               let combined = "";
               const timed: NonNullable<CandidateRun["checks"]> = [];
               for (const name of checks) {
                 const started = performance.now();
-                const check = await command(
-                  "heavy-run",
-                  ["--class", "checks", "--wait", "3600", "--", "mise", "run", name],
-                  worktree,
-                );
+                const check = await command("mise", ["run", name], worktree);
                 timed.push({
                   name,
                   status: check.failed ? "failed" : "passed",
@@ -733,14 +722,8 @@ export function githubBackend(
             if ((await run("git", ["rev-parse", "HEAD"], worktree)) !== candidateHead)
               throw new QueueEnvironmentError("Candidate HEAD changed before retry");
             const result = await command(
-              "heavy-run",
+              "mise",
               [
-                "--class",
-                "checks",
-                "--wait",
-                "3600",
-                "--",
-                "mise",
                 "run",
                 "signoff",
                 "--",
@@ -798,11 +781,7 @@ export function githubBackend(
           await run("git", ["clean", "-fd"], worktree);
           await prepare();
           await restorePublishedAssets();
-          const onMain = await command(
-            "heavy-run",
-            ["--class", "checks", "--wait", "3600", "--", "mise", "run", name],
-            worktree,
-          );
+          const onMain = await command("mise", ["run", name], worktree);
           if (!onMain.failed) return { ...result, log, ...narrowed };
           brokenOnMain.add(`${base} ${name}`);
         }

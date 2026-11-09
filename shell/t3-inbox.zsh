@@ -8,8 +8,8 @@ set -euo pipefail
 
 from=${1:?mac name}
 setup=${0:A:h:h}
-# The merge-queue worker reads the same file to message the Housekeeper.
-HOUSEKEEPER_THREAD=$(<"$setup/config/housekeeper-thread.txt")
+# The front desk's thread; the merge-queue worker reads the same file to message the Ops keeper.
+HOUSEKEEPER_THREAD=$(/usr/bin/plutil -extract housekeeper raw -o - "$setup/config/keeper-threads.json")
 
 if [[ ${SSH_ORIGINAL_COMMAND:-} == "merge-queue "* ]]; then
   # (z) splits words without expanding anything; quotes stay literal and fail the CLI's validation.

@@ -30,10 +30,10 @@ device-queue acquire <project> <ios|android> [--kind <kind>] --owner "<thread ti
 - The grant is a JSON receipt with the device `id` (simulator UDID or AVD name), `serial` for an emulator, and `ready: true`: the queue has
   booted and slimmed the device. Use the `id` for builds, `run`, and `release`.
 - Run `acquire` in the background when queued. On exit 75, retry within two minutes to keep your place.
-- Acquire before `heavy-run --class build -- <argv...>`; never hold host capacity while waiting for a device.
+- Acquire before building onto the device.
 - Renew with the same `acquire` before each round; it returns your device. After 15 idle minutes, a waiting agent can take it.
 - Run device-driving commands through `device-queue run <id> --owner "<thread title>" --timeout-seconds 120 -- <argv...>`;
-  timeout kills the command group. Add `--json` before `--` when you need the command output. Keep builds under `heavy-run`.
+  timeout kills the command group. Add `--json` before `--` when you need the command output.
 - `device-queue release <id>` keeps the device warm for up to 30 minutes: one device, or two while the host has headroom. A waiting lease
   that needs the slot evicts it.
 - This Mac runs up to five iOS simulators and two Android emulators at once. Two simulators always run; each slot above two opens only while
@@ -44,8 +44,11 @@ device-queue acquire <project> <ios|android> [--kind <kind>] --owner "<thread ti
 
 Use the first available tool that fits:
 
-- **Browser:** T3 Code preview (`preview_*`) → $chrome:control-chrome → Claude Code `--chrome` for signed-in Chrome state → `playwright-cli`.
+- **Browser:** T3 Code preview (`preview_*`) → [Codex Chrome](references/codex-chrome.md) → Claude Code `--chrome` for signed-in Chrome state →
+  `playwright-cli`.
 - **Device:** T3 Code `device_open` and the $agent-device command it returns; otherwise $agent-device.
+
+## Devices
 
 agent-device snapshot nodes may omit refs; use an available ref or a supported selector. Replay no longer waits for target readiness,
 and `readinessTimeoutMs` is rejected. Use an explicit `wait <selector>` before acting on a late target; `--settle` observes the result

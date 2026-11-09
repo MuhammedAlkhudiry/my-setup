@@ -39,6 +39,8 @@
 - **SKILL-INSTALL** — Never use `npx skills add`; use SKILL-STRUCTURE for local skills and `config/skills.ts` for remote imports.
 - **MY-SETUP-CLI** — `my-setup` provides only `install` and help. Use `doctor` for health and `system-tools status` or `system-tools update-plan`
   for external tools.
+- **NO-BLOCKING-GUARDS** — Never add hooks or guards that block or restrict agents; fighting them costs turns and hides the real problem.
+  Fix the cause instead: put the fact where agents look first, or make the tool clearer or more forgiving.
 - **WORDING-QUALITY** — Preserve user intent; rewrite rough wording clearly in the repo's voice.
 
 ## Project Glossaries

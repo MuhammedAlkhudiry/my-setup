@@ -1,2286 +1,861 @@
 #!/usr/bin/env bun
-import { agentOutput } from "../../prs/scripts/agent-output";
-import { createReadStream, existsSync, readdirSync, statSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
-import { Database } from "bun:sqlite";
-
-agentOutput("analyze-sessions", { nativeJson: true });
+// Finds agent friction episodes in recorded Claude Code and Codex sessions and ranks their causes by turns wasted.
+import { createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve, sep } from "node:path";
 
 type Obj = Record<string, unknown>;
-type Usage = { input: number; cached: number; output: number };
-type Call = { name: string; label: string; declared: number; commands: string[] };
-type Command = {
+type Category = "errors" | "not-finding" | "searching" | "slowness" | "wasted-work";
+type Call = {
+  id: string;
+  tool: string;
+  label: string;
   command: string;
-  outputs: number;
-  bytes: number;
-  originalTokens: number;
-  truncated: number;
-  declared: number;
+  path: string;
+  start: number;
+  end: number;
+  output: string;
+  error: boolean;
+  turn: number;
+  line: number;
+  endLine: number;
 };
 type Session = {
   file: string;
-  id: string;
+  harness: "claude" | "codex";
   cwd: string;
-  bytes: number;
-  lines: number;
-  parsed: number;
-  malformed: number;
-  unknown: number;
-  createdAt: number;
-  firstActivity: number;
-  lastActivity: number;
-  status: "created" | "resumed" | "unknown";
-  usageMode: "cumulative" | "last-only" | "none";
-  forked: boolean;
-  forkSource: "" | "subagent" | "forked-thread" | "parent-thread" | "history-base";
-  parentId: string;
-  forkBaselineInput: number;
-  tokenEvents: number;
+  subagent: boolean;
+  calls: Call[];
+  compactions: Array<{ at: number; ms: number; line: number; turn: number }>;
+  requests: Array<{ model: string; start: number; ms: number }>;
+  turnTokens: number[];
+  startupTokens: number;
+};
+type Friction = {
+  category: Category;
+  cause: string;
   turns: number;
-  firstInput: number;
-  maxInput: number;
-  totalInput: number;
-  cachedInput: number;
-  totalOutput: number;
-  compactions: number;
-  baseInstructionBytes: number;
-  turnContextInstructionBytes: number;
-  injectedUserMessages: number;
-  injectedUserBytes: number;
-  humanRequests: number;
-  firstUserMessage: string;
-  imageMessages: number;
-  imageBytes: number;
-  toolOutputs: number;
-  execOutputs: number;
-  largeExecOutputs: number;
-  truncatedOutputs: number;
-  unmatchedToolOutputs: number;
-  time: ClaudeTime;
+  tokens: number;
+  lostMs: number;
+  retries: number;
+  file: string;
+  ref: string;
+  detail: string;
 };
-type Tree = {
-  rootId: string;
-  title: string;
-  cwd: string;
+type Episode = { ref: string; turns: number; detail: string };
+type Totals = { count: number; turns: number; tokens: number; lostMs: number };
+type Cause = Totals & {
+  key: string;
+  category: Category;
+  cause: string;
   sessions: number;
-  descendants: number;
-  forkedSessions: number;
-  maxDepth: number;
-  totalInput: number;
-  repeatedRootRequest: number;
-  highStartupDescendants: number;
-  incomplete: boolean;
-};
-type ClaudeTool = {
-  tool: string;
-  label: string;
-  outputs: number;
-  bytes: number;
-  maxBytes: number;
-  truncated: number;
-};
-type ClaudeSession = {
-  file: string;
-  project: string;
-  id: string;
-  agentId: string;
-  cwd: string;
-  sidechain: boolean;
-  parentId: string;
-  bytes: number;
-  lines: number;
-  parsed: number;
-  malformed: number;
-  createdAt: number;
-  firstActivity: number;
-  lastActivity: number;
-  status: "created" | "resumed" | "unknown";
-  models: string[];
-  requests: number;
-  firstInput: number;
-  maxInput: number;
-  totalInput: number;
-  cachedInput: number;
-  cacheWriteInput: number;
-  totalOutput: number;
-  compactions: number;
-  compactedPreTokens: number;
-  apiErrors: number;
-  humanRequests: number;
-  firstUserMessage: string;
-  injectedUserMessages: number;
-  injectedUserBytes: number;
-  attachments: number;
-  attachmentBytes: number;
-  imageMessages: number;
-  imageBytes: number;
-  toolOutputs: number;
-  toolOutputBytes: number;
-  largestToolOutput: number;
-  unmatchedToolOutputs: number;
-  time: ClaudeTime;
-};
-type TimeCategory =
-  | "model"
-  | "tool"
-  | "subagent"
-  | "background"
-  | "compaction"
-  | "retry"
-  | "hook"
-  | "stall"
-  | "user"
-  | "idle";
-type ClaudeTime = Record<TimeCategory, number> & { active: number; tasks: number };
-type ClaudeToolTime = {
-  scope: "main" | "subagent";
-  tool: string;
-  label: string;
-  calls: number;
-  wallMs: number;
-  totalMs: number;
-  maxMs: number;
-  errors: number;
-  errorMs: number;
-  timeouts: number;
-  durations: number[];
-  slowest: string;
-  slowestFile: string;
-};
-type ClaudeTask = {
-  file: string;
-  trigger: "human" | "wake";
-  prompt: string;
-  start: number;
-  activeMs: number;
-  modelMs: number;
-  toolMs: number;
-  backgroundMs: number;
-  otherMs: number;
-  requests: number;
-  toolCalls: number;
-  toolShare: Map<string, number>;
-};
-type ClaudeRequest = { model: string; ms: number; input: number; output: number };
-type ClaudeTree = {
-  sessionId: string;
-  project: string;
-  title: string;
-  mainInput: number;
-  subagentInput: number;
-  subagents: number;
-  totalInput: number;
+  retries: number;
+  episodes: Episode[];
+  before?: { count: number; turns: number; lostMs: number };
 };
 
-const home = process.env.HOME || "";
+const home = process.env.HOME || process.env.USERPROFILE || "";
+const HELP = `Usage: analyze-sessions.ts [options]
+       analyze-sessions.ts --episode <file>:<from>-<to>
+
+Finds friction episodes in recorded sessions and ranks their causes by turns and tokens wasted (wall time second).
+Waiting on legitimate work (checks, builds, tests, QA, model responses) is totalled separately, not ranked.
+Each cause lists up to five episode refs; --episode prints one ref's transcript slice compactly.
+
+Options:
+  --harness <name>      codex, claude, or all (default: every root that exists).
+  --root <path>         Codex sessions. Default: ~/.codex/sessions.
+  --claude-root <path>  Claude Code projects. Default: ~/.claude_cliproxy/projects.
+  --days <number>       Lookback in days. Default: 7.
+  --since <date>        Start of the window; overrides --days.
+  --cwd <path>          Only sessions whose working directory is this path or below it.
+  --limit <number>      Causes to print. Default: 10.
+  --baseline <file>     Earlier --save report; adds before -> after per cause.
+  --save <file>         Write the full JSON report to this file.
+  --episode <ref>       Print one episode slice (lines <from>-<to> of a session file) and exit.
+  --json                Print the JSON report.
+  --verbose             Longer outputs in --episode slices.`;
+
 function die(message: string): never {
   console.error(message);
   process.exit(2);
 }
+
 function parseArgs(values: string[]): Map<string, string> {
-  const result = new Map<string, string>(),
-    flags = new Set(["help", "h", "json"]);
-  const options = new Set([
-    "root",
-    "claude-root",
-    "harness",
-    "days",
-    "limit",
-    "cwd",
-    "since",
-    "since-mtime",
-    "state-db",
-  ]);
+  const flags = new Set(["help", "json", "verbose"]);
+  const options = new Set(["harness", "root", "claude-root", "days", "since", "cwd", "limit", "baseline", "save", "episode"]);
+  const result = new Map<string, string>();
   for (let i = 0; i < values.length; i++) {
-    const raw = values[i];
-    if (raw === "-h") {
-      result.set("h", "true");
-      continue;
-    }
+    const raw = values[i] === "-h" ? "--help" : values[i];
     if (!raw.startsWith("--")) die(`Unknown argument: ${raw}`);
     const [key, inline] = raw.slice(2).split("=", 2);
     if (flags.has(key)) {
-      if (inline !== undefined) die(`Option --${key} does not accept a value.`);
       result.set(key, "true");
       continue;
     }
-    if (!options.has(key)) die(`Unknown option: --${key}`);
+    if (!options.has(key)) die(`Unknown option: --${key}. See --help.`);
     const value = inline ?? values[++i];
     if (!value || value.startsWith("--")) die(`Option --${key} requires a value.`);
     result.set(key, value);
   }
   return result;
 }
+
 const args = parseArgs(process.argv.slice(2));
-if (args.has("help") || args.has("h")) {
-  console.log(`Usage:
-  analyze-sessions.ts [options]
-
-Audits recorded agent sessions for context waste, task and tool time, and model
-latency. Covers Codex rollouts and Claude Code transcripts. Claude Code also
-distinguishes background work, subagents, hooks, and retries.
-
-Options:
-  --harness <name>      codex, claude, or all. Default: every root that exists,
-                        or only the harness whose root was passed explicitly.
-  --root <path>         Codex session root. Default: ~/.codex/sessions.
-  --claude-root <path>  Claude Code project root. Default: ~/.claude_cliproxy/projects.
-  --days <number>       Event-time lookback when --since is absent. Default: 14.
-  --limit <number>      Maximum ranked items per section. Default: 12.
-  --cwd <path>          Include only sessions for this working directory.
-  --since <date>        Include activity at or after this event timestamp.
-  --since-mtime <time>  Diagnostic file prefilter using an epoch timestamp.
-  --state-db <path>     Codex state database. Default: ~/.codex/state_5.sqlite.
-  --json                Emit machine-readable output.
-  --verbose             Print the detailed text report.`);
+if (args.has("help")) {
+  console.log(HELP);
   process.exit(0);
 }
-function positive(value: string, option: string): number {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number <= 0) die(`${option} must be a positive number.`);
-  return number;
-}
-function epoch(value: string, option: string): number {
-  const number = Number(value);
-  if (!Number.isFinite(number) || number < 0) die(`${option} must be a valid epoch timestamp.`);
-  return number > 10_000_000_000 ? number : number * 1000;
-}
-const root = args.get("root") || join(home, ".codex", "sessions");
-const claudeRoot = args.get("claude-root") || join(home, ".claude_cliproxy", "projects");
-const requestedHarness = args.get("harness");
-if (requestedHarness && !["codex", "claude", "all"].includes(requestedHarness))
-  die(`--harness must be codex, claude, or all: ${requestedHarness}`);
-const harnesses = new Set<"codex" | "claude">(
-  requestedHarness === "codex" || requestedHarness === "claude"
-    ? [requestedHarness]
-    : requestedHarness === "all"
-      ? ["codex", "claude"]
-      : args.has("root") && !args.has("claude-root")
-        ? ["codex"]
-        : args.has("claude-root") && !args.has("root")
-          ? ["claude"]
-          : [
-              ...(existsSync(root) ? (["codex"] as const) : []),
-              ...(existsSync(claudeRoot) ? (["claude"] as const) : []),
-            ],
-);
-if (!harnesses.size) die(`No session roots found: ${root} and ${claudeRoot} are both missing.`);
-const days = positive(args.get("days") || "14", "--days");
-const limit = positive(args.get("limit") || "12", "--limit");
-const since = args.has("since") ? Date.parse(args.get("since")!) : Date.now() - days * 86_400_000;
-if (!Number.isFinite(since)) die(`--since must be a valid date: ${args.get("since")}`);
-const sinceMtime = args.has("since-mtime")
-  ? epoch(args.get("since-mtime")!, "--since-mtime")
-  : undefined;
-const cwdFilter = args.get("cwd");
-const stateDb = args.get("state-db") || join(home, ".codex", "state_5.sqlite");
 
 const object = (value: unknown): Obj =>
   value && typeof value === "object" && !Array.isArray(value) ? (value as Obj) : {};
 const string = (value: unknown): string => (typeof value === "string" ? value : "");
 const number = (value: unknown): number => (typeof value === "number" ? value : 0);
-const bytes = (value: unknown): number =>
-  Buffer.byteLength(typeof value === "string" ? value : JSON.stringify(value ?? ""));
 const time = (value: unknown): number => {
   const parsed = typeof value === "string" ? Date.parse(value) : NaN;
   return Number.isFinite(parsed) ? parsed : 0;
 };
-const getUsage = (value: unknown): Usage => {
-  const item = object(value);
-  return {
-    input: number(item.input_tokens),
-    cached: number(item.cached_input_tokens),
-    output: number(item.output_tokens),
-  };
+const short = (value: string, max = 80): string => {
+  const flat = value.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 };
-const text = (value: unknown): string =>
+const normalized = (path: string): string =>
+  resolve(path.startsWith("~/") ? join(home, path.slice(2)) : path).replace(/[\\/]+$/, "");
+const display = (path: string): string =>
+  home && path.startsWith(home) ? `~${path.slice(home.length).replace(/\\/g, "/")}` : path.replace(/\\/g, "/");
+const outputText = (value: unknown): string =>
   typeof value === "string"
     ? value
     : Array.isArray(value)
-      ? value
-          .map((part) => string(object(part).text) || string(object(part).input_text))
-          .filter(Boolean)
-          .join("\n")
-          .trim()
-      : "";
-const short = (value: string, max = 72): string => {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
-};
-const normalizedPath = (value: string): string =>
-  resolve(value.startsWith("~/") ? join(home, value.slice(2)) : value).replace(/\/+$/, "");
-const displayPath = (value: string): string =>
-  home && value.startsWith(`${home}/`) ? `~${value.slice(home.length)}` : value;
+      ? value.map((part) => string(object(part).text)).filter(Boolean).join("\n")
+      : JSON.stringify(value ?? "");
 
-function walk(dir: string, accept: (entry: string) => boolean): string[] {
-  const found: string[] = [];
-  for (const entry of readdirSync(dir)) {
-    const path = join(dir, entry),
-      stat = statSync(path);
-    if (stat.isDirectory()) found.push(...walk(path, accept));
-    else if (accept(entry) && (sinceMtime === undefined || stat.mtimeMs >= sinceMtime))
-      found.push(path);
-  }
-  return found.sort();
-}
-async function* lines(file: string): AsyncGenerator<string> {
+async function* jsonLines(file: string): AsyncGenerator<{ event: Obj; line: number }> {
   const decoder = new TextDecoder();
-  let pending = "";
+  let pending = "",
+    line = 0;
+  const parse = (text: string): Obj | undefined => {
+    try {
+      return object(JSON.parse(text));
+    } catch {
+      return undefined;
+    }
+  };
   for await (const chunk of createReadStream(file)) {
     pending += decoder.decode(chunk, { stream: true });
     let end = pending.indexOf("\n");
     while (end >= 0) {
-      yield pending.slice(0, end);
+      line++;
+      const event = parse(pending.slice(0, end));
+      if (event) yield { event, line };
       pending = pending.slice(end + 1);
       end = pending.indexOf("\n");
     }
   }
-  pending += decoder.decode();
-  if (pending) yield pending;
+  const last = parse(pending + decoder.decode());
+  if (last) yield { event: last, line: line + 1 };
 }
-const injectedBlocks =
-  /<(recommended_plugins|app-context|environment_context|skills_instructions|permissions instructions|apps_instructions|plugins_instructions|system-reminder|local-command-stdout)>[\s\S]*?<\/\1>/gi;
-function classify(message: string): { human: string; injected: boolean; injectedBytes: number } {
-  let human = message.replace(injectedBlocks, "").trim();
-  human = human
-    .replace(
-      /^# AGENTS\.md instructions for [^\n]+\n<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>\s*/i,
-      "",
-    )
-    .trim();
-  const injected = human !== message.trim();
-  return {
-    human,
-    injected,
-    injectedBytes: injected ? Math.max(0, bytes(message) - bytes(human)) : 0,
-  };
-}
-const subcommandBinaries = new Set([
-  "adb",
-  "agent-browser",
-  "agent-device",
-  "artisan",
-  "aws",
-  "brew",
-  "bun",
-  "bunx",
-  "cargo",
-  "claude",
-  "codex",
-  "composer",
-  "ddev",
-  "deno",
-  "docker",
-  "eas",
-  "expo",
-  "flutter",
-  "gcloud",
-  "gh",
-  "git",
-  "go",
-  "kubectl",
-  "maestro",
-  "make",
-  "mise",
-  "my-setup",
-  "node",
-  "npm",
-  "npx",
-  "nx",
-  "php",
-  "pnpm",
-  "python",
-  "python3",
-  "rtk",
-  "solo",
-  "supabase",
-  "system-tools",
-  "turbo",
-  "uv",
-  "xcrun",
-  "yarn",
-]);
-const commandPrefixes = new Set(["command", "env", "exec", "nice", "nohup", "sudo", "time"]);
-const navigationCommands = new Set(["cd", "pushd", "popd", "set", "true", "source", "."]);
-// Inline scripts passed to a shell keep their own line structure, so reject tokens that
-// are script syntax rather than a program name.
-const scriptNoise = new Set([
-  "EOF",
-  "await",
-  "catch",
-  "const",
-  "do",
-  "done",
-  "else",
-  "esac",
-  "export",
-  "fi",
-  "for",
-  "function",
-  "if",
-  "import",
-  "let",
-  "return",
-  "then",
-  "try",
-  "var",
-  "while",
-]);
-function commandLabel(raw: string): string {
-  const tokens = raw.trim().split(/\s+/).filter(Boolean);
-  while (
-    tokens.length &&
-    (commandPrefixes.has(tokens[0]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[0]))
-  )
-    tokens.shift();
-  const binary =
-    (tokens[0] || "")
-      .replace(/^['"(]+/, "")
-      .split("/")
-      .pop() || "";
-  if (!binary || scriptNoise.has(binary) || !/^[A-Za-z0-9_.@+-]+$/.test(binary)) return "";
-  if (!subcommandBinaries.has(binary)) return binary;
-  const sub = tokens.slice(1).find((token) => !token.startsWith("-"));
-  return sub && !/[/=$'"]/.test(sub) ? `${binary} ${short(sub, 24)}` : binary;
-}
-function commandStatements(raw: string): string[] {
-  const source = raw.trim();
-  if (!source) return [];
-  const parts = (source.includes("<<") ? [source] : source.split(/\r?\n/))
-    .flatMap((line) => line.split(/&&|\|\||;/))
-    .map((part) => part.split("|")[0].trim())
-    .filter(Boolean);
-  const labels = parts
-    .map((part) => commandLabel(part))
-    .filter(Boolean)
-    .slice(0, 16);
-  // A leading directory change is never the command that produced the output.
-  const meaningful = labels.filter((label) => !navigationCommands.has(label));
-  return meaningful.length ? meaningful : labels;
-}
-const commandField = /(?:"cmd"|'cmd'|\bcmd)\s*:\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g;
-function wrapperCommands(source: string): string[] {
-  const found: string[] = [];
-  for (const match of source.matchAll(commandField)) {
-    const literal = match[1];
-    let value = literal.slice(1, -1);
-    try {
-      value = JSON.parse(
-        literal.startsWith("'") ? `"${value.replace(/\\'/g, "'").replace(/"/g, '\\"')}"` : literal,
-      ) as string;
-    } catch {
-      // Keep the raw literal body when the payload is not valid JSON.
+
+// --episode: print one transcript slice as compact lines so a reader never loads a whole session.
+function blockLines(content: unknown, role: string, max: number): string[] {
+  if (typeof content === "string") return content.trim() ? [`${role}: ${short(content, max)}`] : [];
+  const lines: string[] = [];
+  for (const block of Array.isArray(content) ? content : []) {
+    const item = object(block);
+    const text = string(item.text);
+    if ((item.type === "text" || item.type === "input_text" || item.type === "output_text") && text.trim())
+      lines.push(`${role}: ${short(text, max)}`);
+    if (item.type === "tool_use") {
+      const input = object(item.input);
+      const subject = string(input.command) || string(input.file_path) || string(input.pattern) || JSON.stringify(input);
+      lines.push(`call ${string(item.name)}: ${short(subject, max)}`);
     }
-    found.push(...commandStatements(value));
+    if (item.type === "tool_result") lines.push(`result${item.is_error ? " (error)" : ""}: ${short(outputText(item.content), max)}`);
   }
-  return found;
+  return lines;
 }
-function normalizeCall(payload: Obj): Call | undefined {
-  if (payload.type !== "function_call" && payload.type !== "custom_tool_call") return;
-  const name = string(payload.name),
-    source = string(payload.arguments) || string(payload.input);
-  const leaf = name.split(/[.:/]/).pop();
-  if (leaf === "exec_command") {
-    try {
-      const command = string(object(JSON.parse(source)).cmd);
-      return {
-        name,
-        label: short(command || "(no command)"),
-        declared: 1,
-        commands: commandStatements(command),
-      };
-    } catch {
-      return { name, label: "(unparsed command)", declared: 1, commands: [] };
-    }
-  }
-  if (leaf === "exec") {
-    const declared = [...source.matchAll(/tools\.(?:[\w_]+\.)?exec_command\s*\(/g)].length,
-      commands = wrapperCommands(source);
-    // The wrapper also carries non-shell tool calls, so attribute their output to the tool.
-    for (const match of source.matchAll(/\btools\.([A-Za-z0-9_$]+)\s*\(/g))
-      if (match[1] !== "exec_command") commands.push(`tools.${match[1]}`);
-    return { name, label: "functions.exec inline script", declared, commands };
-  }
-  return { name, label: name || "(unnamed tool)", declared: 0, commands: [] };
+function describe(event: Obj, max: number): string[] {
+  const message = object(event.message);
+  const payload = object(event.payload);
+  const type = string(event.type);
+  if (type === "user" || type === "assistant") return blockLines(message.content, type, max);
+  if (type === "system" && event.subtype === "compact_boundary") return ["compaction"];
+  if (type === "system" && event.subtype === "api_error") return [`api error: ${short(JSON.stringify(event.error ?? event.content ?? ""), max)}`];
+  if (type === "compacted") return ["compaction"];
+  if (type !== "response_item") return [];
+  const kind = string(payload.type);
+  if (kind === "message" && payload.role !== "developer") return blockLines(payload.content, string(payload.role), max);
+  if (kind === "function_call" || kind === "custom_tool_call")
+    return [`call ${string(payload.name)}: ${short(string(payload.arguments) || string(payload.input), max)}`];
+  if (kind === "function_call_output" || kind === "custom_tool_call_output") return [`result: ${short(outputText(payload.output), max)}`];
+  return [];
 }
-function outputText(value: unknown): string {
-  return typeof value === "string"
-    ? value
-    : Array.isArray(value)
-      ? value
-          .map((part) => string(object(part).text))
-          .filter(Boolean)
-          .join("\n")
-      : JSON.stringify(value ?? "");
-}
-function isTruncated(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(isTruncated);
-  if (value && typeof value === "object")
-    return Object.entries(object(value)).some(([key, item]) =>
-      /^(?:text_?)?truncated$/i.test(key) && item === true ? true : isTruncated(item),
-    );
-  if (typeof value !== "string") return false;
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (typeof parsed !== "string" || parsed !== value) return isTruncated(parsed);
-  } catch {
-    // Tool wrappers can return plain text or several JSON objects in one block.
-  }
-  return /\b\d+ tokens truncated\b|(?:^|\n)\s*(?:Warning:\s*)?truncated output\b|<truncated>|["']?(?:text_?)?truncated["']?\s*:\s*true\b|(?:^|\n)Error: result \([\d,]+ characters\) exceeds maximum allowed tokens\./i.test(
-    value,
-  );
-}
-function addCommand(map: Map<string, Command>, call: Call, output: unknown): void {
-  const rendered = outputText(output),
-    total = bytes(output),
-    originalTokens = Number(
-      rendered.match(/(?:Original token count|original_token_count)["':\s]+(\d+)/i)?.[1] || 0,
-    ),
-    truncated = isTruncated(output) ? 1 : 0;
-  const labels = call.commands.length ? call.commands : [call.label],
-    counts = new Map<string, number>();
-  for (const label of labels) counts.set(label, (counts.get(label) || 0) + 1);
-  for (const [label, count] of counts) {
-    const share = count / labels.length,
-      existing = map.get(label) || {
-        command: label,
-        outputs: 0,
-        bytes: 0,
-        originalTokens: 0,
-        truncated: 0,
-        declared: 0,
-      };
-    existing.outputs++;
-    existing.bytes += Math.round(total * share);
-    existing.originalTokens += Math.round(originalTokens * share);
-    existing.truncated += truncated;
-    existing.declared += call.commands.length ? count : call.declared;
-    map.set(label, existing);
+async function printEpisode(ref: string): Promise<void> {
+  const match = ref.match(/^(.+):(\d+)(?:-(\d+))?$/);
+  if (!match) die(`--episode must look like <file>:<from>-<to>: ${ref}`);
+  const file = normalized(match[1]);
+  if (!existsSync(file)) die(`Session file not found: ${match[1]}`);
+  const from = Number(match[2]);
+  const to = Number(match[3] ?? match[2]);
+  const max = args.has("verbose") ? 1500 : 300;
+  console.log(`episode ${display(file)}:${from}-${to}`);
+  for await (const { event, line } of jsonLines(file)) {
+    if (line > to) break;
+    if (line >= from) for (const text of describe(event, max)) console.log(`L${line} ${text}`);
   }
 }
-function table<T>(items: T[], columns: Array<[string, (item: T) => string | number]>): void {
-  for (const item of items) {
-    console.log(columns.map(([label, get]) => `${label}=${JSON.stringify(get(item))}`).join(" "));
-  }
-}
-const outsideCwdFilter = (cwd: string): boolean =>
-  Boolean(
-    cwdFilter &&
-    normalizedPath(cwd) !== normalizedPath(cwdFilter) &&
-    !normalizedPath(cwd).startsWith(`${normalizedPath(cwdFilter)}/`),
-  );
-
-// An active gap this long is a sleeping machine or a hung run, not tool or model work.
-const stallMs = 2 * 3_600_000;
-const userWaitTool =
-  /(^|[._/])(AskUserQuestion|ExitPlanMode|request_user_input|request_user_input_async)$/;
-const toolTimeout = /did not complete within its \d+s timeout|Command timed out/;
-function emptyTime(): ClaudeTime {
-  return {
-    model: 0,
-    tool: 0,
-    subagent: 0,
-    background: 0,
-    compaction: 0,
-    retry: 0,
-    hook: 0,
-    stall: 0,
-    user: 0,
-    idle: 0,
-    active: 0,
-    tasks: 0,
-  };
-}
-function mergeToolTimes(
-  target: Map<string, ClaudeToolTime>,
-  tools: Map<string, ClaudeToolTime>,
-  scope: "main" | "subagent",
-): void {
-  for (const item of tools.values()) {
-    const key = `${scope}\0${item.label}`;
-    const aggregate = target.get(key) || {
-      ...item,
-      scope,
-      calls: 0,
-      wallMs: 0,
-      totalMs: 0,
-      maxMs: 0,
-      errors: 0,
-      errorMs: 0,
-      timeouts: 0,
-      durations: [],
-    };
-    aggregate.calls += item.calls;
-    aggregate.wallMs += item.wallMs;
-    aggregate.totalMs += item.totalMs;
-    aggregate.errors += item.errors;
-    aggregate.errorMs += item.errorMs;
-    aggregate.timeouts += item.timeouts;
-    aggregate.durations.push(...item.durations);
-    if (item.maxMs > aggregate.maxMs) {
-      aggregate.maxMs = item.maxMs;
-      aggregate.slowest = item.slowest;
-      aggregate.slowestFile = item.slowestFile;
-    }
-    target.set(key, aggregate);
-  }
-}
-// Codex writes usage after the response (sometimes after tool results). Keep the
-// response boundary separately so execution time never becomes model latency.
-function codexTimeline(file: string) {
-  const time = emptyTime(),
-    tools = new Map<string, ClaudeToolTime>(),
-    tasks: ClaudeTask[] = [],
-    requests: ClaudeRequest[] = [],
-    seenResponses = new Set<string>(),
-    open = new Map<string, { call: Call; start: number }>();
-  let previous = 0,
-    running = false,
-    model = "(unknown)",
-    modelStart = 0,
-    lastCumulative = "",
-    response: { start: number; end: number } | undefined,
-    task: ClaudeTask | undefined;
-
-  const stats = (call: Call): ClaudeToolTime => {
-    const existing = tools.get(call.label);
-    if (existing) return existing;
-    const item: ClaudeToolTime = {
-      scope: "main",
-      tool: call.name,
-      label: call.label,
-      calls: 0,
-      wallMs: 0,
-      totalMs: 0,
-      maxMs: 0,
-      errors: 0,
-      errorMs: 0,
-      timeouts: 0,
-      durations: [],
-      slowest: "",
-      slowestFile: "",
-    };
-    tools.set(call.label, item);
-    return item;
-  };
-  const spend = (category: TimeCategory, ms: number, label = ""): void => {
-    time[category] += ms;
-    if (["idle", "user", "stall"].includes(category)) return;
-    time.active += ms;
-    if (!task) return;
-    task.activeMs += ms;
-    if (category === "model") task.modelMs += ms;
-    else if (category === "tool") {
-      task.toolMs += ms;
-      task.toolShare.set(label, (task.toolShare.get(label) || 0) + ms);
-    } else task.otherMs += ms;
-  };
-  const closeResponse = (usage: Usage = { input: 0, cached: 0, output: 0 }): void => {
-    if (response && response.start >= since && response.end - response.start < stallMs) {
-      requests.push({
-        model,
-        ms: Math.max(0, response.end - response.start),
-        input: usage.input,
-        output: usage.output,
-      });
-      if (task) task.requests++;
-    }
-    if (response) modelStart = Math.max(modelStart, response.end);
-    response = undefined;
-  };
-  const closeTask = (): void => {
-    closeResponse();
-    if (task && task.start >= since) tasks.push(task);
-    task = undefined;
-    open.clear();
-    running = false;
-  };
-  const startTask = (at: number): void => {
-    closeTask();
-    running = true;
-    modelStart = at;
-    task = {
-      file,
-      trigger: "human",
-      prompt: "",
-      start: at,
-      activeMs: 0,
-      modelMs: 0,
-      toolMs: 0,
-      backgroundMs: 0,
-      otherMs: 0,
-      requests: 0,
-      toolCalls: 0,
-      toolShare: new Map(),
-    };
-  };
-
-  return {
-    time,
-    tools,
-    tasks,
-    requests,
-    step(event: Obj, at: number): void {
-      if (!at) return;
-      const payload = object(event.payload),
-        type = string(payload.type),
-        isEvent = event.type === "event_msg",
-        isItem = event.type === "response_item";
-      if (previous && at >= previous) {
-        const gap = at - Math.max(previous, since);
-        if (gap > 0) {
-          if (!running) spend("idle", gap);
-          else if (at - previous >= stallMs) spend("stall", gap);
-          else if (open.size)
-            for (const { call } of open.values()) {
-              const share = gap / open.size;
-              if (userWaitTool.test(call.name)) spend("user", share);
-              else {
-                spend("tool", share, call.label);
-                stats(call).wallMs += share;
-              }
-            }
-          else spend(event.type === "compacted" ? "compaction" : "model", gap);
-        }
-      }
-      previous = Math.max(previous, at);
-      if (isEvent && type === "task_started") startTask(at);
-      if (event.type === "turn_context") model = string(payload.model) || model;
-      if (isItem && type === "message" && payload.role === "user") {
-        const prompt = classify(text(payload.content)).human;
-        if (prompt) {
-          if (!running) startTask(at);
-          if (task) task.prompt ||= prompt;
-        }
-      }
-
-      const call = isItem ? normalizeCall(payload) : undefined;
-      const isModel =
-        isItem &&
-        (call || type === "reasoning" || (type === "message" && payload.role === "assistant"));
-      if (isModel && running) {
-        response ||= { start: modelStart || at, end: at };
-        response.end = Math.max(response.end, at);
-      }
-      if (call) {
-        const id = string(payload.call_id) || string(payload.id);
-        if (id) open.set(id, { call, start: at });
-        if (task) task.toolCalls++;
-      }
-      if (isItem && (type === "function_call_output" || type === "custom_tool_call_output")) {
-        const id = string(payload.call_id) || string(payload.id),
-          pending = open.get(id);
-        open.delete(id);
-        if (pending && pending.start >= since && !userWaitTool.test(pending.call.name)) {
-          const ms = Math.max(0, at - pending.start),
-            item = stats(pending.call);
-          item.calls++;
-          item.totalMs += ms;
-          item.durations.push(ms);
-          if (ms > item.maxMs) {
-            item.maxMs = ms;
-            item.slowest = pending.call.label;
-            item.slowestFile = file;
-          }
-          if (
-            object(payload.output).isError === true ||
-            /(?:Process exited with code|exit_code["'\s]*:)\s*[1-9]\d*/i.test(
-              outputText(payload.output),
-            )
-          ) {
-            item.errors++;
-            item.errorMs += ms;
-          }
-          if (toolTimeout.test(outputText(payload.output))) item.timeouts++;
-        }
-        modelStart = at;
-      }
-      if (event.type === "token_usage_record") {
-        const id = string(payload.response_id);
-        if (!id || !seenResponses.has(id)) closeResponse(getUsage(payload.usage));
-        if (id) seenResponses.add(id);
-      }
-      if (isEvent && type === "token_count") {
-        const info = object(payload.info),
-          total = info.total_token_usage;
-        const cumulative = total ? JSON.stringify(getUsage(total)) : "";
-        if (info.last_token_usage && (!cumulative || cumulative !== lastCumulative))
-          closeResponse(getUsage(info.last_token_usage));
-        if (cumulative) lastCumulative = cumulative;
-      }
-      if (isEvent && ["task_complete", "task_completed", "turn_aborted"].includes(type))
-        closeTask();
-    },
-    finish(): void {
-      closeTask();
-      time.tasks = tasks.length;
-    },
-  };
-}
-
-const sessions: Session[] = [],
-  commands = new Map<string, Command>(),
-  codexToolTimes = new Map<string, ClaudeToolTime>(),
-  codexTasks: ClaudeTask[] = [],
-  codexRequests: ClaudeRequest[] = [];
-let candidates: string[] = [];
-const turnOwners = new Map<string, { file: string; at: number; copies: Set<string> }>();
-if (harnesses.has("codex")) {
-  if (!existsSync(root)) die(`Codex sessions directory not found: ${root}`);
-  candidates = walk(root, (entry) => entry.startsWith("rollout-") && entry.endsWith(".jsonl"));
-  // Read only metadata first, so source sessions precede inherited fork history
-  // without a second full scan of potentially very large rollouts.
-  const created = new Map<string, number>();
-  for (const file of candidates) {
-    let createdAt = Infinity;
-    for await (const line of lines(file)) {
-      let event: Obj;
-      try {
-        event = object(JSON.parse(line));
-      } catch {
-        continue;
-      }
-      const payload = object(event.payload);
-      if (event.type === "session_meta") {
-        createdAt = time(payload.timestamp) || time(event.timestamp) || Infinity;
-        break;
-      }
-    }
-    created.set(file, createdAt);
-  }
-  candidates.sort((left, right) => created.get(left)! - created.get(right)!);
-
-  for (const file of candidates) {
-    const summary: Session = {
-      file: relative(root, file),
-      id: "",
-      cwd: "",
-      bytes: 0,
-      lines: 0,
-      parsed: 0,
-      malformed: 0,
-      unknown: 0,
-      createdAt: 0,
-      firstActivity: 0,
-      lastActivity: 0,
-      status: "unknown",
-      usageMode: "none",
-      forked: false,
-      forkSource: "",
-      parentId: "",
-      forkBaselineInput: 0,
-      tokenEvents: 0,
-      turns: 0,
-      firstInput: 0,
-      maxInput: 0,
-      totalInput: 0,
-      cachedInput: 0,
-      totalOutput: 0,
-      compactions: 0,
-      baseInstructionBytes: 0,
-      turnContextInstructionBytes: 0,
-      injectedUserMessages: 0,
-      injectedUserBytes: 0,
-      humanRequests: 0,
-      firstUserMessage: "",
-      imageMessages: 0,
-      imageBytes: 0,
-      toolOutputs: 0,
-      execOutputs: 0,
-      largeExecOutputs: 0,
-      truncatedOutputs: 0,
-      unmatchedToolOutputs: 0,
-      time: emptyTime(),
-    };
-    const calls = new Map<string, Call>(),
-      localCommands = new Map<string, Command>(),
-      timeline = codexTimeline(summary.file);
-    let active = false,
-      previousCumulative: Usage | undefined,
-      sawCumulative = false;
-    const cumulativeDelta: Usage = { input: 0, cached: 0, output: 0 };
-    const legacy: Usage = { input: 0, cached: 0, output: 0 };
-    const ownedTurns = new Set<string>();
-    let turnId = "";
-    for await (const line of lines(file)) {
-      if (!line) continue;
-      summary.lines++;
-      let event: Obj;
-      try {
-        const parsed: unknown = JSON.parse(line);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          summary.malformed++;
-          continue;
-        }
-        event = parsed as Obj;
-      } catch {
-        summary.malformed++;
-        continue;
-      }
-      summary.parsed++;
-      const type = string(event.type),
-        payload = object(event.payload),
-        at = time(event.timestamp) || time(payload.timestamp);
-      if (type === "turn_context" || type === "event_msg") {
-        turnId = string(payload.turn_id) || turnId;
-        if (turnId && !outsideCwdFilter(summary.cwd)) {
-          const owner = turnOwners.get(turnId) ?? { file, at, copies: new Set<string>() };
-          owner.copies.add(file);
-          turnOwners.set(turnId, owner);
-        }
-      }
-      if (type === "session_meta") {
-        summary.id = string(payload.id) || string(payload.session_id) || summary.id;
-        summary.cwd = string(payload.cwd) || summary.cwd;
-        summary.createdAt ||= time(payload.timestamp) || at;
-        summary.baseInstructionBytes ||= bytes(string(object(payload.base_instructions).text));
-        const spawn = object(object(object(payload.source).subagent).thread_spawn),
-          historyBase = object(payload.history_base);
-        const parentId =
-          string(payload.forked_from_id) ||
-          string(payload.parent_thread_id) ||
-          string(spawn.parent_thread_id) ||
-          string(historyBase.thread_id);
-        if (parentId) {
-          summary.forked = true;
-          summary.parentId ||= parentId;
-          summary.forkSource ||= Object.keys(object(object(payload.source).subagent)).length
-            ? "subagent"
-            : payload.forked_from_id
-              ? "forked-thread"
-              : payload.parent_thread_id
-                ? "parent-thread"
-                : "history-base";
-        }
-      }
-      if (
-        type === "response_item" &&
-        (payload.type === "function_call" || payload.type === "custom_tool_call")
-      ) {
-        const call = normalizeCall(payload),
-          id = string(payload.call_id) || string(payload.id);
-        if (call && id) calls.set(id, call);
-      }
-      if (type === "event_msg" && payload.type === "token_count" && at < since) {
-        const total = object(object(payload.info).total_token_usage);
-        if (Object.keys(total).length) previousCumulative = getUsage(total);
-      }
-      if (turnId && turnOwners.has(turnId) && turnOwners.get(turnId)!.file !== file) {
-        // Still advance the provider baseline through inherited history, so the
-        // first native turn includes only the usage it actually added.
-        if (type === "event_msg" && payload.type === "token_count") {
-          const total = object(object(payload.info).total_token_usage);
-          if (Object.keys(total).length) previousCumulative = getUsage(total);
-        }
-        continue;
-      }
-      timeline.step(event, at);
-      if (!at || at < since) continue;
-      if (turnId) ownedTurns.add(turnId);
-      active = true;
-      summary.firstActivity ||= at;
-      summary.lastActivity = Math.max(summary.lastActivity, at);
-      summary.bytes += bytes(line);
-      if (type === "turn_context") {
-        const instructions = string(payload.user_instructions);
-        if (instructions) summary.turnContextInstructionBytes += bytes(instructions);
-      } else if (type === "compacted") summary.compactions++;
-      else if (type === "event_msg" && payload.type === "token_count") {
-        const info = object(payload.info),
-          last = getUsage(info.last_token_usage),
-          total = object(info.total_token_usage);
-        summary.tokenEvents++;
-        if (summary.createdAt >= since) summary.firstInput ||= last.input;
-        summary.maxInput = Math.max(summary.maxInput, last.input);
-        if (Object.keys(total).length) {
-          sawCumulative = true;
-          const current = getUsage(total);
-          if (summary.forked && !previousCumulative) {
-            // A forked session inherits the parent's cumulative totals, so its first
-            // in-window snapshot is a baseline rather than usage this session caused.
-            summary.forkBaselineInput = current.input;
-            // A stable native turn identifies this as new work even when its
-            // inherited baseline was not serialized in the child rollout.
-            if (turnId) {
-              cumulativeDelta.input += last.input;
-              cumulativeDelta.cached += last.cached;
-              cumulativeDelta.output += last.output;
-            }
-          } else
-            for (const key of ["input", "cached", "output"] as const) {
-              const prior = previousCumulative?.[key] ?? 0;
-              cumulativeDelta[key] += current[key] >= prior ? current[key] - prior : current[key];
-            }
-          previousCumulative = current;
-        } else {
-          summary.usageMode = "last-only";
-          legacy.input += last.input;
-          legacy.cached += last.cached;
-          legacy.output += last.output;
-        }
-      } else if (
-        type === "response_item" &&
-        payload.type === "message" &&
-        payload.role === "user"
-      ) {
-        const message = text(payload.content),
-          result = classify(message);
-        if (result.injected) {
-          summary.injectedUserMessages++;
-          summary.injectedUserBytes += result.injectedBytes;
-        }
-        if (result.human) {
-          summary.humanRequests++;
-          summary.firstUserMessage ||= result.human;
-        }
-        const imageParts = Array.isArray(payload.content)
-          ? payload.content.filter((part) => {
-              const item = object(part);
-              return (
-                item.type === "input_image" ||
-                /data:image/.test(string(item.image_url) || string(item.url))
-              );
-            })
-          : [];
-        if (imageParts.length) {
-          summary.imageMessages++;
-          summary.imageBytes += bytes(imageParts);
-        }
-      } else if (
-        type === "response_item" &&
-        (payload.type === "function_call" || payload.type === "custom_tool_call")
-      ) {
-        // Calls are indexed before the window check so an in-window output can match a prewindow call.
-      } else if (
-        type === "response_item" &&
-        (payload.type === "function_call_output" || payload.type === "custom_tool_call_output")
-      ) {
-        summary.toolOutputs++;
-        const call = calls.get(string(payload.call_id) || string(payload.id));
-        if (!call) {
-          summary.unmatchedToolOutputs++;
-          continue;
-        }
-        const leaf = call.name.split(/[.:/]/).pop();
-        if (leaf === "exec" || leaf === "exec_command") {
-          const rendered = outputText(payload.output);
-          summary.execOutputs++;
-          if (
-            Number(
-              rendered.match(/(?:Original token count|original_token_count)["':\s]+(\d+)/i)?.[1] ||
-                0,
-            ) > 1000
-          )
-            summary.largeExecOutputs++;
-          if (isTruncated(payload.output)) summary.truncatedOutputs++;
-          addCommand(localCommands, call, payload.output);
-        }
-      } else if (
-        !["session_meta", "turn_context", "compacted"].includes(type) &&
-        !(
-          (type === "event_msg" && payload.type === "token_count") ||
-          (type === "response_item" &&
-            [
-              "message",
-              "function_call",
-              "custom_tool_call",
-              "function_call_output",
-              "custom_tool_call_output",
-            ].includes(string(payload.type)))
-        )
-      )
-        summary.unknown++;
-    }
-    if (!active || outsideCwdFilter(summary.cwd)) continue;
-    timeline.finish();
-    summary.time = timeline.time;
-    codexRequests.push(...timeline.requests);
-    if (summary.forkSource !== "subagent") codexTasks.push(...timeline.tasks);
-    mergeToolTimes(
-      codexToolTimes,
-      timeline.tools,
-      summary.forkSource === "subagent" ? "subagent" : "main",
-    );
-    summary.turns = ownedTurns.size;
-    if (sawCumulative) {
-      summary.usageMode = "cumulative";
-      summary.totalInput = cumulativeDelta.input;
-      summary.cachedInput = cumulativeDelta.cached;
-      summary.totalOutput = cumulativeDelta.output;
-    } else
-      Object.assign(summary, {
-        totalInput: legacy.input,
-        cachedInput: legacy.cached,
-        totalOutput: legacy.output,
-      });
-    summary.status = !summary.createdAt
-      ? "unknown"
-      : summary.createdAt < since
-        ? "resumed"
-        : "created";
-    sessions.push(summary);
-    for (const item of localCommands.values()) {
-      const aggregate = commands.get(item.command) || {
-        ...item,
-        outputs: 0,
-        bytes: 0,
-        originalTokens: 0,
-        truncated: 0,
-        declared: 0,
-      };
-      aggregate.outputs += item.outputs;
-      aggregate.bytes += item.bytes;
-      aggregate.originalTokens += item.originalTokens;
-      aggregate.truncated += item.truncated;
-      aggregate.declared += item.declared;
-      commands.set(item.command, aggregate);
-    }
-  }
-}
-
-function taskTrees(): Tree[] {
-  if (!existsSync(stateDb) || !sessions.length) return [];
-  const db = new Database(stateDb, { readonly: true });
-  try {
-    const threads = db
-      .query("SELECT id, title, cwd, first_user_message FROM threads")
-      .all() as Array<{ id: string; title: string; cwd: string; first_user_message: string }>;
-    const edges = db
-      .query("SELECT parent_thread_id, child_thread_id FROM thread_spawn_edges")
-      .all() as Array<{ parent_thread_id: string; child_thread_id: string }>;
-    const thread = new Map(threads.map((item) => [item.id, item])),
-      parent = new Map(edges.map((item) => [item.child_thread_id, item.parent_thread_id]));
-    const unique = new Map<string, Session>();
-    for (const session of sessions)
-      if (
-        session.id &&
-        (!unique.has(session.id) || session.lastActivity > unique.get(session.id)!.lastActivity)
-      )
-        unique.set(session.id, session);
-    const groups = new Map<
-      string,
-      Array<{ session: Session; depth: number; request: string; incomplete: boolean }>
-    >();
-    for (const session of unique.values()) {
-      let rootId = session.id,
-        depth = 0;
-      const visited = new Set<string>();
-      while (parent.has(rootId) && !visited.has(rootId)) {
-        visited.add(rootId);
-        rootId = parent.get(rootId)!;
-        depth++;
-      }
-      const item = {
-        session,
-        depth,
-        request: thread.get(session.id)?.first_user_message || session.firstUserMessage,
-        incomplete: !unique.has(rootId),
-      };
-      groups.set(rootId, [...(groups.get(rootId) || []), item]);
-    }
-    return [...groups.entries()]
-      .map(([rootId, members]) => {
-        const rootThread = thread.get(rootId),
-          rootRequest =
-            rootThread?.first_user_message ||
-            members.find((item) => item.depth === 0)?.request ||
-            "";
-        const descendants = members.filter((item) => item.depth > 0);
-        return {
-          rootId,
-          title: rootThread?.title || rootRequest || rootId,
-          cwd: rootThread?.cwd || members[0]?.session.cwd || "",
-          sessions: members.length,
-          descendants: descendants.length,
-          forkedSessions: members.filter((item) => item.session.forked).length,
-          maxDepth: Math.max(...members.map((item) => item.depth)),
-          totalInput: members.reduce((sum, item) => sum + item.session.totalInput, 0),
-          repeatedRootRequest: descendants.filter((item) => item.request === rootRequest).length,
-          highStartupDescendants: descendants.filter((item) => item.session.firstInput >= 50_000)
-            .length,
-          incomplete: members.some((item) => item.incomplete),
-        };
-      })
-      .filter((item) => item.descendants > 0)
-      .sort((a, b) => b.totalInput - a.totalInput);
-  } finally {
-    db.close();
-  }
-}
-let trees: Tree[] = [],
-  treeError = "";
-if (harnesses.has("codex"))
-  try {
-    trees = taskTrees();
-  } catch (error) {
-    treeError = error instanceof Error ? error.message : String(error);
-  }
-
-function claudeToolLabel(name: string, input: Obj): string {
-  if (name === "Bash" || name === "BashOutput") {
-    const label = commandStatements(string(input.command))[0] || "";
-    return label ? `Bash ${label}` : "Bash";
-  }
-  if (["Read", "Write", "Edit", "NotebookEdit"].includes(name)) {
-    const path = string(input.file_path) || string(input.notebook_path);
-    return path ? `${name} ${short(displayPath(path), 60)}` : name;
-  }
-  if (name === "Grep" || name === "Glob") {
-    const pattern = string(input.pattern) || string(input.glob);
-    return pattern ? `${name} ${short(pattern, 40)}` : name;
-  }
-  if (name === "Skill") return `Skill ${short(string(input.skill), 40) || "(unnamed)"}`;
-  if (name === "Agent") return `Agent ${short(string(input.subagent_type) || "default", 40)}`;
-  if (name === "Task") return `Task ${short(string(input.subagent_type) || "default", 40)}`;
-  return name;
-}
-function addTool(
-  map: Map<string, ClaudeTool>,
-  call: { tool: string; label: string },
-  output: string,
-): void {
-  const existing = map.get(call.label) || {
-    tool: call.tool,
-    label: call.label,
-    outputs: 0,
-    bytes: 0,
-    maxBytes: 0,
-    truncated: 0,
-  };
-  const size = bytes(output);
-  existing.outputs++;
-  existing.bytes += size;
-  existing.maxBytes = Math.max(existing.maxBytes, size);
-  existing.truncated += isTruncated(output) ? 1 : 0;
-  map.set(call.label, existing);
-}
-
-const waitLoop = /(^|[\s;&|(])(sleep\s+\d|until\s)|\s--watch\b/;
-type ClaudeKind =
-  | "human"
-  | "wake"
-  | "subagent"
-  | "background"
-  | "interrupt"
-  | "result"
-  | "assistant"
-  | "failure"
-  | "stop-hook"
-  | "compact"
-  | "api-error";
-function claudeKind(event: Obj): ClaudeKind | undefined {
-  const type = string(event.type),
-    content = object(event.message).content;
-  if (type === "assistant")
-    return object(event.message).model === "<synthetic>" && text(content).startsWith("API Error")
-      ? "failure"
-      : "assistant";
-  if (type === "system") {
-    const subtype = string(event.subtype);
-    if (subtype === "stop_hook_summary") return "stop-hook";
-    if (subtype === "compact_boundary") return "compact";
-    return subtype === "api_error" ? "api-error" : undefined;
-  }
-  if (type !== "user" || event.isCompactSummary === true) return;
-  if (Array.isArray(content) && content.some((block) => object(block).type === "tool_result"))
-    return "result";
-  const body = text(content),
-    origin = string(object(event.origin).kind);
-  // Work stopped by an ended session is reported on resume, after the user was away.
-  if (origin === "task-notification" || body.startsWith("<task-notification>")) {
-    if (body.includes("<status>stopped</status>")) return "wake";
-    return /<summary>(Background )?agent /i.test(body) ? "subagent" : "background";
-  }
-  if (body.startsWith("[Request interrupted by user")) return "interrupt";
-  if (origin || event.isMeta === true || (body && !classify(body).human)) return "wake";
-  return "human";
-}
-function claudeToolDetail(input: Obj): string {
-  for (const key of ["command", "description", "url", "query", "file_path", "pattern", "skill"]) {
-    const value = string(input[key]);
-    if (value) return short(value, 60);
-  }
-  return "";
-}
-// Splits session wall time into what the agent was waiting on between consecutive events.
-function claudeTimeline(file: string) {
-  const time = emptyTime(),
-    tools = new Map<string, ClaudeToolTime>(),
-    tasks: ClaudeTask[] = [],
-    requests: ClaudeRequest[] = [],
-    open = new Map<string, { tool: string; label: string; start: number; detail: string }>();
-  let prev: { at: number; kind: ClaudeKind; ended: boolean; messageId: string } | undefined,
-    task: ClaudeTask | undefined,
-    request: (ClaudeRequest & { id: string; start: number; end: number }) | undefined,
-    requestStart = 0;
-
-  const toolTime = (call: { tool: string; label: string }): ClaudeToolTime => {
-    const existing = tools.get(call.label);
-    if (existing) return existing;
-    const created: ClaudeToolTime = {
-      scope: "main",
-      tool: call.tool,
-      label: call.label,
-      calls: 0,
-      wallMs: 0,
-      totalMs: 0,
-      maxMs: 0,
-      errors: 0,
-      errorMs: 0,
-      timeouts: 0,
-      durations: [],
-      slowest: "",
-      slowestFile: "",
-    };
-    tools.set(call.label, created);
-    return created;
-  };
-  const spend = (category: TimeCategory, ms: number, label = ""): void => {
-    time[category] += ms;
-    if (category === "idle" || category === "user" || category === "stall") return;
-    time.active += ms;
-    if (!task) return;
-    task.activeMs += ms;
-    if (category === "model") task.modelMs += ms;
-    else if (category === "tool") {
-      task.toolMs += ms;
-      task.toolShare.set(label, (task.toolShare.get(label) || 0) + ms);
-    } else if (category === "subagent" || category === "background") task.backgroundMs += ms;
-    else task.otherMs += ms;
-  };
-  const closeRequest = (): void => {
-    if (request && request.start >= since && request.end >= request.start)
-      requests.push({
-        model: request.model,
-        ms: request.end - request.start,
-        input: request.input,
-        output: request.output,
-      });
-    request = undefined;
-  };
-  const closeTask = (): void => {
-    if (task && task.start >= since) tasks.push(task);
-    task = undefined;
-  };
-  const attribute = (gap: number, kind: ClaudeKind, messageId: string): void => {
-    if (!prev) return;
-    const working = [...open.values()].filter((call) => !userWaitTool.test(call.tool));
-    if (open.size && !working.length) return spend("user", gap);
-    if ((working.length || !prev.ended) && gap >= stallMs) return spend("stall", gap);
-    if (open.size) {
-      const share = gap / open.size;
-      for (const call of open.values()) {
-        if (userWaitTool.test(call.tool)) spend("user", share);
-        else {
-          spend("tool", share, call.label);
-          toolTime(call).wallMs += share;
-        }
-      }
-      return;
-    }
-    if (kind === "assistant" && prev.kind === "assistant" && messageId === prev.messageId)
-      return spend("model", gap);
-    if (prev.ended)
-      return spend(
-        kind === "subagent" || kind === "background"
-          ? gap >= stallMs
-            ? "stall"
-            : kind
-          : kind === "stop-hook"
-            ? "hook"
-            : "idle",
-        gap,
-      );
-    spend(
-      kind === "stop-hook"
-        ? "hook"
-        : kind === "compact"
-          ? "compaction"
-          : kind === "api-error" || kind === "failure" || prev.kind === "api-error"
-            ? "retry"
-            : "model",
-      gap,
-    );
-  };
-
-  return {
-    time,
-    tools,
-    tasks,
-    requests,
-    step(event: Obj, at: number): void {
-      const kind = claudeKind(event);
-      if (!kind || !at) return;
-      const message = object(event.message),
-        messageId = string(message.id),
-        usage = object(message.usage);
-
-      if (prev && prev.at >= since && at >= prev.at) attribute(at - prev.at, kind, messageId);
-
-      if ((kind === "human" || kind === "wake") && (!task || prev?.ended)) {
-        closeTask();
-        task = {
-          file,
-          trigger: kind,
-          prompt: "",
-          start: at,
-          activeMs: 0,
-          modelMs: 0,
-          toolMs: 0,
-          backgroundMs: 0,
-          otherMs: 0,
-          requests: 0,
-          toolCalls: 0,
-          toolShare: new Map(),
-        };
-      }
-      // Injected context can land just before the human prompt it belongs to.
-      if (task && kind === "human" && task.trigger === "wake" && !task.requests) {
-        task.trigger = "human";
-        task.prompt = "";
-      }
-      if (task && !task.prompt && (kind === "human" || kind === "wake"))
-        task.prompt = classify(text(message.content)).human || text(message.content);
-
-      if (kind === "assistant") {
-        if (request?.id !== messageId) {
-          closeRequest();
-          // A new request needs every earlier result, so calls still open never returned one.
-          open.clear();
-          if (messageId && message.model !== "<synthetic>") {
-            request = {
-              id: messageId,
-              model: string(message.model) || "(unknown)",
-              start: requestStart || -1,
-              end: at,
-              input:
-                number(usage.input_tokens) +
-                number(usage.cache_read_input_tokens) +
-                number(usage.cache_creation_input_tokens),
-              output: number(usage.output_tokens),
-              ms: 0,
-            };
-            requestStart = 0;
-            if (task) task.requests++;
-          }
-        } else {
-          request.end = at;
-          request.output = Math.max(request.output, number(usage.output_tokens));
-        }
-        for (const block of Array.isArray(message.content) ? message.content : []) {
-          const item = object(block);
-          if (item.type !== "tool_use" || !string(item.id)) continue;
-          const tool = string(item.name) || "(unnamed tool)",
-            input = object(item.input);
-          open.set(string(item.id), {
-            tool,
-            label:
-              tool === "Bash" && waitLoop.test(string(input.command))
-                ? "Bash wait loop"
-                : claudeToolLabel(tool, input),
-            start: at,
-            detail: claudeToolDetail(input),
-          });
-          if (task) task.toolCalls++;
-        }
-      } else {
-        closeRequest();
-        if (kind === "interrupt") open.clear();
-        if (kind === "result" && Array.isArray(message.content))
-          for (const block of message.content) {
-            const item = object(block),
-              call = open.get(string(item.tool_use_id));
-            if (item.type !== "tool_result" || !call) continue;
-            open.delete(string(item.tool_use_id));
-            if (call.start < since || userWaitTool.test(call.tool)) continue;
-            const ms = Math.max(0, at - call.start),
-              stats = toolTime(call);
-            stats.calls++;
-            stats.totalMs += ms;
-            stats.durations.push(ms);
-            if (ms > stats.maxMs) {
-              stats.maxMs = ms;
-              stats.slowest = call.detail;
-              stats.slowestFile = file;
-            }
-            if (item.is_error === true) {
-              stats.errors++;
-              stats.errorMs += ms;
-            }
-            if (toolTimeout.test(outputText(item.content))) stats.timeouts++;
-          }
-        requestStart = ["stop-hook", "api-error", "failure", "interrupt"].includes(kind) ? 0 : at;
-      }
-
-      const stop = string(message.stop_reason);
-      prev = {
-        at,
-        kind,
-        messageId,
-        ended:
-          kind === "stop-hook" ||
-          kind === "interrupt" ||
-          kind === "failure" ||
-          (kind === "assistant" && !open.size && stop !== "tool_use"),
-      };
-    },
-    finish(): void {
-      closeRequest();
-      closeTask();
-      time.tasks = tasks.filter((item) => item.trigger === "human").length;
-    },
-  };
-}
-
-const claudeSessions: ClaudeSession[] = [],
-  claudeTools = new Map<string, ClaudeTool>(),
-  claudeToolTimes = new Map<string, ClaudeToolTime>(),
-  claudeTasks: ClaudeTask[] = [],
-  claudeRequests: ClaudeRequest[] = [];
-let claudeCandidates: string[] = [];
-if (harnesses.has("claude")) {
-  if (!existsSync(claudeRoot)) die(`Claude projects directory not found: ${claudeRoot}`);
-  claudeCandidates = walk(claudeRoot, (entry) => entry.endsWith(".jsonl"));
-  for (const file of claudeCandidates) {
-    const relativePath = relative(claudeRoot, file);
-    const summary: ClaudeSession = {
-      file: relativePath,
-      project: relativePath.split("/")[0] || "",
-      id: "",
-      agentId: "",
-      cwd: "",
-      sidechain: false,
-      parentId: "",
-      bytes: 0,
-      lines: 0,
-      parsed: 0,
-      malformed: 0,
-      createdAt: 0,
-      firstActivity: 0,
-      lastActivity: 0,
-      status: "unknown",
-      models: [],
-      requests: 0,
-      firstInput: 0,
-      maxInput: 0,
-      totalInput: 0,
-      cachedInput: 0,
-      cacheWriteInput: 0,
-      totalOutput: 0,
-      compactions: 0,
-      compactedPreTokens: 0,
-      apiErrors: 0,
-      humanRequests: 0,
-      firstUserMessage: "",
-      injectedUserMessages: 0,
-      injectedUserBytes: 0,
-      attachments: 0,
-      attachmentBytes: 0,
-      imageMessages: 0,
-      imageBytes: 0,
-      toolOutputs: 0,
-      toolOutputBytes: 0,
-      largestToolOutput: 0,
-      unmatchedToolOutputs: 0,
-      time: emptyTime(),
-    };
-    const calls = new Map<string, { tool: string; label: string }>(),
-      localTools = new Map<string, ClaudeTool>(),
-      requestUsage = new Map<string, Obj>(),
-      timeline = claudeTimeline(relativePath);
-    let active = false;
-    for await (const line of lines(file)) {
-      if (!line) continue;
-      summary.lines++;
-      let event: Obj;
-      try {
-        const parsed: unknown = JSON.parse(line);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          summary.malformed++;
-          continue;
-        }
-        event = parsed as Obj;
-      } catch {
-        summary.malformed++;
-        continue;
-      }
-      summary.parsed++;
-      const type = string(event.type),
-        message = object(event.message),
-        at = time(event.timestamp);
-      summary.id ||= string(event.sessionId);
-      summary.agentId ||= string(event.agentId);
-      summary.cwd ||= string(event.cwd);
-      summary.parentId ||= string(object(event.forkedFrom).sessionId);
-      if (event.isSidechain === true) summary.sidechain = true;
-      if (at) summary.createdAt ||= at;
-      timeline.step(event, at);
-      if (type === "assistant" && Array.isArray(message.content))
-        for (const block of message.content) {
-          const item = object(block);
-          if (item.type !== "tool_use") continue;
-          const id = string(item.id);
-          if (!id) continue;
-          const name = string(item.name) || "(unnamed tool)";
-          calls.set(id, { tool: name, label: claudeToolLabel(name, object(item.input)) });
-        }
-      if (!at || at < since) continue;
-      active = true;
-      summary.firstActivity ||= at;
-      summary.lastActivity = Math.max(summary.lastActivity, at);
-      summary.bytes += bytes(line);
-      if (type === "assistant") {
-        const usage = object(message.usage),
-          model = string(message.model);
-        if (model && !summary.models.includes(model)) summary.models.push(model);
-        const key = string(message.id) || string(event.requestId) || string(event.uuid);
-        // Streaming content blocks carry increasing usage; the final block wins.
-        if (Object.keys(usage).length) requestUsage.set(key || `line:${summary.lines}`, usage);
-      } else if (type === "user") {
-        const content = message.content,
-          results = Array.isArray(content)
-            ? content.filter((block) => object(block).type === "tool_result")
-            : [];
-        if (results.length) {
-          for (const block of results) {
-            const item = object(block),
-              rendered = outputText(item.content),
-              size = bytes(rendered);
-            summary.toolOutputs++;
-            summary.toolOutputBytes += size;
-            summary.largestToolOutput = Math.max(summary.largestToolOutput, size);
-            const call = calls.get(string(item.tool_use_id));
-            if (!call) {
-              summary.unmatchedToolOutputs++;
-              continue;
-            }
-            addTool(localTools, call, rendered);
-          }
-          continue;
-        }
-        if (event.isCompactSummary === true || event.isMeta === true) continue;
-        const result = classify(text(content));
-        if (result.injected) {
-          summary.injectedUserMessages++;
-          summary.injectedUserBytes += result.injectedBytes;
-        }
-        if (result.human) {
-          summary.humanRequests++;
-          summary.firstUserMessage ||= result.human;
-        }
-        const imageParts = Array.isArray(content)
-          ? content.filter((part) => {
-              const item = object(part);
-              return (
-                item.type === "image" ||
-                /data:image/.test(string(item.image_url) || string(item.url))
-              );
-            })
-          : [];
-        if (imageParts.length) {
-          summary.imageMessages++;
-          summary.imageBytes += bytes(imageParts);
-        }
-      } else if (type === "attachment") {
-        summary.attachments++;
-        summary.attachmentBytes += bytes(event.attachment);
-      } else if (type === "system") {
-        const subtype = string(event.subtype);
-        if (subtype === "compact_boundary") {
-          summary.compactions++;
-          summary.compactedPreTokens += number(object(event.compactMetadata).preTokens);
-        } else if (subtype === "api_error" || string(event.level) === "error") summary.apiErrors++;
-      }
-    }
-    if (!active || outsideCwdFilter(summary.cwd)) continue;
-    for (const item of localTools.values()) {
-      const aggregate = claudeTools.get(item.label) || {
-        ...item,
-        outputs: 0,
-        bytes: 0,
-        maxBytes: 0,
-        truncated: 0,
-      };
-      aggregate.outputs += item.outputs;
-      aggregate.bytes += item.bytes;
-      aggregate.maxBytes = Math.max(aggregate.maxBytes, item.maxBytes);
-      aggregate.truncated += item.truncated;
-      claudeTools.set(item.label, aggregate);
-    }
-    for (const usage of requestUsage.values()) {
-      const cached = number(usage.cache_read_input_tokens);
-      const written = number(usage.cache_creation_input_tokens);
-      const prompt = number(usage.input_tokens) + cached + written;
-      summary.requests++;
-      summary.totalInput += prompt;
-      summary.cachedInput += cached;
-      summary.cacheWriteInput += written;
-      summary.totalOutput += number(usage.output_tokens);
-      summary.maxInput = Math.max(summary.maxInput, prompt);
-      if (summary.createdAt >= since) summary.firstInput ||= prompt;
-    }
-
-    summary.status = !summary.createdAt
-      ? "unknown"
-      : summary.createdAt < since
-        ? "resumed"
-        : "created";
-    claudeSessions.push(summary);
-
-    timeline.finish();
-    summary.time = timeline.time;
-    claudeRequests.push(...timeline.requests);
-    if (!summary.sidechain) claudeTasks.push(...timeline.tasks);
-    mergeToolTimes(claudeToolTimes, timeline.tools, summary.sidechain ? "subagent" : "main");
-  }
-}
-function claudeTrees(): ClaudeTree[] {
-  const map = new Map<string, ClaudeTree>();
-  for (const session of claudeSessions) {
-    const key = session.id || session.file,
-      tree = map.get(key) || {
-        sessionId: key,
-        project: session.project,
-        title: "",
-        mainInput: 0,
-        subagentInput: 0,
-        subagents: 0,
-        totalInput: 0,
-      };
-    if (session.sidechain) {
-      tree.subagents++;
-      tree.subagentInput += session.totalInput;
-    } else {
-      tree.mainInput += session.totalInput;
-      tree.title ||= session.firstUserMessage;
-    }
-    tree.totalInput += session.totalInput;
-    map.set(key, tree);
-  }
-  return [...map.values()]
-    .filter((item) => item.subagents > 0)
-    .sort((a, b) => b.totalInput - a.totalInput);
-}
-const claudeTaskTrees = claudeTrees();
-
-function quantiles(values: number[]): { p50: number; p90: number } {
-  const sorted = values.slice().sort((a, b) => a - b),
-    at = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] || 0;
-  return { p50: at(0.5), p90: at(0.9) };
-}
-function duration(ms: number): string {
-  const seconds = Math.round(ms / 1000);
-  if (ms < 10_000) return `${(ms / 1000).toFixed(1)}s`;
-  if (seconds < 60) return `${seconds}s`;
-  const pad = (value: number) => String(value).padStart(2, "0");
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${pad(seconds % 60)}s`;
-  return `${Math.floor(seconds / 3600)}h ${pad(Math.floor((seconds % 3600) / 60))}m`;
-}
-const percent = (part: number, whole: number): string =>
-  `${Math.round((100 * part) / Math.max(1, whole))}%`;
-function sumTime(items: Array<{ time: ClaudeTime }>): ClaudeTime {
-  const total = emptyTime();
-  for (const item of items)
-    for (const key of Object.keys(total) as Array<keyof ClaudeTime>) total[key] += item.time[key];
-  return total;
-}
-const topTool = (task: ClaudeTask): [string, number] | undefined =>
-  [...task.toolShare].sort((a, b) => b[1] - a[1])[0];
-const contextBuckets: Array<[number, string]> = [
-  [50_000, "under 50k"],
-  [150_000, "50k-150k"],
-  [300_000, "150k-300k"],
-  [600_000, "300k-600k"],
-  [Infinity, "600k+"],
-];
-function latencyRows(requests: ClaudeRequest[], group: (request: ClaudeRequest) => string) {
-  const groups = new Map<string, ClaudeRequest[]>();
-  for (const request of requests) {
-    const name = group(request);
-    if (!groups.has(name)) groups.set(name, []);
-    groups.get(name)!.push(request);
-  }
-  return [...groups].map(([name, items]) => {
-    const totalMs = items.reduce((sum, item) => sum + item.ms, 0),
-      output = items.reduce((sum, item) => sum + item.output, 0);
-    return {
-      group: name,
-      requests: items.length,
-      totalMs,
-      ...quantiles(items.map((item) => item.ms)),
-      meanOutput: Math.round(output / items.length),
-      outputPerSecond: Math.round(output / Math.max(1, totalMs / 1000)),
-    };
-  });
-}
-
-function timeReport(
-  main: Array<{ time: ClaudeTime }>,
-  subagents: Array<{ time: ClaudeTime }>,
-  tasks: ClaudeTask[],
-  tools: Map<string, ClaudeToolTime>,
-  requests: ClaudeRequest[],
-) {
-  const active = tasks.filter((item) => item.trigger === "human" && item.activeMs > 0);
-  return {
-    main: sumTime(main),
-    subagents: sumTime(subagents),
-    taskSpread: {
-      ...quantiles(active.map((item) => item.activeMs)),
-      max: Math.max(0, ...active.map((item) => item.activeMs)),
-    },
-    tasks: tasks.map(({ toolShare, ...task }) => ({
-      ...task,
-      topTool: topTool({ ...task, toolShare })?.[0] || "",
-    })),
-    tools: [...tools.values()].map(({ durations, ...item }) => ({
-      ...item,
-      ...quantiles(durations),
-    })),
-    models: latencyRows(requests, (item) => item.model).sort((a, b) => b.totalMs - a.totalMs),
-    contexts: latencyRows(
-      requests,
-      (item) => contextBuckets.find(([limit]) => item.input < limit)![1],
-    ).sort(
-      (a, b) =>
-        contextBuckets.findIndex(([, name]) => name === a.group) -
-        contextBuckets.findIndex(([, name]) => name === b.group),
-    ),
-  };
-}
-const codexTime = timeReport(
-  sessions.filter((item) => item.forkSource !== "subagent"),
-  sessions.filter((item) => item.forkSource === "subagent"),
-  codexTasks,
-  codexToolTimes,
-  codexRequests,
-);
-const claudeTime = timeReport(
-  claudeSessions.filter((item) => !item.sidechain),
-  claudeSessions.filter((item) => item.sidechain),
-  claudeTasks,
-  claudeToolTimes,
-  claudeRequests,
-);
-const {
-  main: claudeMainTime,
-  subagents: claudeSubagentTime,
-  taskSpread: claudeTaskSpread,
-  tools: claudeToolRows,
-  models: claudeModelRows,
-  contexts: claudeContextRows,
-} = claudeTime;
-const claudeHumanTasks = claudeTasks.filter(
-  (item) => item.trigger === "human" && item.activeMs > 0,
-);
-
-const totals = {
-  candidateFiles: candidates.length,
-  sessions: sessions.length,
-  turns: sessions.reduce((sum, item) => sum + item.turns, 0),
-  inheritedTurnCopies: [...turnOwners.values()]
-    .filter((turn) => turn.at >= since)
-    .reduce((sum, turn) => sum + turn.copies.size - 1, 0),
-  created: sessions.filter((item) => item.status === "created").length,
-  resumed: sessions.filter((item) => item.status === "resumed").length,
-  unknownStatus: sessions.filter((item) => item.status === "unknown").length,
-  forked: sessions.filter((item) => item.forked).length,
-  bytes: sessions.reduce((sum, item) => sum + item.bytes, 0),
-  parsed: sessions.reduce((sum, item) => sum + item.parsed, 0),
-  malformed: sessions.reduce((sum, item) => sum + item.malformed, 0),
-  unknown: sessions.reduce((sum, item) => sum + item.unknown, 0),
-  input: sessions.reduce((sum, item) => sum + item.totalInput, 0),
-  cachedInput: sessions.reduce((sum, item) => sum + item.cachedInput, 0),
-  output: sessions.reduce((sum, item) => sum + item.totalOutput, 0),
-  toolOutputs: sessions.reduce((sum, item) => sum + item.toolOutputs, 0),
-  unmatchedToolOutputs: sessions.reduce((sum, item) => sum + item.unmatchedToolOutputs, 0),
-};
-const claudeTotals = {
-  candidateFiles: claudeCandidates.length,
-  sessions: claudeSessions.length,
-  subagents: claudeSessions.filter((item) => item.sidechain).length,
-  created: claudeSessions.filter((item) => item.status === "created").length,
-  resumed: claudeSessions.filter((item) => item.status === "resumed").length,
-  bytes: claudeSessions.reduce((sum, item) => sum + item.bytes, 0),
-  parsed: claudeSessions.reduce((sum, item) => sum + item.parsed, 0),
-  malformed: claudeSessions.reduce((sum, item) => sum + item.malformed, 0),
-  requests: claudeSessions.reduce((sum, item) => sum + item.requests, 0),
-  input: claudeSessions.reduce((sum, item) => sum + item.totalInput, 0),
-  cachedInput: claudeSessions.reduce((sum, item) => sum + item.cachedInput, 0),
-  cacheWriteInput: claudeSessions.reduce((sum, item) => sum + item.cacheWriteInput, 0),
-  output: claudeSessions.reduce((sum, item) => sum + item.totalOutput, 0),
-  compactions: claudeSessions.reduce((sum, item) => sum + item.compactions, 0),
-  toolOutputs: claudeSessions.reduce((sum, item) => sum + item.toolOutputs, 0),
-  toolOutputBytes: claudeSessions.reduce((sum, item) => sum + item.toolOutputBytes, 0),
-  unmatchedToolOutputs: claudeSessions.reduce((sum, item) => sum + item.unmatchedToolOutputs, 0),
-};
-const report = {
-  window: { since, sinceMtime: sinceMtime ?? null },
-  harnesses: [...harnesses],
-  totals,
-  sessions,
-  commands: [...commands.values()],
-  taskTrees: trees,
-  taskTreeError: treeError,
-  time: codexTime,
-  claude: {
-    totals: claudeTotals,
-    sessions: claudeSessions,
-    tools: [...claudeTools.values()],
-    subagentTrees: claudeTaskTrees,
-    time: claudeTime,
-  },
-};
-if (args.has("json")) {
-  console.log(JSON.stringify(report, null, 2));
+if (args.has("episode")) {
+  await printEpisode(args.get("episode")!);
   process.exit(0);
 }
 
-console.log("Agent sessions");
-console.log(`Harnesses: ${[...harnesses].join(", ")}`);
-console.log(`Activity window: since ${new Date(since).toISOString()} (event timestamps)`);
-if (sinceMtime !== undefined)
-  console.log(`Diagnostic file prefilter: mtime since ${new Date(sinceMtime).toISOString()}`);
-if (harnesses.has("codex")) {
-  console.log("\nCodex\n");
-  console.log(
-    `Sessions with activity: ${totals.sessions}/${totals.candidateFiles} candidates (${totals.created} created, ${totals.resumed} resumed, ${totals.unknownStatus} unknown, ${totals.forked} forked)`,
-  );
-  console.log(`Serialized event bytes in window: ${totals.bytes.toLocaleString()}`);
-  console.log(
-    `Provider usage in window: ${totals.input.toLocaleString()} input, ${totals.cachedInput.toLocaleString()} cached input, ${totals.output.toLocaleString()} output`,
-  );
-  console.log(
-    `Coverage: ${totals.parsed.toLocaleString()} parsed, ${totals.malformed} malformed, ${totals.unknown} unknown, ${totals.unmatchedToolOutputs} unmatched tool outputs\n`,
-  );
-  console.log("Largest Task Trees\n");
-  if (trees.length)
-    table(trees.slice(0, limit), [
-      ["input usage", (x) => x.totalInput.toLocaleString()],
-      ["observed sessions", (x) => x.sessions],
-      ["observed desc", (x) => x.descendants],
-      ["forked", (x) => x.forkedSessions],
-      ["depth", (x) => x.maxDepth],
-      ["repeat request", (x) => x.repeatedRootRequest],
-      ["50k+ startup", (x) => x.highStartupDescendants],
-      ["root", (x) => short(x.title)],
-    ]);
-  else
-    console.log(
-      treeError
-        ? `Task-tree diagnostics unavailable: ${treeError}`
-        : "No multi-task trees detected in this window.",
-    );
-  console.log("\nLargest Sessions\n");
-  table(
-    sessions
-      .slice()
-      .sort((a, b) => b.bytes - a.bytes)
-      .slice(0, limit),
-    [
-      ["bytes", (x) => x.bytes.toLocaleString()],
-      ["input usage", (x) => x.totalInput.toLocaleString()],
-      ["usage", (x) => x.usageMode],
-      ["status", (x) => (x.forked ? `forked:${x.forkSource}` : x.status)],
-      ["first activity", (x) => new Date(x.firstActivity).toISOString()],
-      ["file", (x) => x.file],
-    ],
-  );
-  console.log("\nNoisiest Shell Commands\n");
-  table([...commands.values()].sort((a, b) => b.bytes - a.bytes).slice(0, limit), [
-    ["output bytes", (x) => x.bytes.toLocaleString()],
-    ["outputs", (x) => x.outputs],
-    ["declared runs", (x) => x.declared],
-    ["reported orig tokens", (x) => x.originalTokens.toLocaleString()],
-    ["trunc", (x) => x.truncated],
-    ["command", (x) => x.command],
-  ]);
-  console.log("\nHighest Startup Inputs\n");
-  table(
-    sessions
-      .filter((x) => x.firstInput)
-      .sort((a, b) => b.firstInput - a.firstInput)
-      .slice(0, limit),
-    [
-      ["first input usage", (x) => x.firstInput.toLocaleString()],
-      ["base bytes", (x) => x.baseInstructionBytes.toLocaleString()],
-      ["turn-context bytes", (x) => x.turnContextInstructionBytes.toLocaleString()],
-      ["injected user bytes", (x) => x.injectedUserBytes.toLocaleString()],
-      ["human request", (x) => short(x.firstUserMessage)],
-      ["images", (x) => `${x.imageMessages}/${x.imageBytes.toLocaleString()} B`],
-      ["file", (x) => x.file],
-    ],
-  );
-  console.log("\nWhere Codex Time Goes\n");
-  table(["active", "model", "tool", "compaction", "user", "idle", "stall"] as const, [
-    ["main sessions", (key) => duration(codexTime.main[key])],
-    ["subagents", (key) => duration(codexTime.subagents[key])],
-    ["category", (key) => key],
-  ]);
-  console.log(
-    `\nCodex turn active time: median ${duration(codexTime.taskSpread.p50)}, p90 ${duration(codexTime.taskSpread.p90)}, longest ${duration(codexTime.taskSpread.max)}`,
-  );
-  console.log("\nSlowest Codex Turns\n");
-  table(
-    codexTime.tasks
-      .slice()
-      .sort((a, b) => b.activeMs - a.activeMs)
-      .slice(0, limit),
-    [
-      ["active", (x) => duration(x.activeMs)],
-      ["model", (x) => duration(x.modelMs)],
-      ["tools", (x) => duration(x.toolMs)],
-      ["requests", (x) => x.requests],
-      ["tool calls", (x) => x.toolCalls],
-      ["top tool", (x) => x.topTool],
-      ["task", (x) => short(x.prompt)],
-      ["file", (x) => x.file],
-    ],
-  );
-  console.log("\nSlowest Codex Tools\n");
-  table(
-    codexTime.tools
-      .slice()
-      .sort((a, b) => b.wallMs - a.wallMs)
-      .slice(0, limit),
-    [
-      ["wall time", (x) => duration(x.wallMs)],
-      ["calls", (x) => x.calls],
-      ["p50", (x) => duration(x.p50)],
-      ["p90", (x) => duration(x.p90)],
-      ["max", (x) => duration(x.maxMs)],
-      ["scope", (x) => x.scope],
-      ["call", (x) => x.label],
-    ],
-  );
-  console.log("\nCodex Model Latency\n");
-  for (const [rows, label] of [
-    [codexTime.models, "model"],
-    [codexTime.contexts, "prompt size"],
-  ] as const)
-    table(rows, [
-      ["requests", (x) => x.requests],
-      ["total", (x) => duration(x.totalMs)],
-      ["p50", (x) => duration(x.p50)],
-      ["p90", (x) => duration(x.p90)],
-      ["mean output tokens", (x) => x.meanOutput],
-      ["output tok/s", (x) => x.outputPerSecond],
-      [label, (x) => x.group],
-    ]);
+const positive = (name: string, fallback: number): number => {
+  const value = Number(args.get(name) ?? fallback);
+  if (!Number.isFinite(value) || value <= 0) die(`--${name} must be a positive number.`);
+  return value;
+};
+const days = positive("days", 7);
+const limit = Math.floor(positive("limit", 10));
+const since = args.has("since") ? Date.parse(args.get("since")!) : Date.now() - days * 86_400_000;
+if (!Number.isFinite(since)) die(`--since must be a date: ${args.get("since")}`);
+const codexRoot = args.get("root") || join(home, ".codex", "sessions");
+const claudeRoot = args.get("claude-root") || join(home, ".claude_cliproxy", "projects");
+const harness = args.get("harness");
+if (harness && !["codex", "claude", "all"].includes(harness)) die(`--harness must be codex, claude, or all: ${harness}`);
+const wanted = (name: "codex" | "claude", root: string): boolean =>
+  harness === name || harness === "all" || (!harness && existsSync(root));
+const useCodex = wanted("codex", codexRoot);
+const useClaude = wanted("claude", claudeRoot);
+if (!useCodex && !useClaude) die(`No session roots found: ${codexRoot}, ${claudeRoot}`);
+const cwdFilter = args.has("cwd") ? normalized(args.get("cwd")!) : "";
+
+// Worktrees and clones of one repository count as one project.
+function project(cwd: string): string {
+  const path = cwd.replace(/\\/g, "/");
+  const worktree = path.match(/\/\.t3\/worktrees\/([^/]+)/) || path.match(/\/PhpstormProjects\/([^/]+)/);
+  return worktree ? worktree[1] : basename(path) || "(unknown)";
 }
-if (harnesses.has("claude")) {
-  console.log("\nClaude Code\n");
-  console.log(
-    `Sessions with activity: ${claudeTotals.sessions}/${claudeTotals.candidateFiles} candidates (${claudeTotals.created} created, ${claudeTotals.resumed} resumed, ${claudeTotals.subagents} subagent transcripts)`,
-  );
-  console.log(`Serialized event bytes in window: ${claudeTotals.bytes.toLocaleString()}`);
-  console.log(
-    `Provider usage in window: ${claudeTotals.input.toLocaleString()} prompt input (${claudeTotals.cachedInput.toLocaleString()} cache read, ${claudeTotals.cacheWriteInput.toLocaleString()} cache write), ${claudeTotals.output.toLocaleString()} output across ${claudeTotals.requests.toLocaleString()} requests`,
-  );
-  console.log(
-    `Tool output in window: ${claudeTotals.toolOutputBytes.toLocaleString()} bytes across ${claudeTotals.toolOutputs.toLocaleString()} results`,
-  );
-  console.log(
-    `Coverage: ${claudeTotals.parsed.toLocaleString()} parsed, ${claudeTotals.malformed} malformed, ${claudeTotals.unmatchedToolOutputs} unmatched tool outputs, ${claudeTotals.compactions} compactions\n`,
-  );
-  console.log("Largest Claude Sessions\n");
-  table(
-    claudeSessions
-      .slice()
-      .sort((a, b) => b.totalInput - a.totalInput)
-      .slice(0, limit),
-    [
-      ["input usage", (x) => x.totalInput.toLocaleString()],
-      ["cache read", (x) => x.cachedInput.toLocaleString()],
-      ["output", (x) => x.totalOutput.toLocaleString()],
-      ["requests", (x) => x.requests],
-      ["peak context", (x) => x.maxInput.toLocaleString()],
-      ["compactions", (x) => x.compactions],
-      ["kind", (x) => (x.sidechain ? "subagent" : x.status)],
-      ["file", (x) => short(x.file, 64)],
-    ],
-  );
-  console.log("\nSubagent Cost by Parent Session\n");
-  if (claudeTaskTrees.length)
-    table(claudeTaskTrees.slice(0, limit), [
-      ["total input", (x) => x.totalInput.toLocaleString()],
-      ["main input", (x) => x.mainInput.toLocaleString()],
-      ["subagent input", (x) => x.subagentInput.toLocaleString()],
-      [
-        "subagent share",
-        (x) => `${Math.round((100 * x.subagentInput) / Math.max(1, x.totalInput))}%`,
-      ],
-      ["subagents", (x) => x.subagents],
-      ["session", (x) => short(x.title || x.sessionId)],
-    ]);
-  else console.log("No subagent transcripts in this window.");
-  console.log("\nLargest Claude Tool Outputs\n");
-  table([...claudeTools.values()].sort((a, b) => b.bytes - a.bytes).slice(0, limit), [
-    ["output bytes", (x) => x.bytes.toLocaleString()],
-    ["outputs", (x) => x.outputs],
-    ["largest", (x) => x.maxBytes.toLocaleString()],
-    ["trunc", (x) => x.truncated],
-    ["call", (x) => x.label],
-  ]);
-  console.log("\nClaude Tool Output by Tool\n");
-  const byTool = new Map<string, { tool: string; outputs: number; bytes: number }>();
-  for (const item of claudeTools.values()) {
-    const aggregate = byTool.get(item.tool) || { tool: item.tool, outputs: 0, bytes: 0 };
-    aggregate.outputs += item.outputs;
-    aggregate.bytes += item.bytes;
-    byTool.set(item.tool, aggregate);
+
+const searchBinaries = new Set(["grep", "rg", "find", "fd", "ls", "tree", "locate", "which", "ag", "Grep", "Glob", "LS"]);
+const readBinaries = new Set(["cat", "head", "tail", "sed", "less", "bat", "nl", "wc", "jq"]);
+// Quick programs that never explain a slow or failing call, such as a trailing "; date".
+const quickPrograms = [
+  ..."date uptime pwd whoami basename dirname sort uniq cut tr break continue exit wait".split(" "),
+  ..."status log diff rev-parse branch show".split(" ").map((sub) => `git ${sub}`),
+];
+const lookupBinaries = new Set([...searchBinaries, ...readBinaries, ...quickPrograms]);
+const commandPrefixes = new Set(["command", "env", "exec", "nice", "nohup", "sudo", "time", "do", "then", "else"]);
+const subcommandBinaries = new Set(
+  "adb agent-device asc aws brew bun bunx cargo claude codex composer docker eas expo gh git go mise my-setup npm npx php pnpm python python3 system-tools uv xcrun yarn merge-queue decisions doctor".split(
+    " ",
+  ),
+);
+const scriptRunners = new Set(["run", "exec", "x", "artisan"]);
+const skipped = new Set(
+  "cd pushd popd set true false source . export echo printf for while until if case done fi esac [ [[ { } local read mkdir rm sleep tee".split(" "),
+);
+// The program a shell line runs, with the subcommand for multi-command CLIs ("git push", "mise run check").
+// Prefers the last program that is not just reading or searching: in "edit && check | tail" the check is what is slow or failing.
+function commandLabel(raw: string): string {
+  const labels = programLabels(raw);
+  return labels.findLast((label) => !lookupBinaries.has(label)) || labels[0] || short(raw, 40) || "(shell)";
+}
+// Heredoc bodies are data, not commands.
+const withoutHeredocs = (raw: string): string => raw.replace(/<<-?\s*['"]?(\w+)['"]?([^\n]*)\n[\s\S]*?\n\s*\1\b/g, "$2");
+function programLabels(raw: string): string[] {
+  const labels: string[] = [];
+  const statements = withoutHeredocs(raw)
+    .split(/\r?\n/)
+    .flatMap((line) => line.split(/&&|\|\||;/))
+    .map((part) => part.split("|")[0].trim())
+    .filter(Boolean);
+  for (const statement of statements) {
+    const tokens = statement.split(/\s+/);
+    // Older sessions wrapped commands in the retired `heavy-run --class checks -- <argv>`.
+    if (tokens[0] === "heavy-run" && tokens.includes("--")) tokens.splice(0, tokens.indexOf("--") + 1);
+    while (tokens.length && (commandPrefixes.has(tokens[0]) || /^[A-Za-z_]\w*=/.test(tokens[0]))) tokens.shift();
+    const binary = (tokens[0] || "").replace(/^['"(]+/, "").split("/").pop() || "";
+    if (!binary || skipped.has(binary) || !/^[A-Za-z0-9_.@+-]+$/.test(binary)) continue;
+    if (binary === "cat" && tokens[1]?.startsWith(">")) continue;
+    if (!subcommandBinaries.has(binary)) {
+      labels.push(binary);
+      continue;
+    }
+    const rest = tokens.slice(1).filter((token) => !token.startsWith("-") && !/^\d+$/.test(token));
+    const sub = rest[0] && /^[\w:.-]+$/.test(rest[0]) ? rest[0] : "";
+    const script = scriptRunners.has(sub) && rest[1] && /^[\w:.-]+$/.test(rest[1]) ? ` ${rest[1]}` : "";
+    labels.push(sub ? `${binary} ${sub}${script}` : binary);
   }
-  table([...byTool.values()].sort((a, b) => b.bytes - a.bytes).slice(0, limit), [
-    ["output bytes", (x) => x.bytes.toLocaleString()],
-    ["outputs", (x) => x.outputs],
-    ["tool", (x) => x.tool],
-  ]);
-  console.log("\nHighest Claude Startup Inputs\n");
-  table(
-    claudeSessions
-      .filter((x) => x.firstInput)
-      .sort((a, b) => b.firstInput - a.firstInput)
-      .slice(0, limit),
-    [
-      ["first request input", (x) => x.firstInput.toLocaleString()],
-      ["attachments", (x) => `${x.attachments}/${x.attachmentBytes.toLocaleString()} B`],
-      ["injected user bytes", (x) => x.injectedUserBytes.toLocaleString()],
-      ["images", (x) => `${x.imageMessages}/${x.imageBytes.toLocaleString()} B`],
-      ["human request", (x) => short(x.firstUserMessage)],
-      ["file", (x) => short(x.file, 64)],
-    ],
+  return labels;
+}
+
+// The first line that explains a failure, with paths, ids, and numbers stripped so the same error groups across sessions.
+const noise = /^(Exit code -?\d+|Script (failed|completed)\b.*|Wall time\b.*|Chunk ID\b.*|Original token count\b.*|Output:)$/i;
+// Error lines, not file content a compound command printed before it failed.
+const explains =
+  /^(\S+:\s*)?(error|fatal|fail(ed|ure)?|panic)\b|\b\w*(Error|Exception)\b:|\bnot found\b|no such|denied|invalid|cannot|can't|unable to|refused|blocked|unknown (option|command|flag|argument)|no matches found|parse error|^\(fail\)|\bN? ?fail\b/i;
+// The last line that explains a failure (summaries come last), with paths, ids, and numbers stripped so the same error groups
+// across sessions. Without one, the cause is the command alone.
+function errorMessage(output: string): string {
+  const lines = output
+    .replace(/\x1b\[[0-9;]*m/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => /[A-Za-z]/.test(line) && !noise.test(line) && !line.startsWith('{"chunk_id"'));
+  const line = lines.findLast((item) => explains.test(item)) || "";
+  return short(
+    line
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, "<id>")
+      .replace(/(?<![\w.-])(?:~|\.{1,2})?\/[^\s'"`:,()\]]+/g, "<path>")
+      .replace(/(?<![\w.<>-])[\w.-]+(?:\/[\w.-]+)+/g, "<path>")
+      .replace(/\b(?=[0-9a-f]*\d)[0-9a-f]{7,}\b/gi, "<id>")
+      .replace(/\d+(?:\.\d+)?/g, "N")
+      // zsh names the word it choked on: "no matches found: --include=*.ts".
+      .replace(/^\(eval\):N: (no matches found|parse error near|command not found)\b.*$/, "zsh: $1")
+      .replace(/^\(eval\):N: =+ not found$/, "zsh: unquoted = word not found"),
+    90,
   );
-  console.log("\nWhere Claude Time Goes\n");
-  console.log(
-    `Human tasks in main sessions: ${claudeHumanTasks.length}; active time median ${duration(claudeTaskSpread.p50)}, p90 ${duration(claudeTaskSpread.p90)}, longest ${duration(claudeTaskSpread.max)}\n`,
-  );
-  const categories: Array<[keyof ClaudeTime, string]> = [
-    ["active", "Active total"],
-    ["model", "Model responses"],
-    ["tool", "Foreground tool calls, including foreground subagents"],
-    ["subagent", "Background subagents after the turn ended"],
-    ["background", "Background commands and monitors after the turn ended"],
-    ["compaction", "Compaction"],
-    ["retry", "Failed API requests and retries"],
-    ["hook", "Hooks"],
-    ["stall", "Stalls: working gaps over 2h (excluded)"],
-    ["user", "Waiting for answers to agent questions (excluded)"],
-    ["idle", "Idle between turns (excluded)"],
-  ];
-  table(categories, [
-    ["main sessions", ([key]) => duration(claudeMainTime[key])],
-    [
-      "main share",
-      ([key]) =>
-        ["user", "idle", "stall"].includes(key)
-          ? "-"
-          : percent(claudeMainTime[key], claudeMainTime.active),
-    ],
-    ["subagents", ([key]) => duration(claudeSubagentTime[key])],
-    ["category", ([, label]) => label],
-  ]);
-  console.log("\nSlowest Claude Tasks\n");
-  table(
-    claudeHumanTasks
-      .slice()
-      .sort((a, b) => b.activeMs - a.activeMs)
-      .slice(0, limit),
-    [
-      ["active", (x) => duration(x.activeMs)],
-      ["model", (x) => duration(x.modelMs)],
-      ["tools", (x) => duration(x.toolMs)],
-      ["background", (x) => duration(x.backgroundMs)],
-      ["requests", (x) => x.requests],
-      ["tool calls", (x) => x.toolCalls],
-      [
-        "top tool",
-        (x) => {
-          const top = topTool(x);
-          return top ? `${short(top[0], 32)} (${duration(top[1])})` : "-";
-        },
-      ],
-      ["task", (x) => short(x.prompt, 56)],
-      ["file", (x) => short(x.file, 48)],
-    ],
-  );
-  for (const scope of ["main", "subagent"] as const) {
-    const heading = scope === "main" ? "Main Sessions" : "Subagents";
-    console.log(`\nSlowest Claude Tools in ${heading}\n`);
-    table(
-      claudeToolRows
-        .filter((x) => x.scope === scope)
-        .sort((a, b) => b.wallMs - a.wallMs)
-        .slice(0, limit),
-      [
-        ["wall time", (x) => duration(x.wallMs)],
-        [
-          "share",
-          (x) =>
-            percent(x.wallMs, scope === "main" ? claudeMainTime.active : claudeSubagentTime.active),
-        ],
-        ["calls", (x) => x.calls],
-        ["p50", (x) => duration(x.p50)],
-        ["p90", (x) => duration(x.p90)],
-        ["max", (x) => duration(x.maxMs)],
-        ["errors", (x) => x.errors],
-        ["timeouts", (x) => x.timeouts],
-        ["call", (x) => short(x.label, 40)],
-        ["slowest example", (x) => short(x.slowest, 48)],
-      ],
-    );
+}
+
+function walk(dir: string, accept: (name: string) => boolean): string[] {
+  const found: string[] = [];
+  for (const entry of readdirSync(dir).sort()) {
+    const path = join(dir, entry);
+    const stat = statSync(path);
+    if (stat.isDirectory()) found.push(...walk(path, accept));
+    else if (accept(entry) && stat.mtimeMs >= since) found.push(path);
   }
-  console.log("\nClaude Model Latency\n");
-  for (const [rows, label] of [
-    [claudeModelRows, "model"],
-    [claudeContextRows, "prompt size"],
-  ] as const) {
-    table(rows, [
-      ["requests", (x) => x.requests],
-      ["total", (x) => duration(x.totalMs)],
-      ["p50", (x) => duration(x.p50)],
-      ["p90", (x) => duration(x.p90)],
-      ["mean output tokens", (x) => x.meanOutput],
-      ["output tok/s", (x) => x.outputPerSecond],
-      [label, (x) => x.group],
-    ]);
-    console.log("");
+  return found.sort();
+}
+
+// Forked and resumed transcripts copy earlier calls; count each call once.
+const seenCalls = new Set<string>();
+const newSession = (file: string, harness: "claude" | "codex", subagent: boolean): Session => ({
+  file,
+  harness,
+  cwd: "",
+  subagent,
+  calls: [],
+  compactions: [],
+  requests: [],
+  turnTokens: [],
+  startupTokens: 0,
+});
+
+async function readClaude(file: string): Promise<Session> {
+  const session = newSession(file, "claude", file.split(sep).includes("subagents"));
+  const open = new Map<string, Call>();
+  let previous = 0,
+    inputAt = 0,
+    request: { id: string; model: string; start: number; end: number } | undefined;
+  const closeRequest = () => {
+    if (request) session.requests.push({ model: request.model, start: request.start, ms: request.end - request.start });
+    request = undefined;
+  };
+  let messageId = "";
+  for await (const { event, line } of jsonLines(file)) {
+    const at = time(event.timestamp);
+    if (!at) continue;
+    session.cwd ||= string(event.cwd);
+    const message = object(event.message);
+    const type = string(event.type);
+    if (type === "assistant" && message.model !== "<synthetic>") {
+      const id = string(message.id);
+      // Each model request is one turn; its context size is what every wasted turn costs.
+      if (id !== messageId) {
+        const usage = object(message.usage);
+        const context = number(usage.input_tokens) + number(usage.cache_read_input_tokens) + number(usage.cache_creation_input_tokens);
+        session.startupTokens ||= context;
+        session.turnTokens.push(context);
+        messageId = id;
+      }
+      if (request?.id !== id) {
+        closeRequest();
+        if (inputAt && at >= since) request = { id, model: string(message.model) || "(unknown)", start: inputAt, end: at };
+        inputAt = 0;
+      } else request.end = at;
+      for (const block of Array.isArray(message.content) ? message.content : []) {
+        const item = object(block);
+        if (item.type !== "tool_use" || !string(item.id) || at < since) continue;
+        const tool = string(item.name);
+        const input = object(item.input);
+        const command = tool === "Bash" ? string(input.command) : "";
+        const path = string(input.file_path) || string(input.notebook_path) || string(input.path);
+        const label =
+          tool === "Bash"
+            ? commandLabel(command)
+            : tool === "Read" && (input.offset || input.limit)
+              ? `Read ${path}@${input.offset ?? ""}:${input.limit ?? ""}`
+              : tool;
+        const turn = session.turnTokens.length - 1;
+        open.set(string(item.id), { id: string(item.id), tool, label, command, path, start: at, end: at, output: "", error: false, turn, line, endLine: line });
+      }
+    } else if (type === "user") {
+      closeRequest();
+      inputAt = at;
+      for (const block of Array.isArray(message.content) ? message.content : []) {
+        const item = object(block);
+        const call = open.get(string(item.tool_use_id));
+        if (item.type !== "tool_result" || !call) continue;
+        open.delete(call.id);
+        call.end = at;
+        call.endLine = line;
+        call.output = outputText(item.content);
+        call.error = item.is_error === true;
+        session.calls.push(call);
+      }
+    } else if (type === "system") {
+      closeRequest();
+      const subtype = string(event.subtype);
+      const turn = Math.max(0, session.turnTokens.length - 1);
+      if (subtype === "compact_boundary" && at >= since && previous) session.compactions.push({ at, ms: at - previous, line, turn });
+      if (subtype === "api_error" && at >= since) {
+        const output = short(outputText(event.content) || JSON.stringify(event.error ?? ""), 200);
+        session.calls.push({ id: string(event.uuid), tool: "API", label: "API error", command: "", path: "", start: at, end: at, output, error: true, turn, line, endLine: line });
+      }
+    }
+    previous = at;
+  }
+  closeRequest();
+  return session;
+}
+
+const exitCodes = /"exit_code"\s*:\s*(-?\d+)|Process exited with code (-?\d+)/g;
+async function readCodex(file: string): Promise<Session> {
+  const session = newSession(file, "codex", false);
+  const open = new Map<string, Call & { commands: string[] }>();
+  let previous = 0,
+    inputAt = 0,
+    model = "(unknown)",
+    turnOpen = false;
+  for await (const { event, line } of jsonLines(file)) {
+    const at = time(event.timestamp);
+    if (!at) continue;
+    const payload = object(event.payload);
+    const type = string(payload.type);
+    const turn = Math.max(0, session.turnTokens.length - 1);
+    if (event.type === "session_meta") {
+      session.cwd ||= string(payload.cwd);
+      session.subagent = Boolean(payload.forked_from_id || object(payload.source).subagent);
+    }
+    if (event.type === "turn_context") model = string(payload.model) || model;
+    if (event.type === "compacted" && at >= since && previous) session.compactions.push({ at, ms: at - previous, line, turn });
+    if (event.type === "event_msg" && type === "token_count") {
+      const context = number(object(object(payload.info).last_token_usage).input_tokens);
+      session.startupTokens ||= context;
+      if (session.turnTokens.length) session.turnTokens[session.turnTokens.length - 1] ||= context;
+    }
+    if (event.type === "response_item") {
+      const isCall = type === "function_call" || type === "custom_tool_call";
+      const isModel = isCall || type === "reasoning" || (type === "message" && payload.role === "assistant");
+      // A model item after new input starts a turn; several items of one response share it.
+      if (isModel && !turnOpen) {
+        session.turnTokens.push(0);
+        turnOpen = true;
+      }
+      if (isModel && inputAt && at >= since) session.requests.push({ model, start: inputAt, ms: at - inputAt });
+      if (isModel) inputAt = 0;
+      if (type === "message" && payload.role === "user") {
+        inputAt = at;
+        turnOpen = false;
+      }
+      if (isCall && at >= since) {
+        const name = string(payload.name);
+        const source = string(payload.arguments) || string(payload.input);
+        const leaf = name.split(/[.:/]/).pop() || name;
+        let commands: string[] = [];
+        if (leaf === "exec_command")
+          try {
+            commands = [string(object(JSON.parse(source)).cmd)];
+          } catch {
+            commands = [];
+          }
+        else if (leaf === "exec")
+          for (const match of source.matchAll(/\bcmd\s*:\s*("(?:[^"\\]|\\.)*")/g))
+            try {
+              commands.push(JSON.parse(match[1]) as string);
+            } catch {
+              commands.push(match[1].slice(1, -1));
+            }
+        const id = string(payload.call_id) || string(payload.id);
+        const command = commands[0] || "";
+        const label = commands.length ? commandLabel(command) : name;
+        const callTurn = session.turnTokens.length - 1;
+        open.set(id, { id, tool: commands.length ? "Bash" : name, label, command, path: "", start: at, end: at, output: "", error: false, turn: callTurn, line, endLine: line, commands });
+      }
+      if (type === "function_call_output" || type === "custom_tool_call_output") {
+        inputAt = at;
+        turnOpen = false;
+        const id = string(payload.call_id) || string(payload.id);
+        const call = open.get(id);
+        if (!call) continue;
+        open.delete(id);
+        call.end = at;
+        call.endLine = line;
+        call.output = outputText(payload.output);
+        const codes = [...call.output.matchAll(exitCodes)].map((match) => Number(match[1] ?? match[2]));
+        const failed = codes.findIndex((code) => code !== 0);
+        call.error = failed >= 0 || object(payload.output).isError === true || /^Script failed/m.test(call.output);
+        // A wrapper runs several commands; blame the one that failed.
+        if (failed >= 0 && call.commands[failed]) {
+          call.command = call.commands[failed];
+          call.label = commandLabel(call.command);
+        }
+        // Each wrapped command reports a JSON chunk; keep the failing command's own output.
+        const chunks = call.output.split("\n").filter((text) => text.startsWith('{"chunk_id"'));
+        if (failed >= 0 && chunks[failed])
+          try {
+            call.output = `Exit code ${codes[failed]}\n${string(object(JSON.parse(chunks[failed])).output)}`.trim();
+          } catch {
+            // Keep the whole wrapper output when a chunk is not valid JSON.
+          }
+        const { commands: _, ...plain } = call;
+        session.calls.push(plain);
+      }
+    }
+    previous = at;
+  }
+  return session;
+}
+
+const shells = new Set(["zsh", "bash", "sh", "eval", "(eval)"]);
+const userWait = /(^|[._/])(AskUserQuestion|ExitPlanMode|request_user_input\w*)$/;
+// Waiting on purpose, or tools whose duration only reflects a parallel batch they shared.
+const notSlow = /^(Agent|Task|Read|Grep|Glob|Edit|Write|MultiEdit|NotebookEdit|TodoWrite)$|wait$|_wait|delegate|spawn_agent/i;
+// Slow because the work is real: checks, builds, tests, QA, installs, deploys.
+const legitimateWork =
+  /\b(check|checks|signoff|premerge|test|tests|pest|phpunit|vitest|jest|lint|typecheck|tsc|build|qa|e2e|maestro|xcodebuild|gradlew|eas|install|deploy|heavy-run|merge-queue)\b/i;
+const pollLoop = /(^|[\s;&|(])(sleep\s+\d|until\s|while\s+(true|:))|\s--watch\b/;
+const helpCall = /(^|\s)--help(\s|$)|^\S+(\s+[\w:-]+)?\s+(help|-h|usage)\s*$/;
+const notFound = /No such file or directory|File does not exist|Path does not exist|does not exist\b|ENOENT|cannot find the path/i;
+// zsh prints "command not found: x", bash "x: command not found"; try zsh first.
+const commandMissing = [/command not found:\s*([\w.@+-]+)/i, /([\w.@+-]+): command not found/i, /executable file not found[^\n]*?"([\w.@+-]+)"/i];
+const emptyResult = /^(?:No matches found|No files found|Exit code 1|\s*)$/;
+const userRejected = /The user doesn't want to|user (?:rejected|denied)|Request interrupted by user|tool call was interrupted/i;
+const SLOW_TOOL_MS = 60_000;
+const SLOW_MODEL_MS = 120_000;
+const RECOVERY_CAP_MS = 5 * 60_000;
+const STALL_MS = 2 * 3_600_000;
+// An error episode runs from the failure through the retries and lookups that follow, until the first call that moves on.
+const EPISODE_MAX_CALLS = 12;
+// Episode refs start a few lines early so the reader sees what the agent meant to do.
+const CONTEXT_LINES = 4;
+const EPISODES_PER_CAUSE = 5;
+
+const subjectOf = (call: Call): string => call.command || call.path || call.tool;
+const evidence = (subject: string, output: string): string => `${short(subject, 60)} -> ${short(output, 58)}`;
+
+// Screenshots and logs are overwritten or grow between reads, so reading them again is not a re-read.
+const changing = /\.(png|jpe?g|gif|webp|log|out)(@|$)/i;
+function readTarget(call: Call): string {
+  const target =
+    call.tool === "Read"
+      ? call.label.startsWith("Read ")
+        ? call.label.slice(5)
+        : call.path
+      : call.tool === "Bash" && readBinaries.has(call.label) && call.command.trim().split(/\s+/).length <= 4 && !/[|;&<>]/.test(call.command)
+        ? call.command.trim().split(/\s+/).pop()!
+        : "";
+  return changing.test(target) ? "" : target;
+}
+
+function failureCause(call: Call, empty: boolean, where: string): [Category, string] {
+  const missing = commandMissing.map((pattern) => call.output.match(pattern)).find(Boolean);
+  const program = missing?.[1];
+  if (missing) return ["not-finding", `command not found: ${program && !shells.has(program) ? program : call.label}`];
+  if (notFound.test(call.output.slice(0, 500))) return ["not-finding", `missing path: ${call.label}${call.path ? ` in ${display(dirname(call.path))}` : ""}`];
+  if (empty) return ["not-finding", `${call.label} empty result (${where})`];
+  if (/hook (error|blocked)|blocked by hook|PreToolUse/i.test(call.output.slice(0, 300))) {
+    const guard = call.output.match(/\[([^\]\s]+)/)?.[1];
+    return ["errors", `hook refusal: ${guard ? basename(guard) : "unknown hook"}`];
+  }
+  const code = call.output.match(/"code"\s*:\s*"(\w+)"/)?.[1];
+  if (code) return ["errors", `${call.label} failed: ${code}`];
+  if (/Invalid parameters|InputValidationError/i.test(call.output)) return ["errors", `${call.label} failed: invalid parameters`];
+  const message = errorMessage(call.output);
+  // The shell refused the line before any program ran, so the program is not the cause.
+  if (message.startsWith("zsh: ")) return ["errors", `shell error: ${message}`];
+  return ["errors", `${call.tool === "API" ? "API error" : `${call.label} failed`}${message ? `: ${message}` : ""}`];
+}
+
+type Wait = { label: string; ms: number };
+// Turns one session's calls into friction episodes and legitimate waits.
+function detect(session: Session, parentReads: Map<string, number> | undefined): { friction: Friction[]; waits: Wait[] } {
+  const friction: Friction[] = [];
+  const waits: Wait[] = [];
+  const where = project(session.cwd);
+  const calls = session.calls.filter((call) => !userWait.test(call.tool)).sort((a, b) => a.start - b.start);
+  const reads = new Map<string, number>();
+  const compactions = session.compactions.map((item) => item.at);
+  const tokensOf = (turns: Set<number>) => [...turns].reduce((sum, turn) => sum + (session.turnTokens[turn] ?? 0), 0);
+  const refOf = (first: number, last: number) => `${display(session.file)}:${Math.max(1, first - CONTEXT_LINES)}-${Math.max(first, last)}`;
+  const add = (
+    category: Category,
+    cause: string,
+    wasted: Call[],
+    lostMs: number,
+    detail: string,
+    options: { retries?: number; first?: Call; end?: Call; noTurns?: boolean } = {},
+  ) => {
+    const turns = new Set(options.noTurns ? [] : wasted.map((call) => call.turn));
+    const first = options.first ?? wasted[0];
+    const end = options.end ?? wasted[wasted.length - 1];
+    friction.push({ category, cause, turns: turns.size, tokens: tokensOf(turns), lostMs, retries: options.retries ?? 0, file: session.file, ref: refOf(first.line, end.endLine), detail: short(detail, 120) });
+  };
+  const info = calls.map((call) => {
+    const isSearch = (searchBinaries.has(call.label) || searchBinaries.has(call.tool)) && !/\s-[ABC]\s?\d/.test(call.command);
+    const isHelp = call.tool === "Bash" && helpCall.test(call.command.split("\n")[0]);
+    const empty = isSearch && emptyResult.test(call.output.trim());
+    const ignored = call.end - call.start > STALL_MS || userRejected.test(call.output.slice(0, 200));
+    return { isSearch, isHelp, empty, ignored, failed: !ignored && (call.error || empty), lookup: isSearch || isHelp || Boolean(readTarget(call)) };
+  });
+  const stepOf = (index: number) => {
+    const call = calls[index];
+    const ms = call.end - call.start;
+    const next = calls.slice(index + 1).find((item) => item.start > call.start);
+    return Math.max(ms, Math.min(next ? next.start - call.start : ms, ms + RECOVERY_CAP_MS));
+  };
+  const trackRead = (call: Call): string => {
+    if (call.tool === "Edit" || call.tool === "Write") reads.delete(call.path);
+    return readTarget(call);
+  };
+  let chain: number[] = [];
+  const flushChain = (end?: Call) => {
+    // A subagent is often sent to search, so its chains are the work; its errors still count.
+    if (chain.length >= 3 && !session.subagent) {
+      const wasted = chain.slice(1).map((index) => calls[index]);
+      const lost = chain.slice(1).reduce((sum, index) => sum + stepOf(index), 0);
+      const tried = chain.map((index) => short(subjectOf(calls[index]), 40)).join(" | ");
+      add("searching", `search chain before first read (${where})`, wasted, lost, tried, { first: calls[chain[0]], end });
+    }
+    chain = [];
+  };
+  let consumedUntil = -1;
+
+  for (const [index, call] of calls.entries()) {
+    const ms = call.end - call.start;
+    const subject = subjectOf(call);
+    const { isSearch, isHelp, empty, ignored, failed } = info[index];
+    if (ignored) continue;
+    if (index <= consumedUntil) {
+      const target = trackRead(call);
+      if (target) reads.set(target, call.start);
+      continue;
+    }
+
+    if (failed) {
+      flushChain();
+      let stop = index + 1;
+      while (stop < calls.length && stop - index < EPISODE_MAX_CALLS && (info[stop].failed || info[stop].lookup || info[stop].ignored)) stop++;
+      consumedUntil = stop - 1;
+      const wasted = calls.slice(index, stop);
+      const recovery = calls[stop];
+      const last = wasted[wasted.length - 1];
+      const lostMs = Math.max(ms, Math.min(recovery ? recovery.start : last.end, last.end + RECOVERY_CAP_MS) - call.start);
+      const retries = wasted.slice(1).filter((item, offset) => info[index + 1 + offset].failed && subjectOf(item) === subject).length;
+      const [category, cause] = failureCause(call, empty, where);
+      add(category, cause, wasted, lostMs, evidence(subject, call.output), { retries, end: recovery });
+      continue;
+    }
+
+    if (call.tool === "Bash" && pollLoop.test(withoutHeredocs(call.command))) {
+      flushChain();
+      add("slowness", `polling: ${call.label}`, [call], ms, subject, { noTurns: true });
+      continue;
+    }
+    if (ms >= SLOW_TOOL_MS && !notSlow.test(call.tool)) {
+      flushChain();
+      if (legitimateWork.test(`${call.label} ${withoutHeredocs(call.command)}`)) waits.push({ label: call.label, ms });
+      else add("slowness", `slow tool: ${call.label}`, [call], ms, subject, { noTurns: true });
+      continue;
+    }
+    if (isHelp) {
+      add("searching", `help lookup: ${call.label}`, [call], stepOf(index), subject);
+      chain.push(index);
+      continue;
+    }
+    if (isSearch) {
+      chain.push(index);
+      continue;
+    }
+    flushChain(call);
+
+    const target = trackRead(call);
+    if (!target) continue;
+    const previous = reads.get(target);
+    reads.set(target, call.start);
+    if (previous !== undefined) {
+      const compacted = compactions.some((at) => at > previous && at < call.start);
+      add(compacted ? "wasted-work" : "searching", `re-read ${compacted ? "after compaction" : "same file"} (${where})`, [call], stepOf(index), display(target));
+    } else if (session.subagent && parentReads?.has(target) && parentReads.get(target)! < (calls[0]?.start ?? 0))
+      add("wasted-work", `subagent re-read parent's files (${where})`, [call], stepOf(index), display(target));
+  }
+  flushChain();
+
+  for (const item of session.compactions)
+    if (item.ms < STALL_MS)
+      friction.push({
+        category: "wasted-work",
+        cause: `compaction (${session.harness})`,
+        turns: 1,
+        tokens: session.turnTokens[item.turn] ?? 0,
+        lostMs: item.ms,
+        retries: 0,
+        file: session.file,
+        ref: refOf(item.line, item.line + CONTEXT_LINES),
+        detail: `compaction at ${new Date(item.at).toISOString()}`,
+      });
+  for (const request of session.requests)
+    if (request.ms >= SLOW_MODEL_MS && request.ms < STALL_MS) waits.push({ label: `model response: ${request.model}`, ms: request.ms });
+  return { friction, waits };
+}
+
+function median(values: number[]): number {
+  const sorted = values.filter(Boolean).sort((a, b) => a - b);
+  return sorted.length ? sorted[Math.floor(sorted.length / 2)] : 0;
+}
+function duration(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 1) return `${Math.round(ms / 1000)}s`;
+  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m`;
+}
+function amount(value: number): string {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  return value >= 1000 ? `${Math.round(value / 1000)}k` : String(value);
+}
+
+const inWindow = (session: Session): boolean =>
+  !cwdFilter || (Boolean(session.cwd) && (normalized(session.cwd) === cwdFilter || normalized(session.cwd).startsWith(cwdFilter + sep)));
+const sessions: Session[] = [];
+const events: Friction[] = [];
+const waits: Wait[] = [];
+const ingest = (session: Session, parentReads?: Map<string, number>) => {
+  session.calls = session.calls.filter((call) => {
+    const key = `${session.harness}:${call.id}`;
+    if (call.id && seenCalls.has(key)) return false;
+    seenCalls.add(key);
+    return true;
+  });
+  if (!inWindow(session) || (!session.calls.length && !session.requests.length && !session.compactions.length)) return;
+  sessions.push(session);
+  const found = detect(session, parentReads);
+  events.push(...found.friction);
+  waits.push(...found.waits);
+};
+
+if (useClaude) {
+  if (!existsSync(claudeRoot)) die(`Claude projects directory not found: ${claudeRoot}`);
+  // Sorted paths put <id>.jsonl before its <id>/subagents/ transcripts.
+  const parents = new Map<string, Map<string, number>>();
+  for (const file of walk(claudeRoot, (name) => name.endsWith(".jsonl"))) {
+    const session = await readClaude(file);
+    const parentKey = session.subagent ? file.slice(0, file.lastIndexOf(`${sep}subagents${sep}`)) : file.replace(/\.jsonl$/, "");
+    if (!session.subagent) {
+      const reads = new Map<string, number>();
+      for (const call of session.calls) {
+        const target = readTarget(call);
+        if (target && !reads.has(target)) reads.set(target, call.start);
+      }
+      parents.set(parentKey, reads);
+    }
+    ingest(session, session.subagent ? parents.get(parentKey) : undefined);
   }
 }
-console.log("\nLimits\n");
-if (harnesses.has("codex")) {
-  console.log(
-    "- Codex time uses owned turn boundaries and paired tool call/result timestamps. Parallel tools share wall time; idle, user waits, and working gaps over 2 hours are excluded. Model latency is estimated from the turn start or last tool result to the final response item, paired with usage snapshots; repeated snapshots do not create requests. Legacy logs without turn boundaries end at their last recorded event. Incomplete turns are limited to observed time.",
-  );
-  console.log(
-    "- Codex stable turn IDs select the oldest source session and exclude inherited copies. Legacy records without turn IDs cannot be deduplicated; last-only usage is summed.",
-  );
-  console.log(
-    "- Codex cumulative usage subtracts prewindow and inherited snapshots. A fork without stable turn IDs uses its first in-window snapshot as a baseline and omits that snapshot's usage.",
-  );
-  console.log(
-    "- Task-tree rows include only sessions observed in the window. Known descendants without window activity are not represented.",
-  );
-  console.log(
-    "- Session totals can include duplicate rollout files for one session; task-tree totals select the newest active copy per session ID.",
-  );
-  console.log(
-    "- functions.exec output bytes are split evenly across the shell commands declared in the same wrapper call.",
-  );
+if (useCodex) {
+  if (!existsSync(codexRoot)) die(`Codex sessions directory not found: ${codexRoot}`);
+  for (const file of walk(codexRoot, (name) => name.startsWith("rollout-") && name.endsWith(".jsonl"))) ingest(await readCodex(file));
 }
-if (harnesses.has("claude")) {
-  console.log(
-    "- Claude input counts the full prompt for each API response (fresh input, cache reads, and cache writes), deduplicated by message ID.",
-  );
-  console.log(
-    "- Claude tool output bytes measure the tool_result content returned to the model, not the on-disk record.",
-  );
-  console.log(
-    "- Subagent transcripts are stored under the parent session directory and are grouped by the parent session ID.",
-  );
-  console.log(
-    "- Claude time splits the wall time between consecutive transcript events by what the agent was waiting on. Parallel tool calls share a gap evenly, and a response is timed from the last input before it to its last written block. Bash commands with sleep, until, or --watch are grouped as wait loops.",
-  );
-  console.log(
-    "- A task starts at a human prompt after the previous turn ended. Idle gaps and answers to AskUserQuestion or ExitPlanMode are excluded from active time. Background time is a gap that ends in a task notification after the turn ended. Working gaps over 2 hours count as stalls and are excluded too.",
-  );
+
+const byWaste = (a: Totals, b: Totals) => b.turns - a.turns || b.tokens - a.tokens || b.lostMs - a.lostMs || b.count - a.count;
+const grouped = new Map<string, Friction[]>();
+for (const event of events) {
+  const key = `${event.category}|${event.cause}`;
+  grouped.set(key, [...(grouped.get(key) ?? []), event]);
 }
+const baseline = new Map<string, Cause>();
+if (args.has("baseline") && existsSync(normalized(args.get("baseline")!))) {
+  try {
+    // Reports from before turn counting rank a different way, so they cannot judge this run.
+    for (const item of JSON.parse(readFileSync(normalized(args.get("baseline")!), "utf8")).causes as Cause[])
+      if (typeof item.turns === "number") baseline.set(item.key, item);
+  } catch {
+    die(`--baseline is not a saved analyze-sessions report: ${args.get("baseline")}`);
+  }
+}
+const sum = (list: Friction[]): Totals => ({
+  count: list.length,
+  turns: list.reduce((total, item) => total + item.turns, 0),
+  tokens: list.reduce((total, item) => total + item.tokens, 0),
+  lostMs: list.reduce((total, item) => total + item.lostMs, 0),
+});
+// The costliest episodes first, one per session before a second from the same session.
+function pickEpisodes(list: Friction[]): Episode[] {
+  const sorted = [...list].sort((a, b) => b.turns - a.turns || b.lostMs - a.lostMs);
+  const firsts = sorted.filter((item, index) => sorted.findIndex((other) => other.file === item.file) === index);
+  const picked = [...firsts, ...sorted.filter((item) => !firsts.includes(item))].slice(0, EPISODES_PER_CAUSE);
+  return picked.map((item) => ({ ref: item.ref, turns: item.turns, detail: item.detail }));
+}
+const ranked: Cause[] = [...grouped.entries()]
+  .map(([key, list]) => {
+    const old = baseline.get(key);
+    return {
+      key,
+      category: list[0].category,
+      cause: list[0].cause,
+      ...sum(list),
+      sessions: new Set(list.map((item) => item.file)).size,
+      retries: list.reduce((total, item) => total + item.retries, 0),
+      episodes: pickEpisodes(list),
+      ...(baseline.size ? { before: { count: old?.count ?? 0, turns: old?.turns ?? 0, lostMs: old?.lostMs ?? 0 } } : {}),
+    };
+  })
+  .sort(byWaste);
+const categories = [...new Set(events.map((event) => event.category))]
+  .map((category) => ({ category, ...sum(events.filter((event) => event.category === category)) }))
+  .sort(byWaste);
+const waitTotals = new Map<string, { label: string; count: number; lostMs: number }>();
+for (const wait of waits) {
+  const total = waitTotals.get(wait.label) ?? { label: wait.label, count: 0, lostMs: 0 };
+  total.count++;
+  total.lostMs += wait.ms;
+  waitTotals.set(wait.label, total);
+}
+const waiting = [...waitTotals.values()].sort((a, b) => b.lostMs - a.lostMs);
+const startup = {
+  claude: median(sessions.filter((s) => s.harness === "claude" && !s.subagent).map((s) => s.startupTokens)),
+  codex: median(sessions.filter((s) => s.harness === "codex").map((s) => s.startupTokens)),
+};
+const gone = [...baseline.values()].filter((item) => !grouped.has(item.key)).sort(byWaste).slice(0, limit);
+const report = {
+  window: { since: new Date(since).toISOString(), harnesses: [useClaude && "claude", useCodex && "codex"].filter(Boolean), cwd: cwdFilter || null },
+  sessions: sessions.length,
+  friction: sum(events),
+  waitingMs: waits.reduce((total, wait) => total + wait.ms, 0),
+  startupTokensMedian: startup,
+  categories,
+  causes: ranked,
+  waiting,
+  gone: gone.map((item) => ({ key: item.key, before: { count: item.count, turns: item.turns ?? 0, lostMs: item.lostMs } })),
+};
+if (args.has("save")) {
+  const target = normalized(args.get("save")!);
+  mkdirSync(dirname(target), { recursive: true });
+  writeFileSync(target, `${JSON.stringify(report, null, 2)}\n`);
+}
+if (args.has("json")) {
+  console.log(JSON.stringify({ ...report, causes: ranked.slice(0, limit), waiting: waiting.slice(0, limit) }, null, 2));
+  process.exit(0);
+}
+
+const cost = (item: Totals) => `${item.turns} turns ${amount(item.tokens)} tok ${duration(item.lostMs)}`;
+console.log(
+  `analyze-sessions: ${sessions.length} sessions since ${report.window.since.slice(0, 10)}; friction ${report.friction.count} episodes, ${cost(report.friction)}; waiting on work ${duration(report.waitingMs)} (not ranked); startup prompt median claude ${amount(startup.claude)}, codex ${amount(startup.codex)} tokens`,
+);
+console.log(`by category: ${categories.map((item) => `${item.category} ${cost(item)}`).join("; ")}`);
+for (const [index, cause] of ranked.slice(0, limit).entries()) {
+  const before = cause.before ? ` (before ${cause.before.turns} turns ${cause.before.count}x ${duration(cause.before.lostMs)})` : "";
+  const retries = cause.retries ? ` ${cause.retries} retries` : "";
+  console.log(`${index + 1}. ${cost(cause)} ${cause.count}x ${cause.sessions} sessions${retries} [${cause.category}] ${cause.cause}${before}`);
+  for (const episode of cause.episodes) console.log(`   ${episode.ref} ${episode.turns}t ${episode.detail}`);
+}
+for (const item of waiting.slice(0, 5)) console.log(`waiting: ${item.label} ${duration(item.lostMs)} ${item.count}x`);
+for (const item of gone) console.log(`gone: ${item.key} (before ${item.turns ?? 0} turns ${item.count}x ${duration(item.lostMs)})`);

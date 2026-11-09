@@ -34,7 +34,7 @@ interface AdmissionOptions {
   log: (line: string) => Promise<void>;
 }
 
-/** The worker owns this bounded wait; it consumes no heavy-run reservation. */
+/** The worker owns this bounded wait for the host's sign-off lock and load. */
 export async function admitSignoff(options: AdmissionOptions) {
   const now = options.now ?? Date.now;
   const readLoad = options.readLoad ?? (() => loadavg()[0]!);

@@ -145,8 +145,8 @@ test("top footprint parsing handles compressed footprints, unit suffixes, and un
 test("each crossed threshold opens its own stable alert", () => {
   const busy = { command: "qemu-system-aarch64 -avd Awraq_Main", ageMinutes: 600, cpuLifetime: 90 };
 
-  expect(keys({ diskFreeGib: 15 })).toEqual([]);
-  expect(keys({ diskFreeGib: 9 })).toEqual(["low-disk"]);
+  expect(keys({ diskFreeGib: 45 })).toEqual([]);
+  expect(keys({ diskFreeGib: 39 })).toEqual(["low-disk"]);
   expect(keys({ pressureLevel: "warning" })).toEqual([]);
   expect(keys({ pressureLevel: "critical" })).toEqual(["memory-pressure"]);
   expect(keys({ swapUsedGib: 13, swapTotalGib: 14 })).toEqual([]);
@@ -174,9 +174,9 @@ test("a stopped watcher run raises its own warning apart from stopped leftovers"
   ]);
 });
 
-test("disk alerts open below 10 GiB and name the largest disk users", () => {
+test("disk alerts open below 40 GiB and name the largest disk users", () => {
   const largestDiskUsers = [{ path: "~/.t3/worktrees/app", gib: 150 }];
-  const [warning] = thresholdAlerts({ ...quiet, diskFreeGib: 9, largestDiskUsers });
+  const [warning] = thresholdAlerts({ ...quiet, diskFreeGib: 39, largestDiskUsers });
   const [critical] = thresholdAlerts({ ...quiet, diskFreeGib: 5 });
 
   expect(warning).toMatchObject({

@@ -322,9 +322,7 @@ main() {
   check_link merge-queue "$HOME/bin/merge-queue" "$MY_SETUP_ROOT/shell/merge-queue.zsh"
   check_link device-queue "$HOME/bin/device-queue" "$MY_SETUP_ROOT/shell/device-queue.zsh"
   check_link telegram-send "$HOME/bin/telegram-send" "$MY_SETUP_ROOT/shell/telegram-send.zsh"
-  check_link heavy-run "$HOME/bin/heavy-run" "$MY_SETUP_ROOT/shell/heavy-run.zsh"
-  check_link ci-runner "$HOME/bin/ci-runner" "$MY_SETUP_ROOT/shell/ci-runner.zsh"
-  check_link wait-for "$HOME/bin/wait-for" "$MY_SETUP_ROOT/shell/wait-for.zsh"
+  check_link verify "$HOME/bin/verify" "$MY_SETUP_ROOT/shell/verify.zsh"
   check_link claude-skills "$HOME/.claude_cliproxy/skills" "$HOME/.agents/skills"
 
   print_header "Managed skills"

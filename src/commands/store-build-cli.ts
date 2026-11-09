@@ -268,6 +268,18 @@ function buildLocally(
     profileValue(eas, options.profile, (profile) => profile.environment) ?? options.profile;
   checkSecrets(environment, options.allowMissing?.split(",").filter(Boolean) ?? []);
 
+  // sentry-cli 3 ignores a token whose source differs from the URL's, and the generated sentry.properties sets the
+  // URL. Passing the `sentry-cli login` token as SENTRY_AUTH_TOKEN makes it win over that file.
+  const sentryLogin = join(homedir(), ".sentryclirc");
+
+  if (!env.SENTRY_AUTH_TOKEN && existsSync(sentryLogin)) {
+    const token = readFileSync(sentryLogin, "utf8").match(/^\s*token\s*=\s*(\S+)/m)?.[1];
+
+    if (token) {
+      env.SENTRY_AUTH_TOKEN = token;
+    }
+  }
+
   env.EAS_LOCAL_BUILD_PLUGIN_PATH = resolveLocalBuildPlugin(env);
 
   const root = buildRoot();

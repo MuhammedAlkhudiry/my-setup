@@ -11,6 +11,7 @@ export interface HostLoad {
   maxLoad: number;
   busy?: boolean;
 }
+/** The least-loaded idle spare Mac, else main-mac when it is idle; busy or overloaded hosts are skipped. */
 export function chooseSignoffHost(samples: HostLoad[], excluded: string[] = []) {
   const eligible = samples.filter(
     (s) => !excluded.includes(s.host) && !s.busy && Number.isFinite(s.load) && s.load < s.maxLoad,
@@ -75,8 +76,12 @@ export async function dispatchSignoff(options: {
   const probe =
     options.probe ??
     (async (host: string) => {
-      if (host === "main-mac")
-        return { host, load: loadavg()[0]!, maxLoad: signoffPolicy().maxLoad };
+      if (host === "main-mac") {
+        // Busy, like a spare Mac's probe, while another queue sign-off holds this Mac.
+        const release = acquireQueueLock("signoff");
+        release?.();
+        return { host, load: loadavg()[0]!, maxLoad: signoffPolicy().maxLoad, busy: !release };
+      }
       const result = await options.execute("ssh", remoteSignoffCommand(host, true), {
         timeout: 20_000,
         reject: false,
@@ -160,7 +165,7 @@ export async function dispatchSignoff(options: {
 }
 
 export async function collectSignoffLogs(result: CandidateResult) {
-  const paths = new Set([
+  return collectLogs([
     result.log,
     ...(result.runs ?? []).flatMap((run) => [
       run.log,
@@ -168,6 +173,11 @@ export async function collectSignoffLogs(result: CandidateResult) {
       ...run.failures.map((failure) => failure.log),
     ]),
   ]);
+}
+
+/** Reads each log and every log it names, at most 64, for copying back to main-mac. */
+export async function collectLogs(start: string[]) {
+  const paths = new Set(start);
   const logs: Record<string, string> = {};
   for (const path of paths) {
     if (Object.keys(logs).length >= 64) break;

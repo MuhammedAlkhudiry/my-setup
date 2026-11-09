@@ -103,7 +103,7 @@ function matchingParen(text: string, open: number): number {
   return text.length;
 }
 
-const WRAPPERS = new Set(["sudo", "env", "command", "exec", "time", "nohup", "nice", "caffeinate", "heavy-run"]);
+const WRAPPERS = new Set(["sudo", "env", "command", "exec", "time", "nohup", "nice", "caffeinate"]);
 const SHELLS = new Set(["sh", "bash", "zsh"]);
 // Reserved words that start a command list, as in `for d in a; do rm -rf $d; done`.
 const KEYWORDS = new Set(["do", "then", "else", "elif", "{", "!"]);

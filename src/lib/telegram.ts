@@ -53,6 +53,7 @@ export function opsBot(): { botId: number; ownerId: number } {
 
 export async function telegramApi(method: string, body: object = {}): Promise<unknown> {
   const { token } = credentials();
+  let reason = "check credentials and connectivity";
 
   try {
     const response = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
@@ -61,14 +62,27 @@ export async function telegramApi(method: string, body: object = {}): Promise<un
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(15_000),
     });
-    const data = z.object({ ok: z.boolean(), result: z.unknown() }).parse(await response.json());
-    if (!response.ok || !data.ok) throw new Error();
+    const data = z
+      .object({ ok: z.boolean(), result: z.unknown().optional(), description: z.string().optional() })
+      .parse(await response.json());
+    if (!response.ok || !data.ok) {
+      reason = safeTelegramReason(data.description, token) ?? reason;
+      throw new Error();
+    }
 
     return data.result;
   } catch {
     // Fetch errors and API descriptions can contain credentials or webhook URLs.
-    throw new Error(`Telegram ${method} failed; check credentials and connectivity`);
+    throw new Error(`Telegram ${method} failed; ${reason}`);
   }
+}
+
+/** Keeps short "Bad Request: …" reasons such as "file is too big"; drops anything that could carry a URL or token. */
+function safeTelegramReason(description: string | undefined, token: string): string | undefined {
+  if (!description?.startsWith("Bad Request: ") || description.length > 120) return undefined;
+  if (/https?:|\/\/|bot\d/i.test(description) || description.includes(token)) return undefined;
+
+  return description.slice("Bad Request: ".length);
 }
 
 export function validateRelayUrl(value: string): void {

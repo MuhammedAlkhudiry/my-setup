@@ -20,6 +20,7 @@ import { z } from "zod";
 
 import { ACTIVE_PROJECTS } from "../../config/active-projects";
 import { MAC_WATCHER } from "../../config/mac-watcher";
+import { acquireQueueLock, mergeQueueDirectory } from "./merge-queue";
 import { readQueueState } from "./queue-store";
 import { timedCommand } from "./timed-command";
 import {
@@ -208,6 +209,97 @@ export function codexThreadsToDelete(
   );
 }
 
+/** The system-image folders an AVD `config.ini` names, such as `system-images/android-36/google_apis/arm64-v8a`. */
+export function avdSystemImages(config: string): string[] {
+  return [...config.matchAll(/^image\.sysdir\.\d+\s*=\s*(.+?)\/?\s*$/gm)].map((match) => match[1]!);
+}
+
+/** NDK versions a Gradle file, Gradle properties, Expo config, or React Native version catalog names. */
+export function ndkVersionsIn(text: string): string[] {
+  return [...text.matchAll(/ndkVersion["']?\s*[:=]\s*["']?(\d+(?:\.\d+)+)/g)].map(
+    (match) => match[1]!,
+  );
+}
+
+const playwrightBrowsersSchema = z.object({
+  browsers: z.array(
+    z.object({
+      name: z.string(),
+      revision: z.string(),
+      revisionOverrides: z.record(z.string(), z.string()).optional(),
+    }),
+  ),
+});
+
+/** Playwright's cache folder names for every build a `browsers.json` lists, such as `chromium_headless_shell-1248`. */
+export function playwrightBuildDirs(browsersJson: unknown): string[] {
+  const parsed = playwrightBrowsersSchema.safeParse(browsersJson);
+  if (!parsed.success) return [];
+  return parsed.data.browsers.flatMap((browser) =>
+    [browser.revision, ...Object.values(browser.revisionOverrides ?? {})].map(
+      (revision) => `${browser.name.replaceAll("-", "_")}-${revision}`,
+    ),
+  );
+}
+
+const PLAYWRIGHT_BUILD = /^(.+)-(\d+)$/;
+const VERSION = /^\d+(\.\d+)+$/;
+
+function compareVersions(a: string, b: string): number {
+  const left = a.split(".").map(Number);
+  const right = b.split(".").map(Number);
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+/** Old system images no AVD names; with no AVD found, nothing counts as unused. */
+export function systemImagesToDelete<T extends AgedEntry>(
+  images: T[],
+  options: { sdk: string; used: Set<string>; days: number; now: number },
+): T[] {
+  if (options.used.size === 0) return [];
+  return olderThan(images, options.days, options.now).filter(
+    (image) => !options.used.has(relative(options.sdk, image.path)),
+  );
+}
+
+/** Old NDKs no checkout names, except the newest; with no reference found, nothing counts as unused. */
+export function ndksToDelete<T extends AgedEntry>(
+  ndks: T[],
+  options: { referenced: Set<string>; days: number; now: number },
+): T[] {
+  if (options.referenced.size === 0) return [];
+  const versions = ndks.map((ndk) => basename(ndk.path)).filter((name) => VERSION.test(name));
+  const newest = versions.sort(compareVersions).at(-1);
+  return olderThan(ndks, options.days, options.now).filter((ndk) => {
+    const version = basename(ndk.path);
+    return VERSION.test(version) && version !== newest && !options.referenced.has(version);
+  });
+}
+
+/** Old Playwright builds nothing lists, except each browser's newest; with no reference found, nothing goes. */
+export function playwrightBuildsToDelete<T extends AgedEntry>(
+  builds: T[],
+  options: { referenced: Set<string>; days: number; now: number },
+): T[] {
+  if (options.referenced.size === 0) return [];
+  const newest = new Map<string, number>();
+  for (const build of builds) {
+    const match = basename(build.path).match(PLAYWRIGHT_BUILD);
+    if (match) newest.set(match[1]!, Math.max(newest.get(match[1]!) ?? 0, Number(match[2])));
+  }
+  return olderThan(builds, options.days, options.now).filter((build) => {
+    const name = basename(build.path);
+    const match = name.match(PLAYWRIGHT_BUILD);
+    return (
+      match !== null && !options.referenced.has(name) && Number(match[2]) !== newest.get(match[1]!)
+    );
+  });
+}
+
 export interface TempEntry extends AgedEntry {
   name: string;
   kind: "file" | "directory" | "other";
@@ -371,6 +463,9 @@ const reportSchema = z.object({
     .object({ files: z.number(), bytes: z.number() })
     .default({ files: 0, bytes: 0 }),
   temp: z.object({ entries: z.number(), bytes: z.number() }).default({ entries: 0, bytes: 0 }),
+  packageCachesPruned: z
+    .object({ entries: z.number(), bytes: z.number() })
+    .default({ entries: 0, bytes: 0 }),
   worktreesRemoved: z.array(z.object({ path: z.string(), bytes: z.number() })),
   worktreesArchived: z.array(z.object({ path: z.string(), archive: z.string() })).default([]),
   worktreesKept: z.array(z.object({ path: z.string(), reason: z.string(), idleDays: z.number() })),
@@ -404,6 +499,7 @@ export function summarizePrune(report: PruneReport): string {
     `low-space sessions archived ${report.lowSpaceArchived.files} (${gib(report.lowSpaceArchived.bytes)})`,
     `browser cache files removed ${report.browserCachesPruned.files} (${gib(report.browserCachesPruned.bytes)})`,
     `temp entries removed ${report.temp.entries} (${gib(report.temp.bytes)})`,
+    `package cache entries removed ${report.packageCachesPruned.entries} (${gib(report.packageCachesPruned.bytes)})`,
     `worktrees removed ${report.worktreesRemoved.length}`,
     `native builds cleared in ${report.nativeBuildsCleared.length} worktrees`,
     `codex threads deleted ${report.codexThreadsDeleted.threads} (${gib(report.codexThreadsDeleted.bytes)})`,
@@ -744,6 +840,258 @@ export async function pruneFileStorage(options: {
 // =============================================================================
 // Test databases
 // =============================================================================
+
+export interface ToolCacheRules {
+  packageCaches: {
+    days: number;
+    paths: readonly string[];
+    orphanStores: readonly { path: string; tool: string }[];
+  };
+  androidSdk: { path: string; days: number };
+  playwright: { path: string; days: number };
+}
+
+const NDK_REFERENCE_FILES = [
+  "android/build.gradle",
+  "android/app/build.gradle",
+  "android/gradle.properties",
+  "app.json",
+  "node_modules/react-native/gradle/libs.versions.toml",
+  "node_modules/.bun/react-native@*/node_modules/react-native/gradle/libs.versions.toml",
+];
+const PLAYWRIGHT_REFERENCE_FILES = [
+  "node_modules/playwright-core/browsers.json",
+  "node_modules/.bun/playwright-core@*/node_modules/playwright-core/browsers.json",
+];
+/** Global installs nest playwright-core inside the tool that needs it. */
+const GLOBAL_PLAYWRIGHT_REFERENCE_FILES = [
+  ...PLAYWRIGHT_REFERENCE_FILES,
+  "node_modules/*/node_modules/playwright-core/browsers.json",
+];
+
+/** Files matching `patterns` in each root and its direct subfolders, such as a monorepo's apps. */
+async function filesIn(roots: string[], patterns: string[], nested = true): Promise<string[]> {
+  const found: string[] = [];
+  for (const root of roots) {
+    if (!existsSync(root)) continue;
+    for (const pattern of nested ? [...patterns, ...patterns.map((p) => `*/${p}`)] : patterns) {
+      const glob = new Bun.Glob(pattern);
+      for await (const path of glob.scan({
+        cwd: root,
+        dot: true,
+        onlyFiles: true,
+        followSymlinks: false,
+        throwErrorOnBrokenSymlink: false,
+      }))
+        found.push(join(root, path));
+    }
+  }
+  return found;
+}
+
+/** Leaf system-image folders, `system-images/<api>/<tag>/<abi>`, aged by their newest direct entry. */
+async function systemImages(sdk: string): Promise<AgedEntry[]> {
+  const images: AgedEntry[] = [];
+  const root = join(sdk, "system-images");
+  if (!existsSync(root)) return images;
+  for (const api of await readdir(root, { withFileTypes: true })) {
+    if (!api.isDirectory()) continue;
+    for (const tag of await readdir(join(root, api.name), {
+      withFileTypes: true,
+    })) {
+      if (!tag.isDirectory()) continue;
+      const abis = await childrenWithAge(join(root, api.name, tag.name));
+      images.push(...abis.filter((abi) => statSync(abi.path).isDirectory()));
+    }
+  }
+  return images;
+}
+
+/** Every system image the user's AVDs name; throws when an AVD's config cannot be read, so nothing goes. */
+async function usedSystemImages(home: string): Promise<Set<string>> {
+  const used = new Set<string>();
+  const avdHome = join(home, ".android/avd");
+  if (!existsSync(avdHome)) return used;
+  for (const name of await readdir(avdHome)) {
+    if (!name.endsWith(".ini")) continue;
+    const pointer = await readFile(join(avdHome, name), "utf8");
+    const avd =
+      pointer.match(/^path=(.+)$/m)?.[1]?.trim() ?? join(avdHome, `${name.slice(0, -4)}.avd`);
+    for (const image of avdSystemImages(await readFile(join(avd, "config.ini"), "utf8")))
+      used.add(image);
+  }
+  return used;
+}
+
+/** Playwright builds listed by checkouts, global tools, and the installs Playwright itself links. */
+async function referencedPlaywrightBuilds(
+  home: string,
+  cache: string,
+  checkouts: string[],
+): Promise<Set<string>> {
+  const files = await filesIn(checkouts, PLAYWRIGHT_REFERENCE_FILES);
+  const miseNode = join(home, ".local/share/mise/installs/node");
+  const globalRoots = [
+    join(home, ".bun/install/global"),
+    ...(existsSync(miseNode)
+      ? (await readdir(miseNode)).map((version) => join(miseNode, version, "lib"))
+      : []),
+    "/opt/homebrew/lib",
+    "/usr/local/lib",
+  ];
+  files.push(...(await filesIn(globalRoots, GLOBAL_PLAYWRIGHT_REFERENCE_FILES, false)));
+  const links = join(cache, ".links");
+  if (existsSync(links)) {
+    for (const link of await readdir(links)) {
+      const target = (await readFile(join(links, link), "utf8")).trim();
+      if (existsSync(join(target, "browsers.json"))) files.push(join(target, "browsers.json"));
+    }
+  }
+
+  const referenced = new Set<string>();
+  for (const file of files) {
+    const parsed = await readFile(file, "utf8")
+      .then((text) => JSON.parse(text) as unknown)
+      .catch(() => undefined);
+    for (const dir of playwrightBuildDirs(parsed)) referenced.add(dir);
+  }
+  return referenced;
+}
+
+/** Removes `path`'s parents while empty, stopping before `stop`. */
+async function removeEmptyDirsUpTo(path: string, stop: string): Promise<void> {
+  let dir = dirname(path);
+  while (dir.startsWith(`${stop}${sep}`)) {
+    if ((await readdir(dir)).length > 0) return;
+    await rmdir(dir);
+    dir = dirname(dir);
+  }
+}
+
+/**
+ * Package-manager cache entries, orphaned package stores, Android SDK parts no emulator or checkout uses, and
+ * Playwright builds nothing lists. `checkouts` are every checkout whose files may name an NDK or Playwright build.
+ */
+export async function pruneToolCaches(options: {
+  home: string;
+  now: number;
+  dryRun: boolean;
+  openPaths: Set<string>;
+  checkouts: string[];
+  rules?: ToolCacheRules;
+  toolInstalled?: (tool: string) => boolean;
+}): Promise<
+  Pick<PruneReport, "deleted" | "packageCachesPruned" | "freedBytes" | "skipped" | "errors">
+> {
+  const { home, now, dryRun, openPaths, checkouts } = options;
+  const rules: ToolCacheRules = options.rules ?? MAC_WATCHER.storage;
+  const toolPath = [
+    process.env.PATH,
+    join(home, ".local/share/mise/shims"),
+    join(home, ".bun/bin"),
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+  ].join(":");
+  const toolInstalled =
+    options.toolInstalled ?? ((tool: string) => Bun.which(tool, { PATH: toolPath }) !== null);
+  const result: Awaited<ReturnType<typeof pruneToolCaches>> = {
+    deleted: [],
+    packageCachesPruned: { entries: 0, bytes: 0 },
+    freedBytes: 0,
+    skipped: [],
+    errors: [],
+  };
+  const step = async (label: string, work: () => Promise<void>) => {
+    try {
+      await work();
+    } catch (error) {
+      result.errors.push(
+        `${label}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 300),
+      );
+    }
+  };
+  const remove = async (path: string, stop?: string) => {
+    const bytes = await sizeBytes(path);
+    if (!dryRun) {
+      await rm(path, { recursive: true, force: true });
+      if (stop) await removeEmptyDirsUpTo(path, stop);
+    }
+    result.deleted.push({ path, bytes });
+    result.freedBytes += bytes;
+  };
+
+  for (const path of rules.packageCaches.paths) {
+    await step(path, async () => {
+      const stale = olderThan(
+        await childrenWithAge(join(home, path)),
+        rules.packageCaches.days,
+        now,
+      ).filter((entry) => !isInUse(entry.path, openPaths));
+      if (stale.length === 0) return;
+      const bytes = await totalSizeBytes(stale.map((entry) => entry.path));
+      if (!dryRun)
+        for (const entry of stale) await rm(entry.path, { recursive: true, force: true });
+      result.packageCachesPruned.entries += stale.length;
+      result.packageCachesPruned.bytes += bytes;
+      result.freedBytes += bytes;
+    });
+  }
+
+  for (const store of rules.packageCaches.orphanStores) {
+    await step(store.path, async () => {
+      const path = join(home, store.path);
+      if (!existsSync(path) || toolInstalled(store.tool) || isInUse(path, openPaths)) return;
+      await remove(path);
+    });
+  }
+
+  const sdk = join(home, rules.androidSdk.path);
+  if (existsSync(sdk)) {
+    await step("android system images", async () => {
+      const unused = systemImagesToDelete(await systemImages(sdk), {
+        sdk,
+        used: await usedSystemImages(home),
+        days: rules.androidSdk.days,
+        now,
+      });
+      for (const image of unused.filter((image) => !isInUse(image.path, openPaths)))
+        await remove(image.path, join(sdk, "system-images"));
+    });
+
+    await step("android ndks", async () => {
+      const referenced = new Set<string>();
+      for (const file of await filesIn(checkouts, NDK_REFERENCE_FILES)) {
+        const text = await readFile(file, "utf8").catch(() => "");
+        for (const version of ndkVersionsIn(text)) referenced.add(version);
+      }
+      const unused = ndksToDelete(await childrenWithAge(join(sdk, "ndk")), {
+        referenced,
+        days: rules.androidSdk.days,
+        now,
+      });
+      for (const ndk of unused.filter((ndk) => !isInUse(ndk.path, openPaths)))
+        await remove(ndk.path);
+    });
+  }
+
+  const playwright = join(home, rules.playwright.path);
+  if (existsSync(playwright)) {
+    await step("playwright browsers", async () => {
+      const builds = (await childrenWithAge(playwright)).filter((entry) =>
+        statSync(entry.path).isDirectory(),
+      );
+      const unused = playwrightBuildsToDelete(builds, {
+        referenced: await referencedPlaywrightBuilds(home, playwright, checkouts),
+        days: rules.playwright.days,
+        now,
+      });
+      for (const build of unused.filter((build) => !isInUse(build.path, openPaths)))
+        await remove(build.path);
+    });
+  }
+
+  return result;
+}
 
 type MysqlQuery = (sql: string) => Promise<string[][] | undefined>;
 
@@ -1387,7 +1735,11 @@ export async function archiveWorktree(options: {
 }
 
 /** Reinstallable ignored folders; any change anywhere in the checkout protects all of them. */
-export async function idleNativeBuilds(worktree: string, now: number): Promise<string[]> {
+export async function idleNativeBuilds(
+  worktree: string,
+  now: number,
+  options: { dependencies?: boolean } = {},
+): Promise<string[]> {
   const rule = MAC_WATCHER.storage.nativeBuilds;
   if (await cleanupFilesChangedRecently(worktree, now, undefined, rule.idleHours * HOUR_MS))
     return [];
@@ -1410,7 +1762,9 @@ export async function idleNativeBuilds(worktree: string, now: number): Promise<s
     rule,
     tracked.stdout.split("\0").filter(Boolean),
   );
-  const paths = [...new Set([...outputs, ...dependencyDirs])];
+  const paths = [
+    ...new Set([...outputs, ...(options.dependencies === false ? [] : dependencyDirs)]),
+  ];
 
   return paths
     .filter((path) => !paths.some((parent) => parent !== path && path.startsWith(parent)))
@@ -1418,14 +1772,32 @@ export async function idleNativeBuilds(worktree: string, now: number): Promise<s
 }
 
 /**
- * A device lease's agent and a heavy run's command keep their checkout open as a working directory, so the open-path
- * check protects exactly the checkout they use. Fail closed only when a lease holder is unknown or a legacy host run
- * is active, since neither names a checkout. Merge candidates live in the queue's own clone, never in these checkouts.
+ * A device lease's agent keeps its checkout open as a working directory, so the open-path check protects exactly the
+ * checkout it uses. Fail closed only when a lease holder is unknown, since it names no checkout. Merge candidates live
+ * in the queue's own clone, never in these checkouts.
  */
 export function dependencyPruneLeasesIdle(queue = readQueueState()): boolean {
   return (
-    Object.values(queue.leases).every((lease) => lease.agentPid > 0) && queue.host.active === null
+    Object.values(queue.leases).every((lease) => lease.agentPid > 0)
   );
+}
+
+/** The merge queue's candidate and update checkouts, in one repository's folder or across all of them. */
+async function mergeQueueCheckouts(repositoryRoot?: string): Promise<string[]> {
+  const candidates = join(mergeQueueDirectory(), "candidates");
+  const roots = repositoryRoot
+    ? [repositoryRoot]
+    : existsSync(candidates)
+      ? (await readdir(candidates)).map((slug) => join(candidates, slug))
+      : [];
+  const checkouts: string[] = [];
+  for (const root of roots) {
+    if (!existsSync(root) || !statSync(root).isDirectory()) continue;
+    for (const name of await readdir(root)) {
+      if (name !== "repo" && existsSync(join(root, name, ".git"))) checkouts.push(join(root, name));
+    }
+  }
+  return checkouts;
 }
 
 // =============================================================================
@@ -1451,6 +1823,7 @@ export async function pruneStorage(options: {
     lowSpaceArchived: { files: 0, bytes: 0 },
     browserCachesPruned: { files: 0, bytes: 0 },
     temp: { entries: 0, bytes: 0 },
+    packageCachesPruned: { entries: 0, bytes: 0 },
     worktreesRemoved: [],
     worktreesArchived: [],
     worktreesKept: [],
@@ -1484,9 +1857,12 @@ export async function pruneStorage(options: {
     return report;
   }
 
-  const clearIdleBuilds = async (checkout: string) => {
+  const clearIdleBuilds = async (
+    checkout: string,
+    buildOptions: { dependencies?: boolean } = {},
+  ) => {
     if (!dependencyPruneLeasesIdle() || isInUse(checkout, openPaths)) return;
-    const builds = await idleNativeBuilds(checkout, now);
+    const builds = await idleNativeBuilds(checkout, now, buildOptions);
     if (builds.length === 0) return;
     if (!dryRun) {
       const freshOpen = await listOpenPaths();
@@ -1613,6 +1989,55 @@ export async function pruneStorage(options: {
     report.freedBytes += result.freedBytes;
     report.skipped.push(...result.skipped);
     report.errors.push(...result.errors);
+  });
+
+  await attempt("tool caches", async () => {
+    const checkouts = new Set(await mergeQueueCheckouts());
+    for (const project of STORAGE_WORKTREE_PROJECTS) {
+      if (!existsSync(project.canonicalRoot)) continue;
+      const listed = await run("git", [
+        "-C",
+        project.canonicalRoot,
+        "worktree",
+        "list",
+        "--porcelain",
+      ]);
+      if (listed.exitCode !== 0) throw new Error(`cannot list worktrees for ${project.name}`);
+      for (const tree of parseWorktreeList(listed.stdout)) checkouts.add(tree.path);
+    }
+    const result = await pruneToolCaches({
+      home,
+      now,
+      dryRun,
+      openPaths,
+      checkouts: [...checkouts],
+    });
+    report.deleted.push(...result.deleted);
+    report.packageCachesPruned = result.packageCachesPruned;
+    report.freedBytes += result.freedBytes;
+    report.skipped.push(...result.skipped);
+    report.errors.push(...result.errors);
+  });
+
+  // Build output only: the queue reuses installed packages on every run. Holding the repository's worker lock keeps a
+  // queue run from starting in a checkout while it is being cleared, and a run already going keeps its checkouts.
+  await attempt("merge queue build outputs", async () => {
+    const root = join(mergeQueueDirectory(), "candidates");
+    if (!existsSync(root)) return;
+    for (const slug of await readdir(root)) {
+      const checkouts = await mergeQueueCheckouts(join(root, slug));
+      if (checkouts.length === 0) continue;
+      const release = acquireQueueLock(`worker-${slug}`);
+      if (!release) {
+        report.skipped.push(`merge queue ${slug}: a queue run is using its checkouts`);
+        continue;
+      }
+      try {
+        for (const checkout of checkouts) await clearIdleBuilds(checkout, { dependencies: false });
+      } finally {
+        release();
+      }
+    }
   });
 
   const codexState = codexDatabase(home, "state");

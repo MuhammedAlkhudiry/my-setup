@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { parseMemoryPressure } from "../lib/host-capacity";
+import { parseMemoryPressure } from "../lib/host-load";
 
 /**
  * Mac resource watcher. `run` is the scheduled pass and `guard` the minute-by-minute CPU guard, each started by its own
@@ -547,7 +547,7 @@ async function reapDevices(): Promise<StoppedDevice[]> {
   }
 }
 
-/** Only main-mac's T3 holds the Housekeeper thread; spare Macs log their stops without messaging. */
+/** Only main-mac's T3 holds the keeper threads; leftover stops go to the Ops keeper, and spare Macs only log theirs. */
 async function notifyHousekeeper(host: string, message: string): Promise<void> {
   if (host !== "main-mac") return;
   try {

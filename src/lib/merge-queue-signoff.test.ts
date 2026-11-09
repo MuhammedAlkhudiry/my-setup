@@ -113,14 +113,14 @@ test("a deterministic-looking failure under a mid-run load spike retries once an
 test("nested stage logs explain an all-passing PHP suite rejected by timing or coverage", async () => {
   const logs = new Map([
     ["/gate.log", "FAIL family-tree:pest log=/stage.log"],
-    ["/stage.log", "heavy-run: failed; log: /php.log"],
+    ["/stage.log", "backend:test failed; log: /php.log"],
     [
       "/php.log",
       "Tests: 3616 passed (9712 assertions)\n::error title=PHP test timing regression::6.5s exceeds 5.00s: example test",
     ],
   ]);
   const result = await signoffDiagnostics(
-    "heavy-run: failed; log: /gate.log",
+    "signoff failed; log: /gate.log",
     "/fallback.log",
     async (path) => logs.get(path)!,
   );
@@ -240,7 +240,7 @@ test("the --json receipt yields per-check timing and FAIL lines for diagnostics"
     ],
     errors: [{ item: "status-post", log: "/post.log" }],
   });
-  const parsed = parseSignoffReceipt(`heavy-run: waiting\n${receipt}\n`);
+  const parsed = parseSignoffReceipt(`signoff starting\n${receipt}\n`);
   expect(parsed?.receipt).toBe(receipt);
   expect(parsed?.checks.map((check) => check.task)).toEqual(["backend:test", "docs:check"]);
   expect(parsed?.failures).toBe(

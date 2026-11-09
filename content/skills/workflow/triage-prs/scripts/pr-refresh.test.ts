@@ -84,15 +84,6 @@ if(existsSync(root+'/fail-'+a[1])) process.exit(1); }
 `,
     { mode: 0o755 },
   );
-  writeFileSync(
-    join(bin, "heavy-run"),
-    `#!${process.execPath}
-const {spawnSync} = require('node:child_process');
-const a=process.argv.slice(2); const result=spawnSync(a[a.indexOf('--')+1],a.slice(a.indexOf('--')+2),{encoding:'utf8'});
-if(a.includes('--json')) { const log=process.env.FIXTURE+'/heavy.log'; require('node:fs').writeFileSync(log,result.stdout+result.stderr); console.log(JSON.stringify({log,childExitCode:result.status})); } else { process.stdout.write(result.stdout); process.stderr.write(result.stderr); } process.exit(result.status);
-`,
-    { mode: 0o755 },
-  );
   const invoke = (...extra: string[]) => {
     const result = Bun.spawnSync(
       [

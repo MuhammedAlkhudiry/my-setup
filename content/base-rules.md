@@ -75,7 +75,8 @@
   <!-- /profile -->
 - **CODEX-WORK** — As Claude, use Codex only for image generation and browser work other than QA, and delegate everything else to Claude
   subagents (native or the T3 `claudeAgent_pool` instance); Claude keeps browser QA; follow $browser-simulator-routing. As Codex, do all
-  work yourself or with Codex subagents; never hand it to Claude.
+  work yourself or with Codex subagents; never hand it to Claude. UI work (screens, layouts, styling, visual design) always goes to
+  Claude, even where a role or brief routes other work to Codex; as Codex, return UI work to the caller instead of doing it.
   <!-- profile:personal -->
 - **OPENROUTER** — For occasional calls outside installed agents, use OpenRouter with `$OPENROUTER_API_KEY` from local secrets. Choose the
   cheapest capable model; never route frontier models (Claude, GPT, Gemini Pro) through it; Gemini image-generation models are
@@ -120,7 +121,8 @@ Use these projects as references when the user mentions them.
   <!-- /profile -->
 - **SOFT-DECISIONS** — Recorded decisions are history and defaults. Before changing behavior in an area, find them with
   `decisions search "<task>" --keywords "<terms>"`. Follow them unless new information or direction warrants a deliberate
-  change; update or delete the record on the same branch.
+  change; update or delete the record on the same branch. Decisions never limit talk: when discussing ideas or options, propose freely
+  and never rule an idea out or frame it as blocked because a decision exists; they apply only once work changes behavior.
 - **AGENT-PROMPTS** — Assume other agents share your skills and instructions. Write only the task and context, never copied system prompts,
   rules, `AGENTS.md`, `CLAUDE.md`, or skill text. Refer to relevant skills by name.
 - **AGENT-MODES** — Start subagents, delegated tasks, and threads in your runtime mode, never a command-approval mode: unattended approvals
@@ -134,7 +136,7 @@ Use these projects as references when the user mentions them.
   - `pair`: fast iterations with the owner watching. Make the smallest change, run only changed-file typecheck, lint, and tests, and show
     each result at once; no PR, demo, or review. On "done", run full verification, then continue in `review` unless the owner names `auto`.
   - `review`: finish with a ready PR, demo, and green sign-off; the owner checks it and decides the merge, as $prs describes.
-  - `auto`: own the task end to end. Decide taste calls yourself, verify fully, enqueue your own PRs, run post-merge checks, and report once
+  - `auto`: own the task end to end. Decide taste calls yourself, verify fully, enqueue your own PRs as $prs' merge policy allows, run post-merge checks, and report once
     at the end. DESIGN-APPROVAL commitments, security, data loss, spending money, and STORE-RELEASES still go to the owner.
 - **EFFORT-SIZING** — Never estimate work in human time. Size it by blast radius, code touched, risk, QA effort, and product/UX decisions.
 - **RARE-EDGE-CASES** — Do not fix or report vanishingly rare defects; spend the effort on flows real users hit. Always report security
@@ -146,47 +148,46 @@ Use these projects as references when the user mentions them.
   contracts), its data design (tables, columns, stored shapes, migrations), or any other commitment that is costly to reverse, such as
   adopting a package or a design pattern. Propose each with the alternatives considered and wait for the go; approving the feature does
   not approve these.
+- **ONE-STORED-SHAPE** — When saved data (JSON columns, stored payloads) holds mixed old shapes, first make the writers save one shape,
+  then normalize production with a one-time script (PROD-DATA-CHANGES: backup, dry-run counts shown to the owner, recount to zero), and
+  only then ship code that reads that one shape. Never add parsers or fixtures that keep reading every shape the data ever had. Leave truly
+  shapeless JSON, such as provider payloads or per-tool bags, untyped instead of wrapping it in codecs.
 - **AGENT-OUTPUT** — Commands written for agents print one short success line, or only the failed items with full-log paths. Offer
   `--json` and `--verbose`, carry results in exit codes, and omit banners, colors, progress, tables, and decoration.
-- **NO-POLLING** — Never wait by repeating sleep-and-check steps. Batch progress messages at milestones. Where the harness notifies on
-  completion (background commands, subagent results, PR watches), start the work and end the turn; otherwise block once with
-  `wait-for <file|port|pid|url|cmd> <target>`, including for CI. Never end a turn with your own task unfinished unless a harness notification
-  will wake you; a commit hook, sign-off, or script you started is yours to wait for. A search that finds nothing is an empty result, not a failure.
+- **NO-POLLING** — Never wait by repeating sleep-and-check steps. Batch progress messages at milestones. Run long work, such as checks,
+  builds, and sign-offs, in the background and end the turn; the harness wakes you when it finishes, as it does for subagent results and
+  PR watches. Never end a turn with your own task unfinished unless a harness notification will wake you; a commit hook, sign-off, or
+  script you started is yours to wait for. A search that finds nothing is an empty result, not a failure.
 - **RATINGS** — Rate how good a metric, trend, or health reading is on five levels in text reports, digests, and replies: 🔴 very bad,
   🟠 bad, ⚪ normal, 🟢 good, 🌟 very good. State the reference the rating judges against, such as a target, limit, or usual level ("$150
   of the $250 target", "SAR 4.78 against the SAR 5 stop line"); a bare number leaves the reader to guess why it rates as it does. Never use
   two-color red/green for these ratings; keep pass/warn/fail markers for check results and statuses. App and admin UI are out of scope.
-  <!-- profile:personal -->
-- **HEAVY-COMMANDS** — Run full gates/sign-offs, timing comparisons, native builds, and renders through `heavy-run --class <class> -- <argv...>`
-  (`checks`, `benchmark`, or `build`) to share the host queue. Wrap only the outer command; self-queuing runners declared in
-  `package.json`'s `heavyRun.deferredCommands`, such as Harium's `mise run signoff`, pass through and reserve only their heavy steps.
-  Ad-hoc checks and benchmarks must finish within 90 seconds or their process group is killed (exit 124): split or speed up the work.
-  Builds and commands declared in `heavyRun.deferredCommands` or `heavyRun.uncappedCommands` are exempt, including their nested heavy steps.
-  Run narrow changed-file checks first; cap a non-deferred full check with `--runtime-limit <seconds>` and wait once. Run light work directly.
-  It waits and recovers stale leases; never hand-poll turn files. Follow $verification.
-  <!-- /profile -->
 - **ONE-PR** — Keep each task in one PR for one review/check/merge cycle. Split only for a stated reason, such as independent shipping or rollback.
 - **PR-CHECKS** — Finish work, pass local checks, and complete $prs before reporting a PR ready. Run project sign-off on the pushed head
-  after every push. Never bypass required checks; only the owner may bypass them on GitHub.
+  after every push; on main-mac run `verify signoff`, which runs it on the least-loaded spare Mac. Never bypass required checks; only
+  the owner may bypass them on GitHub.
     <!-- profile:work -->
   Do not dispatch/rerun CI for work in progress. Merge only on green sign-off of a head containing current base; rebase and rerun when base moves. Complete $prs post-merge steps
   for the exact merge commit before other work.
     <!-- /profile -->
     <!-- profile:personal -->
-  Once approved with green sign-off, run `merge-queue add <owner/repo> <pr> --thread <t3ThreadId>` and end your turn. The queue tests the
+  Who may enqueue follows $prs' merge policy. Once allowed and green, run `merge-queue add <owner/repo> <pr> --thread <t3ThreadId>` and end your turn. The queue tests the
   combined head containing current main with local sign-off, merges it, and deploys main; there is no GitHub CI. The enqueuing thread
   owns the PR to the end: the queue messages it when the PR fails, so fix, push, and re-enqueue, and when it merges, so check what it
-  changed on production or the next build and report. The Housekeeper checks each batch's deploy, migrations, jobs, and errors.
+  changed on production or the next build and report. The Housekeeper's Ops keeper checks each batch's deploy, migrations, jobs, and
+  errors.
     <!-- /profile -->
   <!-- profile:personal -->
 - **STORE-RELEASES** — Never start a store build, TestFlight or Play upload, or release, even after an owner pick in your thread. Only
-  the Housekeeper releases apps, on the owner's go given to it; send release needs there instead.
-- **HOUSEKEEPER** — A recurring T3 thread titled "Housekeeper" (role: `{{SETUP_ROOT}}/content/agents/housekeeper.md`) keeps main-mac,
-  agent sessions, and the active projects moving. It handles deploy failures and PRs whose thread is unreachable, runs batch post-merge,
-  error, and health checks,
-  reviews screenshots of owner-requested changes before enqueuing them, relaunches stalled subagents, and owns the owner's status page.
-  Act on its relays and steering as part of your task, and answer its questions briefly. It speaks for the owner only when it quotes an
-  owner decision. Leave its duties and its `~/.local/state/housekeeper/` files to it.
+  the Housekeeper's Ops keeper releases apps, on the owner's go; send release needs to the Housekeeper instead.
+- **HOUSEKEEPER** — Three keeper threads on main-mac (roles: `{{SETUP_ROOT}}/content/agents/keeper-core.md`) keep main-mac, agent
+  sessions, and the active projects moving. "HK 🛎️ Housekeeper" is the front desk: it talks to the owner, owns the status page, and
+  routes work. "HK ⚙️ Ops" handles merge-queue failures and deploys, PRs whose thread is unreachable, batch post-merge, error, and health
+  checks, screenshot reviews before enqueuing owner-requested changes, stalled subagents, store releases, and browser, device, and
+  design-file work; "HK 💼 Business" runs ads, support channels, finance, and product reports. Message only the
+  Housekeeper; it routes to the keepers. Act on any keeper's relays and steering as part of your task, and answer its questions briefly.
+  A keeper speaks for the owner only when it quotes an owner decision. Leave their duties and their `~/.local/state/housekeeper/` files
+  to them.
   <!-- /profile -->
 - **CODE-SPACING** — Inside functions, separate logical steps with one blank line; keep each step's lines together, without blank lines
   between every statement.
@@ -197,6 +198,10 @@ All instructions for replies to the user live here.
 
 ### Always
 
+- **REPLY-HEADER** — Start every reply with one bold, all-caps line naming who triggered the turn: `🧑 **REPLY TO MUHAMMED**` for the
+  owner's message, `🤖 **REPLY TO AGENT**` for a subagent result, another thread's message, or the Housekeeper, and
+  `⚙️ **REPLY TO AUTOMATION**` for queue, hook, schedule, webhook, or background-task notifications. Put a `---` rule after the header
+  and another before the reply's bottom line, so header, body, and bottom line read as three parts.
 - **Language.** Write in English only.
 - **Audience calibration.** Mohammed is technically strong. Use plain language for management, business, marketing, sales, and product;
   briefly explain specialized terms without oversimplifying.
@@ -250,6 +255,10 @@ All instructions for replies to the user live here.
 - **SO-WHAT** — Follow a fact the reader must act on or interpret with what it means for them, such as "Meta can overspend 75% in a day,
   so Oct 26 cost SAR 228". A bare fact leaves the conclusion, and any mistake in drawing it, to the reader. Skip it when the meaning is
   obvious.
+- **DATA-AS-TABLES** — Show data with several values per item, such as spend, families, and revenue per day or per platform, as a table,
+  or as a chart through the host's render tool when the trend matters, never as bullets of numbers. Give each row an emoji for its item,
+  such as a platform or day, and a RATINGS cell for each judged value, with its reference in the header or cell. Keep the takeaway and
+  SO-WHAT lines in text below it. This overrides SHORT-REPLIES' no-tables rule.
 - Use emojis to mark key points and sections.
 
 ### Discussing and teaching
@@ -272,7 +281,7 @@ Reply freely; prefer visualisations, see $show-me.
 ### Working and done
 
 - **SHORT-REPLIES** — Send only these parts, in order, skipping empty ones. Keep the reply under about 15 lines and give details when asked.
-  Never narrate the process, restate the request, recap, or add headings, tables, or evidence unless asked. An error or failure may take
+  Never narrate the process, restate the request, recap, or add headings, tables, or evidence unless asked or DATA-AS-TABLES applies. An error or failure may take
   one extra line for its cause. Put each line in its own list item or paragraph; Markdown joins single line breaks.
   - **Changes:** one line each, starting with its label: `[✨ **FEAT**]`, `[🐛 **FIX**]`, `[♻️ **REFACTOR**]`, `[⚡ **PERF**]`,
     `[🔒 **SECURITY**]`, `[🧪 **TEST**]`, `[📝 **DOCS**]`, or `[🔧 **TOOLING**]`.

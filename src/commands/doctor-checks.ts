@@ -7,6 +7,7 @@
 import { agentOutput } from "../lib/agent-output";
 import { cfAuthProblem } from "../lib/cf-auth";
 import { readMergeQueue } from "../lib/merge-queue";
+import { keeperThread } from "../lib/merge-queue-notify";
 import { shareAccessProblem } from "../lib/share-access";
 import { SHARE_HOST } from "./share-html";
 import { workerShellArguments, WORKER_TOOL_PROBE } from "../lib/merge-queue-environment";
@@ -54,7 +55,7 @@ if (process.env.MY_SETUP_DOCTOR_DETAIL !== "1") {
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
 const HOME = homedir();
-const MIN_FREE_GIB = 20;
+const MIN_FREE_GIB = 40;
 
 const PROFILE = readDeviceProfile(HOME);
 
@@ -543,6 +544,30 @@ if (freeGib < MIN_FREE_GIB) {
   });
 }
 
+// A stuck Gatekeeper evaluation (syspolicyd "waiting on another evaluation") parks every binary in the
+// ChatGPT bundle at launch, so Codex's node_repl, and with it the Codex Chrome route, hangs (2026-11-09).
+const CHATGPT_NODE_REPL = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl";
+if (existsSync(CHATGPT_NODE_REPL)) {
+  const probe = execaSync(CHATGPT_NODE_REPL, [], { reject: false, input: "", timeout: 5000 });
+  const codexConfig = readFileSync(join(HOME, ".codex/config.toml"), { encoding: "utf8", flag: "a+" });
+  if (probe.timedOut) {
+    findings.push({
+      level: "required",
+      label: "ChatGPT bundle launch",
+      detail:
+        "ChatGPT.app binaries hang at launch on a stuck Gatekeeper evaluation; run sudo killall syspolicyd. " +
+        "Until then, copy cua_node to ~/.codex/cua_node-local and point node_repl paths in ~/.codex/config.toml there",
+    });
+  } else if (codexConfig.includes("cua_node-local")) {
+    findings.push({
+      level: "optional",
+      label: "Codex node_repl copy",
+      detail:
+        "ChatGPT.app launches again; open ChatGPT once so it rewrites node_repl paths in ~/.codex/config.toml, then delete ~/.codex/cua_node-local",
+    });
+  }
+}
+
 // share-html refreshes cf's OAuth token near its expiry, so the sign-in must be refreshable.
 const cfAuth = process.env.CLOUDFLARE_API_TOKEN ? undefined : cfAuthProblem();
 if (cfAuth) findings.push({ level: "required", label: "Cloudflare sign-in", detail: cfAuth });
@@ -792,6 +817,26 @@ if (PROFILE.macWatcher && remotePoolUrl) {
       label: "Merge queue worker",
       detail: "last pass failed; see ~/.local/state/merge-queue/worker.log",
     });
+}
+
+// Main Mac only: the merge queue and leftover reaper message the Ops keeper, the spare-Mac inbox the front desk.
+if (PROFILE.macWatcher && !remotePoolUrl) {
+  const keepers = ["ops", "business"] as const;
+  try {
+    const missing = keepers.filter((keeper) => keeperThread(ROOT_DIR, keeper) === keeperThread(ROOT_DIR, "housekeeper"));
+    if (missing.length)
+      findings.push({
+        level: "optional",
+        label: "Keeper threads",
+        detail: `${missing.join(", ")} unset in config/keeper-threads.json; their messages go to the Housekeeper front desk`,
+      });
+  } catch (error) {
+    findings.push({
+      level: "required",
+      label: "Keeper threads",
+      detail: `config/keeper-threads.json: ${error instanceof Error ? error.message : error}`,
+    });
+  }
 }
 
 // Main Mac only. Checks that the session exists without reading or printing it.

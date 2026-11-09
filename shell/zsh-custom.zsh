@@ -55,6 +55,11 @@ export PATH="$HOME/.local/bin:$PATH"
 export PATH="$HOME/.kimi-code/bin:$PATH"
 export PATH="$PATH:$HOME/.composer/vendor/bin"
 fpath=("$HOME/.local/share/zsh/site-functions" $fpath)
+# Sentry CLI completion (its installer appends this to ~/.zshrc; keep it here instead).
+if [[ -o interactive && -f "$HOME/.local/share/zsh/site-functions/_sentry" ]]; then
+    (( $+functions[compdef] )) || { autoload -Uz compinit; compinit; }
+    autoload -Uz _sentry; compdef _sentry sentry
+fi
 
 # --- Laravel/Herd ------------------------------------------------------------
 # Short aliases for the expected Laravel workflow: PHP and Artisan run through
@@ -154,7 +159,7 @@ ai() {
 }
 
 # --- Mac load ----------------------------------------------------------------
-# `macq` shows the shared check and device queues with load, memory, and disk;
+# `macq` shows load, memory, disk, and the device queue;
 # `macq -w` refreshes it every 5 seconds until Ctrl-C.
 _macq_once() {
     local cores=$(sysctl -n hw.ncpu)
@@ -163,7 +168,6 @@ _macq_once() {
     local disk=$(df -g / | awk 'NR == 2 {print $4}')
 
     echo "load ${load} on ${cores} cores · memory free ${memory} · disk free ${disk} GiB"
-    heavy-run status 2>&1 | sed 's/; waiting/\nwaiting/; s/ (\([a-z]*\); [a-z]*; [a-z0-9-]*)/ \1/g'
     device-queue status 2>&1 | head -1
 }
 
