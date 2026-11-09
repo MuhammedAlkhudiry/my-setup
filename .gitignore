@@ -13,3 +13,4 @@ node_modules
 # macOS metadata and disposable scratch space
 .DS_Store
 tmp/
+.asc/
