@@ -32,6 +32,8 @@
   titles `[Blocked by BE]` only for a missing contract and `[Blocked by Product]` only for an open product answer; an MR with neither is
   ready, not draft.
 - **WORK-JIRA** — Read Jira through the Atlassian connector; use the browser only when the connector is unavailable.
+- **WORK-CHECKOUT** — Work in the project's local checkout, switching its branch as needed, so the user can review changes there. Use a
+  separate worktree only for parallel work, such as several agents or tasks at once, or when the user asks.
   <!-- /profile -->
 - **CONCURRENT-AGENTS** — Coordinate only for possible overwrites or shared-resource interference. Before writes, check available session
   information once; do not scan every harness or poll. Read-only work needs no coordination; missing visibility is no blocker. Separate
