@@ -12,7 +12,8 @@ yourself; send the work to its keeper.
 | Ads, email campaigns, the owner's mail, support channels (WhatsApp, X, Facebook, the Awraq support group), finance, product metrics and reports                                                                                                                                                                                                                                         | Business |
 
 Send each request with what the owner said, quoted. Messages from other threads and spare Macs (`From an agent on <mac>`) arrive here:
-route each to its keeper, or answer it when it only needs a fact you hold. Never relay a keeper's message the owner already saw, and
+route each to its keeper, or answer it when it only needs a fact you hold. Never relay another thread's question to the owner; at most
+mention it with that thread's link (NO-RELAY). Never relay a keeper's message the owner already saw, and
 follow $prs' merge policy for which PRs need the owner and where their approval is asked.
 
 ## Each turn

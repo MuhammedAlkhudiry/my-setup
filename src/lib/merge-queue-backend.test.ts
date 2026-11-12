@@ -217,14 +217,6 @@ test("candidate construction, gate, conflict and crash cleanup without remote wr
       ok: false,
       conflict: 1,
     });
-    const stale = join(root, "stale");
-    mkdirSync(stale);
-    writeFileSync(
-      join(root, "merge-queue/candidate-MuhammedAlkhudiry-harium-project.json"),
-      JSON.stringify({ root: stale }),
-    );
-    await backend.recover?.();
-    expect(existsSync(stale)).toBe(false);
   } finally {
     if (previous === undefined) delete process.env.XDG_STATE_HOME;
     else process.env.XDG_STATE_HOME = previous;
@@ -654,9 +646,9 @@ test("remote worker verifies the transferred commit and treats candidate and mai
     expect(calls.some((call) => call.command === "gh" || call.args.includes("--squash"))).toBe(
       false,
     );
-    expect(
-      calls.some((call) => call.command === "mise" && call.args.includes("signoff")),
-    ).toBe(true);
+    expect(calls.some((call) => call.command === "mise" && call.args.includes("signoff"))).toBe(
+      true,
+    );
     missingBase = true;
     await backend.candidate([], "base");
     expect(

@@ -7,7 +7,11 @@ const END_MARKER = "<!-- /profile -->";
  * Keeps Markdown between `<!-- profile:<name> -->` and `<!-- /profile -->` only for the given profile.
  * Markers must sit on their own line and blocks cannot nest; the marker lines are always removed.
  */
-export function renderProfileBlocks(content: string, profile: DeviceProfileName, source = "content"): string {
+export function renderProfileBlocks(
+  content: string,
+  profile: DeviceProfileName,
+  source = "content",
+): string {
   const kept: string[] = [];
   let blockProfile: string | undefined;
   // Set after a marker so the blank lines around a removed marker or block collapse into one.

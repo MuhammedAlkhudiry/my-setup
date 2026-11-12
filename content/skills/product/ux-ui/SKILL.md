@@ -33,8 +33,7 @@ description: Use before UI changes, design reviews, or visual option comparisons
 
 - The picked mockup is the spec. Before coding, map each element it shows to the existing component that will draw it; agree any substitute
   pattern, layout, or dropped element with the user first. Never fall back to a generic screen pattern because it is quicker.
-- Before reporting, put running-app screenshots beside the picked mockup, screen by screen, fix every difference not agreed, and show the
-  user that comparison.
+- Before reporting, fix every difference from the picked mockup not agreed; the [UI review gate](#ui-review-gate)'s matrix shows it.
 
 ## Design checks
 

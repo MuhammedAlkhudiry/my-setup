@@ -2,19 +2,6 @@
   "name": "my-setup",
   "private": true,
   "type": "module",
-  "scripts": {
-    "install:local": "bun src/cli.ts install",
-    "doctor": "zsh shell/doctor.zsh",
-    "tools:status": "bun src/commands/system-tools-cli.ts status",
-    "tools:update:plan": "bun src/commands/system-tools-cli.ts update-plan",
-    "watcher": "bun src/commands/mac-watcher.ts",
-    "format": "bun src/commands/check-cli.ts format",
-    "format:check": "bun src/commands/check-cli.ts format:check",
-    "lint": "bun src/commands/check-cli.ts lint",
-    "lint:fix": "bun src/commands/check-cli.ts lint:fix",
-    "typecheck": "bun src/commands/check-cli.ts typecheck",
-    "test": "bun src/commands/check-cli.ts test"
-  },
   "dependencies": {
     "@mtcute/bun": "0.32.6",
     "cac": "^7.0.0",

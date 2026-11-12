@@ -26,14 +26,16 @@ function row(pid: number, ppid: number, command: string, ageMinutes = 0, uid = U
 }
 
 test("recognizes screen and simulator recordings, never ffmpeg conversions or Android screenrecord", () => {
-  expect(recordingKind('/opt/homebrew/bin/ffmpeg -f avfoundation -i "1:none" -r 30 /tmp/demo.mp4')).toBe(
-    "ffmpeg screen recording",
-  );
+  expect(
+    recordingKind('/opt/homebrew/bin/ffmpeg -f avfoundation -i "1:none" -r 30 /tmp/demo.mp4'),
+  ).toBe("ffmpeg screen recording");
   expect(recordingKind("xcrun simctl io 0CBC68FD recordVideo --codec h264 /tmp/qa.mp4")).toBe(
     "simulator recording",
   );
   expect(
-    recordingKind("/Applications/Xcode.app/Contents/Developer/usr/bin/simctl io booted recordVideo /tmp/a.mov"),
+    recordingKind(
+      "/Applications/Xcode.app/Contents/Developer/usr/bin/simctl io booted recordVideo /tmp/a.mov",
+    ),
   ).toBe("simulator recording");
   expect(recordingKind("screencapture -v /tmp/screen.mov")).toBe("screencapture recording");
 
@@ -49,7 +51,11 @@ test("the owner is the nearest agent or agent-device daemon, and a merge-queue r
     row(10, 1, "/Users/me/.local/bin/claude --resume"),
     row(11, 10, "/bin/zsh -c ffmpeg"),
     row(12, 11, "ffmpeg -f avfoundation -i 1 out.mp4", 45),
-    row(20, 1, "/Applications/T3 Code.app/Contents/MacOS/T3 Code /Users/me/.t3/tools/agent-device/0.21.31/node_modules/agent-device/dist/src/internal/daemon.js"),
+    row(
+      20,
+      1,
+      "/Applications/T3 Code.app/Contents/MacOS/T3 Code /Users/me/.t3/tools/agent-device/0.21.31/node_modules/agent-device/dist/src/internal/daemon.js",
+    ),
     row(21, 20, "xcrun simctl io ABC recordVideo /tmp/a.mp4", 45),
     row(30, 1, "bun --no-env-file /Users/me/my-setup/src/commands/merge-queue-cli.ts run"),
     row(31, 30, "/Users/me/.local/bin/codex exec signoff"),
@@ -61,6 +67,18 @@ test("the owner is the nearest agent or agent-device daemon, and a merge-queue r
   expect(recordingOwner(rows[4]!, rows)).toEqual({ kind: "agent-device", pid: 20 });
   expect(recordingOwner(rows[7]!, rows)).toEqual({ kind: "merge-queue", pid: 30 });
   expect(recordingOwner(rows[8]!, rows)).toEqual({ kind: "none" });
+});
+
+test("a spare Mac's sign-off worker owns its recordings like a merge-queue run", () => {
+  const rows = [
+    row(50, 1, "bun --no-env-file /Users/me/my-setup/src/commands/merge-queue-signoff-worker.ts"),
+    row(51, 50, "xcrun simctl io ABC recordVideo /tmp/a.mp4", 45),
+    row(60, 1, "bun --no-env-file /Users/me/my-setup/src/commands/agent-signoff-worker.ts"),
+    row(61, 60, "xcrun simctl io DEF recordVideo /tmp/b.mp4", 45),
+  ];
+
+  expect(recordingOwner(rows[1]!, rows)).toEqual({ kind: "merge-queue", pid: 50 });
+  expect(recordingOwner(rows[3]!, rows)).toEqual({ kind: "merge-queue", pid: 60 });
 });
 
 test("only this user's recordings past 30 minutes are stale, and a merge-queue run's never are", () => {

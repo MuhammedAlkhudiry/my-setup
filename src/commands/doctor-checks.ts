@@ -401,7 +401,8 @@ if (remotePoolUrl) {
     }
   }
 
-  const legacyClaudeFiles = findLegacyClaudeFiles(HOME);
+  // The direct profile's rules live at ~/.claude/CLAUDE.md, so only a pool Mac treats that file as a leftover.
+  const legacyClaudeFiles = PROFILE.claude === "pool" ? findLegacyClaudeFiles(HOME) : [];
   if (legacyClaudeFiles.length > 0) {
     findings.push({
       level: "required",
@@ -549,7 +550,10 @@ if (freeGib < MIN_FREE_GIB) {
 const CHATGPT_NODE_REPL = "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl";
 if (existsSync(CHATGPT_NODE_REPL)) {
   const probe = execaSync(CHATGPT_NODE_REPL, [], { reject: false, input: "", timeout: 5000 });
-  const codexConfig = readFileSync(join(HOME, ".codex/config.toml"), { encoding: "utf8", flag: "a+" });
+  const codexConfig = readFileSync(join(HOME, ".codex/config.toml"), {
+    encoding: "utf8",
+    flag: "a+",
+  });
   if (probe.timedOut) {
     findings.push({
       level: "required",
@@ -823,7 +827,9 @@ if (PROFILE.macWatcher && remotePoolUrl) {
 if (PROFILE.macWatcher && !remotePoolUrl) {
   const keepers = ["ops", "business"] as const;
   try {
-    const missing = keepers.filter((keeper) => keeperThread(ROOT_DIR, keeper) === keeperThread(ROOT_DIR, "housekeeper"));
+    const missing = keepers.filter(
+      (keeper) => keeperThread(ROOT_DIR, keeper) === keeperThread(ROOT_DIR, "housekeeper"),
+    );
     if (missing.length)
       findings.push({
         level: "optional",

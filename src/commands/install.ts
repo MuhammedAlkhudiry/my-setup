@@ -24,7 +24,6 @@ import { dirname, isAbsolute, join, relative, sep } from "path";
 import { homedir, tmpdir } from "os";
 import { execa } from "execa";
 import {
-  OPTIONAL_EXTERNAL_SKILL_NAMES,
   REMOTE_SKILL_SOURCES,
   type RemoteSkill,
   type RemoteSkillSource,
@@ -32,17 +31,13 @@ import {
 import { ACTIVE_PROJECTS, type ActiveProject } from "../../config/active-projects";
 import type { DeviceProfile } from "../../config/devices";
 import { createClaudeManagedSettings } from "../../config/claude";
-import { CODEX_RETIRED_TOP_LEVEL_KEYS } from "../../config/codex";
 import { CREDENTIALS_HOME_ENV, CREDENTIALS_ROOT } from "../../config/credentials";
-import { RETIRED_MCP_SERVERS } from "../../config/mcp";
 import { createOpencodeCliConfig, mergeOpencodeConfig } from "../../config/opencode";
-import { mergeClaudeHooks, removeRetiredHooks } from "../../config/hooks";
+import { mergeClaudeHooks } from "../../config/hooks";
 import { renderCodexRules } from "../../config/permissions";
 import {
   codexManagedSectionValues,
   codexManagedTopLevelValues,
-  CODEX_RETIRED_POOL_SECTION_KEYS,
-  CODEX_RETIRED_POOL_TOP_LEVEL_KEYS,
   renderCodexMcpServersToml,
 } from "../lib/codex-config";
 import { replaceDirectory, ensureParentDir } from "../lib/fs";
@@ -61,9 +56,9 @@ import { assertCentralizedModels, renderManagedMarkdown } from "../lib/models";
 import { getRemoteSkillRefreshDecision, recordRemoteSkillRefresh } from "../lib/remote-skills";
 import { discoverLocalSkills, findUnknownSkillReferences } from "../lib/skills";
 import { disableSpotlightIndexing } from "../lib/spotlight";
-import { installT3Settings, t3StateDir } from "../lib/t3-settings";
+import { installT3Settings } from "../lib/t3-settings";
 import { validateRemoteSkillSources } from "../lib/validation";
-import { installVscodeKeymap, vscodeKeybindingsPath } from "../lib/vscode";
+import { installVscodeKeymap } from "../lib/vscode";
 
 // =============================================================================
 // Constants
@@ -87,7 +82,6 @@ const CODEX_PATHS = {
   rules: join(HOME, ".codex/AGENTS.md"),
   config: join(HOME, ".codex/config.toml"),
   execRules: join(HOME, ".codex/rules/default.rules"),
-  hooks: join(HOME, ".codex/hooks.json"),
 };
 
 // With the Claude Pool, Claude Code's config dir is the pool's CLAUDE_CONFIG_DIR; direct sign-in uses the default.
@@ -144,16 +138,15 @@ const SHARED_BIN_COMMANDS = [
   "pk",
   "decisions",
   "share-html",
-  "html-artifact",
   "store-build",
   "device-queue",
   "telegram-send",
   "merge-queue",
   "verify",
 ];
-const MAIN_MAC_BIN_COMMANDS = ["telegram-me", "mail-read"];
+const MAIN_MAC_BIN_COMMANDS = ["telegram-me", "mail-read", "hq"];
 /** Commands my-setup used to link into ~/bin; installs remove their links. */
-const RETIRED_BIN_COMMANDS = ["wait-for", "ci-runner", "heavy-run"];
+const RETIRED_BIN_COMMANDS = ["wait-for", "ci-runner", "heavy-run", "html-artifact"];
 
 // =============================================================================
 // Individual Operations
@@ -192,7 +185,7 @@ function knownSkillNames(): Set<string> {
   const remoteSkillNames = REMOTE_SKILL_SOURCES.flatMap((source) =>
     source.skills.map((skill) => skill.name),
   );
-  const additionalSkillNames = [...remoteSkillNames, ...OPTIONAL_EXTERNAL_SKILL_NAMES];
+  const additionalSkillNames = remoteSkillNames;
   const localSkills = discoverLocalSkills(join(ROOT_DIR, "content", "skills"), {
     additionalSkillNames,
   });
@@ -368,22 +361,6 @@ async function installCodex(profile: DeviceProfile): Promise<void> {
   await mergeCodexConfigAsync();
   await mergeCodexMcpConfigAsync(profile);
   await writeCodexRules(profile);
-  await removeCodexHooks();
-}
-
-// Codex runs no hooks (see config/codex.ts); delete the file once only retired my-setup hooks were in it.
-async function removeCodexHooks(): Promise<void> {
-  if (!existsSync(CODEX_PATHS.hooks)) return;
-
-  const { hooks, ...rest } = JSON.parse(await readFile(CODEX_PATHS.hooks, "utf-8"));
-  const kept = removeRetiredHooks(hooks);
-
-  if (Object.keys(kept).length === 0 && Object.keys(rest).length === 0) {
-    await rm(CODEX_PATHS.hooks);
-    print.success("Removed Codex hooks");
-  } else {
-    await writeFile(CODEX_PATHS.hooks, JSON.stringify({ ...rest, hooks: kept }, null, 2) + "\n");
-  }
 }
 
 async function writeCodexRules(profile: DeviceProfile): Promise<void> {
@@ -447,7 +424,6 @@ async function installClaudeMcpServers(profile: DeviceProfile, configDir: string
   const remove = (name: string) =>
     execa("claude", ["mcp", "remove", "-s", "user", name], { env, reject: false, stdio: "pipe" });
 
-  for (const name of RETIRED_MCP_SERVERS) await remove(name);
   for (const [name, server] of Object.entries(profile.mcpServers)) {
     if (server.type === "http") {
       // Added once and never removed, so a reinstall cannot cost the server its sign-in.
@@ -470,36 +446,6 @@ async function installClaudeMcpServers(profile: DeviceProfile, configDir: string
     );
   }
   print.success(`Claude Code MCP servers installed (${Object.keys(profile.mcpServers).length})`);
-}
-
-function removeTomlTopLevelKey(configToml: string, key: string): string {
-  const lines = configToml.split(/\r?\n/);
-  const firstSectionIndex = lines.findIndex((line) => /^\s*\[/.test(line));
-  const topLevelEnd = firstSectionIndex === -1 ? lines.length : firstSectionIndex;
-  const keyPattern = new RegExp(`^\\s*${key}\\s*=`);
-  const keyIndex = lines.slice(0, topLevelEnd).findIndex((line) => keyPattern.test(line));
-
-  if (keyIndex === -1) {
-    return configToml;
-  }
-
-  lines.splice(keyIndex, 1);
-  return lines.join("\n");
-}
-
-function removeTomlSectionKey(configToml: string, sectionName: string, key: string): string {
-  const lines = configToml.split(/\r?\n/);
-  const sectionIndex = lines.findIndex((line) => line.trim() === `[${sectionName}]`);
-  if (sectionIndex === -1) return configToml;
-
-  const keyPattern = new RegExp(`^\\s*${key}\\s*=`);
-  for (let i = sectionIndex + 1; i < lines.length && !/^\s*\[/.test(lines[i]); i++) {
-    if (keyPattern.test(lines[i])) {
-      lines.splice(i, 1);
-      return lines.join("\n");
-    }
-  }
-  return configToml;
 }
 
 function upsertTomlTopLevelKey(configToml: string, key: string, value: string): string {
@@ -560,19 +506,11 @@ async function mergeCodexConfigAsync(): Promise<void> {
     ? await readFile(CODEX_PATHS.config, "utf-8")
     : "";
   let merged = existing;
-  for (const key of CODEX_RETIRED_TOP_LEVEL_KEYS) {
-    merged = removeTomlTopLevelKey(merged, key);
-  }
   for (const [key, value] of codexManagedTopLevelValues()) {
     merged = upsertTomlTopLevelKey(merged, key, value);
   }
   for (const [section, key, value] of codexManagedSectionValues()) {
     merged = upsertTomlSectionKey(merged, section, key, value);
-  }
-
-  for (const key of CODEX_RETIRED_POOL_TOP_LEVEL_KEYS) merged = removeTomlTopLevelKey(merged, key);
-  for (const [section, key] of CODEX_RETIRED_POOL_SECTION_KEYS) {
-    merged = removeTomlSectionKey(merged, section, key);
   }
 
   await writeFile(CODEX_PATHS.config, merged, { mode: 0o600 });
@@ -639,18 +577,19 @@ async function installShared(profile: DeviceProfile): Promise<void> {
   if (profile.name === "personal" && !readRemoteClaudePoolUrl(HOME)) {
     for (const command of MAIN_MAC_BIN_COMMANDS) {
       const source = join(ROOT_DIR, "shell", `${command}.zsh`);
-      await installManagedSymlink(
-        source,
-        join(SHARED_PATHS.binDir, command),
-        `${command} command`,
-      );
+      await installManagedSymlink(source, join(SHARED_PATHS.binDir, command), `${command} command`);
       await chmod(source, 0o755);
     }
   }
 
   print.info(`Ensuring local command paths are in PATH via ${SHARED_PATHS.zshenv}...`);
   await ensureParentDir(SHARED_PATHS.zshenv);
-  const pathLines = ['export PATH="$HOME/bin:$PATH"', 'export PATH="$HOME/.local/bin:$PATH"'];
+  // mise shims, appended so Homebrew's bun still wins, put node on PATH for non-interactive SSH, which T3's device hosts need on the spare Macs.
+  const pathLines = [
+    'export PATH="$PATH:$HOME/.local/share/mise/shims"',
+    'export PATH="$HOME/bin:$PATH"',
+    'export PATH="$HOME/.local/bin:$PATH"',
+  ];
   const credentialsHomeLine = `export ${CREDENTIALS_HOME_ENV}="$HOME/${CREDENTIALS_ROOT}"`;
   const secretsSourceLine = `[[ -f "$${CREDENTIALS_HOME_ENV}/secrets.zsh" ]] && source "$${CREDENTIALS_HOME_ENV}/secrets.zsh"`;
   const zshenvContent = existsSync(SHARED_PATHS.zshenv)
@@ -898,11 +837,7 @@ export async function syncManagedSkillsAsync(options: ManagedSkillSyncOptions): 
   const excludedSkills = new Set(profile.excludedSkills);
   const skills = discoverLocalSkills(src, {
     reportWarning: console.warn,
-    additionalSkillNames: [
-      ...remoteSkillNames,
-      ...declaredRemoteSkillNames,
-      ...OPTIONAL_EXTERNAL_SKILL_NAMES,
-    ],
+    additionalSkillNames: [...remoteSkillNames, ...declaredRemoteSkillNames],
   }).filter((skill) => !excludedSkills.has(skill.name));
   const skillNames = skills.map((skill) => skill.name).sort();
   const managedSkillNames = [...new Set([...skillNames, ...remoteSkillNames])].sort();
@@ -1091,7 +1026,7 @@ export async function install(): Promise<DeviceProfile> {
       ),
     registerXcodeApps(),
     disableSpareMacSpotlight(),
-    installT3Settings({ home: HOME }).then((result) => {
+    installT3Settings({ home: HOME, profile: profile.name }).then((result) => {
       if (!result.installed) {
         print.info("T3 Code is not installed; skipped its settings");
       } else if (result.clientSettingsChanged) {

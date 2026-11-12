@@ -47,7 +47,7 @@ reported costs may lag. Project IDs from production response headers identify wh
 
 [Costs and Usage](https://developers.openai.com/cookbook/examples/completions_usage_api) need an Admin key. `/v1/organization/usage/*` reports
 activity for completions, embeddings, images, audio transcriptions/speeches, moderations, vector stores and tool sessions/calls; supported
-filters and grouping vary. Prefer Costs over token-price estimates for budget checks.
+filters and grouping vary. Prefer Costs over token-price estimates for spend checks.
 
 Project `/rate_limits` and response `x-ratelimit-{limit,remaining,reset}-{requests,tokens}` describe throughput, not money or remaining credits
 ([rate limits](https://developers.openai.com/api/docs/guides/rate-limits)). Organization/project `/spend_limit` and `/spend_alerts` expose hard
@@ -60,10 +60,8 @@ legacy dashboard billing routes as a supported API or subtract spend from an ass
 [Billing overview](https://platform.openai.com/settings/organization/billing/overview), select the correct organization, and read balance,
 auto-recharge settings, payment method and monthly recharge ceiling. Use the browser’s existing Google account for sign-in; stop for passwords, 2FA codes, or phone prompts. Never change billing during read-only verification.
 
-The Housekeeper's Ops keeper must flag unreadable costs and spend above 80% of the owner's budget, retain immediate credit/quota-error alerts, and check
-prepaid funding separately. A recharge ceiling limits purchases, not usage; manual top-ups and carried credits differ from monthly spend.
-Escalate before credits or the budget run out: a fixed budget cannot guarantee uninterrupted service at unlimited demand. Never silently
-increase spending or stop traffic. Distinguish billing/quota errors from temporary rate limits; retries cannot replenish credits.
+The Housekeeper's Ops keeper owns spend and credit monitoring. A recharge ceiling limits purchases, not usage; manual top-ups and carried
+credits differ from monthly spend. Distinguish billing/quota errors from temporary rate limits; retries cannot replenish credits.
 
 ## Claude pool limits
 

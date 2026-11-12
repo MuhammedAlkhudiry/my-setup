@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-// Ranks a GitHub repository's open pull requests from easiest to hardest to merge, with stacks, CI, conflicts and a merge order.
+// Ranks a GitHub repository's open pull requests from easiest to hardest to merge, with stacks, sign-off, conflicts and a merge order.
 // Usage: bun triage-prs.ts [repo-path] [--remote <name>] [--no-fetch] [--json] [--verbose]
 
 import { agentOutput } from "../../prs/scripts/agent-output";
@@ -44,7 +44,8 @@ export interface Assessment {
   parent: number | null;
   /** A stacked PR whose head lacks its parent's latest commits and needs a restack. */
   behindParent: boolean;
-  ci: "success" | "failure" | "pending" | "none";
+  /** The head commit's `signoff` status. */
+  signoff: "success" | "failure" | "pending" | "none";
   mainConflicts: string[];
   codeLines: number;
   testLines: number;
@@ -53,48 +54,11 @@ export interface Assessment {
   tier: Tier;
 }
 
-interface Check {
-  conclusion?: string | null;
+/** One entry of `gh pr list --json statusCheckRollup`; commit statuses carry `context` and `state`. */
+interface RollupEntry {
+  context?: string;
   state?: string | null;
-  status?: string | null;
 }
-
-type CheckState =
-  | "SUCCESS"
-  | "NEUTRAL"
-  | "SKIPPED"
-  | "FAILURE"
-  | "ERROR"
-  | "TIMED_OUT"
-  | "CANCELLED"
-  | "STARTUP_FAILURE"
-  | "ACTION_REQUIRED"
-  | "STALE"
-  | "PENDING"
-  | "QUEUED"
-  | "IN_PROGRESS"
-  | "EXPECTED"
-  | "REQUESTED"
-  | "WAITING";
-
-const CHECK_STATES: Record<CheckState, Exclude<Assessment["ci"], "none">> = {
-  SUCCESS: "success",
-  NEUTRAL: "success",
-  SKIPPED: "success",
-  FAILURE: "failure",
-  ERROR: "failure",
-  TIMED_OUT: "failure",
-  CANCELLED: "failure",
-  STARTUP_FAILURE: "failure",
-  ACTION_REQUIRED: "failure",
-  STALE: "failure",
-  PENDING: "pending",
-  QUEUED: "pending",
-  IN_PROGRESS: "pending",
-  EXPECTED: "pending",
-  REQUESTED: "pending",
-  WAITING: "pending",
-};
 
 export function isCodePath(path: string): boolean {
   return !NON_CODE_PATTERNS.some((pattern) => pattern.test(path));
@@ -109,13 +73,13 @@ export function isMigrationPath(path: string): boolean {
 }
 
 export function tierFor(input: {
-  ci: Assessment["ci"];
+  signoff: Assessment["signoff"];
   mainConflicts: number;
   draft: boolean;
   codeLines: number;
   migrations: number;
 }): Tier {
-  if (input.ci === "failure" || input.mainConflicts > 0 || input.draft) {
+  if (input.signoff === "failure" || input.mainConflicts > 0 || input.draft) {
     return "blocked";
   }
 
@@ -150,30 +114,19 @@ export function stackOf(prs: PullRequest[]): Map<number, { parent: number | null
   return result;
 }
 
-/** Combines check results into one state: any failure fails, any unfinished check is pending. */
-export function ciFromChecks(checks: Check[]): Assessment["ci"] {
-  if (checks.length === 0) {
+/** The head commit's `signoff` status, which the project's sign-off posts; there is no GitHub CI. */
+export function signoffFromRollup(rollup: RollupEntry[]): Assessment["signoff"] {
+  const state = rollup.find((entry) => entry.context === "signoff")?.state?.toUpperCase();
+
+  if (!state) {
     return "none";
   }
 
-  const results = checks.map((check) => {
-    const state = (check.conclusion || check.state || "").toUpperCase();
-
-    return Object.hasOwn(CHECK_STATES, state) ? CHECK_STATES[state as CheckState] : "pending";
-  });
-
-  if (results.includes("failure")) {
-    return "failure";
+  if (state === "SUCCESS") {
+    return "success";
   }
 
-  if (
-    results.includes("pending") ||
-    checks.some((check) => check.status && check.status.toUpperCase() !== "COMPLETED")
-  ) {
-    return "pending";
-  }
-
-  return "success";
+  return state === "PENDING" || state === "EXPECTED" ? "pending" : "failure";
 }
 
 const TIER_ORDER: Tier[] = ["small", "medium", "large", "blocked"];
@@ -181,7 +134,7 @@ const TIER_TITLES: Record<Tier, string> = {
   small: "🟩 Small: review in minutes",
   medium: "🟨 Medium",
   large: "🟧 Large: needs real review",
-  blocked: "🟥 Blocked: failing CI, conflicts with the default branch, or draft",
+  blocked: "🟥 Blocked: failing sign-off, conflicts with the default branch, or draft",
 };
 
 /** Stacks ordered by their hardest member, overlaps and size; each stack's PRs parent before child. */
@@ -297,7 +250,7 @@ export function assess(options: { cwd: string; remote: string; fetch: boolean })
     headRefName: string;
     headRefOid: string;
     isDraft: boolean;
-    statusCheckRollup: Check[] | null;
+    statusCheckRollup: RollupEntry[] | null;
   }[];
   const prs: PullRequest[] = raw.map((item) => ({
     number: item.number,
@@ -327,41 +280,6 @@ export function assess(options: { cwd: string; remote: string; fetch: boolean })
   }
 
   const stacks = stackOf(prs);
-
-  // GitHub attaches no checks to PRs whose base branch CI does not target, such as stacked PRs; read the head commit's runs instead.
-  const ciState = (pr: PullRequest, rollup: Check[]): Assessment["ci"] => {
-    if (rollup.length > 0) {
-      return ciFromChecks(rollup);
-    }
-
-    const runs = run("gh", [
-      "run",
-      "list",
-      "--commit",
-      pr.headSha,
-      "--limit",
-      "50",
-      "--json",
-      "workflowName,status,conclusion,createdAt",
-    ]);
-    const all = JSON.parse(runs.out) as {
-      workflowName: string;
-      status: string;
-      conclusion: string;
-      createdAt: string;
-    }[];
-    const latest = new Map<string, (typeof all)[number]>();
-
-    for (const item of all) {
-      const current = latest.get(item.workflowName);
-
-      if (!current || current.createdAt < item.createdAt) {
-        latest.set(item.workflowName, item);
-      }
-    }
-
-    return ciFromChecks([...latest.values()]);
-  };
 
   const conflictingPaths = (left: string, right: string): string[] => {
     const result = git(["merge-tree", "--write-tree", "--name-only", left, right], [0, 1]);
@@ -411,7 +329,7 @@ export function assess(options: { cwd: string; remote: string; fetch: boolean })
       behindParent:
         stack.parent !== null &&
         !git(["merge-base", "--is-ancestor", headOf.get(stack.parent) as string, head], [0, 1]).ok,
-      ci: ciState(pr, raw[index].statusCheckRollup ?? []),
+      signoff: signoffFromRollup(raw[index].statusCheckRollup ?? []),
       mainConflicts: conflictingPaths(mainRef, head),
       codeLines: files
         .filter((file) => isCodePath(file.path))
@@ -445,7 +363,7 @@ export function assess(options: { cwd: string; remote: string; fetch: boolean })
 
   for (const assessment of assessments) {
     assessment.tier = tierFor({
-      ci: assessment.ci,
+      signoff: assessment.signoff,
       mainConflicts: assessment.mainConflicts.length,
       draft: assessment.pr.draft,
       codeLines: assessment.codeLines,
@@ -460,14 +378,25 @@ function textReport(defaultBranch: string, assessments: Assessment[]): string {
   const lines = [`triage-prs: ${assessments.length} open PRs; base=${defaultBranch}`];
 
   for (const tier of TIER_ORDER) {
-    for (const item of assessments.filter((item) => item.tier === tier).sort((a, b) => a.codeLines - b.codeLines)) {
-      lines.push(JSON.stringify({
-        pr: item.pr.url, title: item.pr.title, tier: TIER_TITLES[tier],
-        codeLines: item.codeLines, testLines: item.testLines, ci: item.ci,
-        draft: item.pr.draft, parent: item.parent, behindParent: item.behindParent,
-        migrations: item.migrations, mainConflicts: item.mainConflicts,
-        conflictsWith: Object.fromEntries(item.conflictsWith),
-      }));
+    for (const item of assessments
+      .filter((item) => item.tier === tier)
+      .sort((a, b) => a.codeLines - b.codeLines)) {
+      lines.push(
+        JSON.stringify({
+          pr: item.pr.url,
+          title: item.pr.title,
+          tier: TIER_TITLES[tier],
+          codeLines: item.codeLines,
+          testLines: item.testLines,
+          signoff: item.signoff,
+          draft: item.pr.draft,
+          parent: item.parent,
+          behindParent: item.behindParent,
+          migrations: item.migrations,
+          mainConflicts: item.mainConflicts,
+          conflictsWith: Object.fromEntries(item.conflictsWith),
+        }),
+      );
     }
   }
   lines.push(`mergeOrder=${JSON.stringify(mergeOrder(assessments))}`);

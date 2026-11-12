@@ -29,23 +29,14 @@ if (import.meta.main) {
     const slug = request.repo.replaceAll("/", "-").toLowerCase();
     const root = join(agentSignoffDirectory(), slug);
     let slot = 0;
-    for (; slot < SLOTS && !release; slot++)
-      release = acquireQueueLock(`slot-${slot}`, root);
+    for (; slot < SLOTS && !release; slot++) release = acquireQueueLock(`slot-${slot}`, root);
     if (!release) throw new Error(`all ${SLOTS} sign-off slots busy`);
     worktree = join(root, `slot-${slot - 1}`);
 
     const logs = join(agentSignoffDirectory(), "logs");
     await mkdir(logs, { recursive: true });
-    const log = join(
-      logs,
-      `${slug}-${request.sha.slice(0, 9)}-${Date.now()}.log`,
-    );
-    const step = async (
-      command: string,
-      args: string[],
-      cwd: string,
-      timeout: number,
-    ) => {
+    const log = join(logs, `${slug}-${request.sha.slice(0, 9)}-${Date.now()}.log`);
+    const step = async (command: string, args: string[], cwd: string, timeout: number) => {
       const result = await execa(command, args, {
         cwd,
         all: true,
@@ -53,69 +44,33 @@ if (import.meta.main) {
         timeout,
         forceKillAfterDelay: 5000,
       });
-      await writeFile(
-        log,
-        `$ ${command} ${args.join(" ")}\n${result.all ?? ""}\n`,
-        { flag: "a" },
-      );
+      await writeFile(log, `$ ${command} ${args.join(" ")}\n${result.all ?? ""}\n`, { flag: "a" });
       return result;
     };
-    const must = async (
-      command: string,
-      args: string[],
-      cwd: string,
-      timeout = 300_000,
-    ) => {
+    const must = async (command: string, args: string[], cwd: string, timeout = 300_000) => {
       const result = await step(command, args, cwd, timeout);
-      if (result.failed)
-        throw new Error(`${command} ${args[0]} failed; log=${log}`);
+      if (result.failed) throw new Error(`${command} ${args[0]} failed; log=${log}`);
     };
 
     await removeWorktree(canonical, worktree);
     await must(
       "git",
-      [
-        "fetch",
-        "--quiet",
-        "origin",
-        "+refs/heads/main:refs/remotes/origin/main",
-        request.sha,
-      ],
+      ["fetch", "--quiet", "origin", "+refs/heads/main:refs/remotes/origin/main", request.sha],
       canonical,
     );
-    await must(
-      "git",
-      ["worktree", "add", "--detach", worktree, request.sha],
-      canonical,
-    );
-    await must(
-      "mise",
-      ["trust", "--quiet", join(worktree, "mise.toml")],
-      worktree,
-    );
+    await must("git", ["worktree", "add", "--detach", worktree, request.sha], canonical);
+    await must("mise", ["trust", "--quiet", join(worktree, "mise.toml")], worktree);
     await must("mise", ["run", "prepare"], worktree, 1_800_000);
     // As in the queue: Composer's filament:upgrade republishes vendor assets, which would leave the checkout dirty.
-    const generated = (
-      await execa("git", ["diff", "--name-only", "-z"], { cwd: worktree })
-    ).stdout
+    const generated = (await execa("git", ["diff", "--name-only", "-z"], { cwd: worktree })).stdout
       .split("\0")
-      .filter((path) =>
-        /(?:^|\/)public\/(?:css|js|fonts)\/filament\//.test(path),
-      );
+      .filter((path) => /(?:^|\/)public\/(?:css|js|fonts)\/filament\//.test(path));
     if (generated.length)
-      await must(
-        "git",
-        ["restore", "--worktree", "--", ...generated],
-        worktree,
-      );
+      await must("git", ["restore", "--worktree", "--", ...generated], worktree);
 
     const signoff = await step(
       "mise",
-      [
-        "run",
-        "signoff",
-        ...(request.args.length ? ["--", ...request.args] : []),
-      ],
+      ["run", "signoff", ...(request.args.length ? ["--", ...request.args] : [])],
       worktree,
       10_800_000,
     );
@@ -125,17 +80,13 @@ if (import.meta.main) {
       JSON.stringify({
         exitCode: signoff.exitCode ?? 1,
         output,
-        logs: await collectLogs([
-          log,
-          ...[...output.matchAll(/log=(\/\S+)/g)].map((m) => m[1]!),
-        ]),
+        logs: await collectLogs([log, ...[...output.matchAll(/log=(\/\S+)/g)].map((m) => m[1]!)]),
       }),
     );
   } catch (error) {
     console.log(JSON.stringify({ error: String(error) }));
   } finally {
-    if (worktree)
-      await removeWorktree(canonical, worktree).catch(() => undefined);
+    if (worktree) await removeWorktree(canonical, worktree).catch(() => undefined);
     release?.();
   }
 }

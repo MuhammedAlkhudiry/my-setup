@@ -320,7 +320,8 @@ async function createSimulator(member: PoolDevice): Promise<void> {
     await run("xcrun", ["simctl", "list", "devicetypes", "runtimes", "-j"]),
   ).runtimes as SimRuntime[];
   const target = simulatorTarget(member, runtimes);
-  if (!target) throw new Error(`No iOS runtime with an iPhone device type to create ${member.name}`);
+  if (!target)
+    throw new Error(`No iOS runtime with an iPhone device type to create ${member.name}`);
   const { runtime, deviceType } = target;
 
   const udid = (
@@ -662,7 +663,7 @@ async function status(options: { json?: boolean }) {
     }
     queue.forEach((ticket, index) =>
       console.log(
-        `  queue #${index + 1} "${ticket.owner}" for ${ticket.project ?? ticket.id} ${ticket.kind ?? ""} (waiting ${ago(ticket.createdAt)})`,
+        `  queue #${index + 1} "${ticket.owner}" for ${ticket.project ?? "any project"} ${ticket.kind ?? ""} (waiting ${ago(ticket.createdAt)})`,
       ),
     );
   }
@@ -775,7 +776,10 @@ cli
 cli.command("status", "Show slots, leases, unleased devices, and the queue").action(status);
 
 cli
-  .command("reap", "Stop unleased devices beyond the warm ones; the Mac watcher's guard runs it every minute")
+  .command(
+    "reap",
+    "Stop unleased devices beyond the warm ones; the Mac watcher's guard runs it every minute",
+  )
   .action(reap);
 
 cli.help();
@@ -789,7 +793,7 @@ try {
   cli.parse(process.argv, { run: false });
   parsed = true;
   if (!cli.matchedCommand && !cli.options.help && process.argv.length === 2)
-    throw new InputError("Pass acquire, release, status, or reap; see --help");
+    throw new InputError("Pass acquire, release, run, status, or reap; see --help");
   await cli.runMatchedCommand();
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);

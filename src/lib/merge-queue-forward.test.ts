@@ -25,7 +25,11 @@ test("spare Macs forward add with a thread and status", () => {
   expect(forwardedMergeQueueArgs(["status", "--json"])).toEqual(["status", "--json"]);
   const wait = ["wait", "owner/repo", "12", "--deploy", "--timeout", "1800", "--json"];
   expect(forwardedMergeQueueArgs(wait)).toEqual(wait);
-  expect(forwardedMergeQueueArgs(["wait", "owner/repo", "12"])).toEqual(["wait", "owner/repo", "12"]);
+  expect(forwardedMergeQueueArgs(["wait", "owner/repo", "12"])).toEqual([
+    "wait",
+    "owner/repo",
+    "12",
+  ]);
 });
 
 test("forwarding rejects other commands and unexpected arguments", () => {

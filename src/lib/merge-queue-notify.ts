@@ -19,7 +19,9 @@ export type Keeper = "housekeeper" | "ops" | "business";
  * the front desk. shell/t3-inbox.zsh reads the same file's `housekeeper` key.
  */
 export function keeperThread(rootDir: string, keeper: Keeper) {
-  const threads = JSON.parse(readFileSync(join(rootDir, "config/keeper-threads.json"), "utf8")) as Partial<Record<Keeper, string>>;
+  const threads = JSON.parse(
+    readFileSync(join(rootDir, "config/keeper-threads.json"), "utf8"),
+  ) as Partial<Record<Keeper, string>>;
   const frontDesk = threads.housekeeper?.trim();
   if (!frontDesk) throw new Error("config/keeper-threads.json has no housekeeper thread");
 
@@ -33,7 +35,10 @@ export function queueNotifier(rootDir: string, home = homedir()) {
   const t3 = join(home, ".t3/bin/t3");
   const send = (thread: string, message: string, host?: string) =>
     host
-      ? execa("ssh", [host, `~/.t3/bin/t3 thread send ${quote(thread)} -`], { input: message, timeout: 30_000 })
+      ? execa("ssh", [host, `~/.t3/bin/t3 thread send ${quote(thread)} -`], {
+          input: message,
+          timeout: 30_000,
+        })
       : execa(t3, ["thread", "send", thread, "-"], { input: message, timeout: 30_000 });
 
   return async (message: string, owner?: QueueOwner) => {

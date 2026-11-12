@@ -49,6 +49,8 @@ test("device queue prints compact success, structured status, verbose detail, an
           PATH: `${bin}:${process.env.PATH}`,
           ANDROID_HOME: join(root, "sdk"),
           XDG_STATE_HOME: root,
+          DEVICE_QUEUE_IOS_SLOTS: "5",
+          DEVICE_QUEUE_ANDROID_SLOTS: "2",
         },
         stdout: "pipe",
         stderr: "pipe",
@@ -153,6 +155,8 @@ test("released pool simulators stay booted, a missing member is created once, an
           PATH: `${bin}:${process.env.PATH}`,
           ANDROID_HOME: join(root, "sdk"),
           XDG_STATE_HOME: root,
+          DEVICE_QUEUE_IOS_SLOTS: "5",
+          DEVICE_QUEUE_ANDROID_SLOTS: "2",
         },
         stdout: "pipe",
         stderr: "pipe",
@@ -251,7 +255,7 @@ test("acquire retries a timed-out probe and treats a device already off as shut 
     `#!${process.execPath}
     const args = process.argv.slice(2);
     const sim = (udid, name, state) => ({ udid, name, state });
-    if (args[1] === "list") console.log(JSON.stringify({devices:{runtime:[sim("main","Harium Main","Shutdown"),sim("a","Old A","Booted"),sim("b","Old B","Booted"),sim("c","Old C","Booted")]}}));
+    if (args[1] === "list") console.log(JSON.stringify({devices:{runtime:[sim("main","Harium Main","Shutdown"),sim("udid-old-a","Old A","Booted"),sim("udid-old-b","Old B","Booted"),sim("udid-old-c","Old C","Booted")]}}));
     if (args[1] === "shutdown") { console.error("Unable to shutdown device in current state: Shutdown"); process.exit(149); }`,
     { mode: 0o700 },
   );
@@ -289,6 +293,8 @@ test("acquire retries a timed-out probe and treats a device already off as shut 
           PATH: `${bin}:${process.env.PATH}`,
           ANDROID_HOME: join(root, "sdk"),
           XDG_STATE_HOME: root,
+          DEVICE_QUEUE_IOS_SLOTS: "5",
+          DEVICE_QUEUE_ANDROID_SLOTS: "2",
           DEVICE_QUEUE_PROBE_TIMEOUT_MS: "1000",
         },
         stdout: "pipe",
@@ -306,7 +312,7 @@ test("acquire retries a timed-out probe and treats a device already off as shut 
     expect(actions).toContain(
       'probe for "probe test" failed, retrying: ps -axo pid=,ppid=,command= timed out',
     );
-    expect(actions).toMatch(/shut down Old [ABC] \(\w\): /);
+    expect(actions).toMatch(/shut down Old [ABC] \(udid-old-[abc]\): /);
     expect(actions).not.toContain("could not shut down");
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -319,7 +325,7 @@ test("reap stops only an unleased device past the warm ones and the grace, and n
   mkdirSync(bin);
   mkdirSync(join(root, "device-queue"));
   idleHost(bin);
-  const sims = ["old", "fresh-1", "fresh-2", "fresh-3", "leased"];
+  const sims = ["udid-old", "udid-fresh-1", "udid-fresh-2", "udid-fresh-3", "udid-leased"];
   writeFileSync(
     join(bin, "xcrun"),
     `#!${process.execPath}
@@ -329,17 +335,21 @@ test("reap stops only an unleased device past the warm ones and the grace, and n
     if (args[1] === "shutdown") appendFileSync(${JSON.stringify(join(root, "shutdowns"))}, args[2] + "\\n");`,
     { mode: 0o700 },
   );
-  writeFileSync(join(bin, "adb"), `#!${process.execPath}\nconsole.log("List of devices attached");`, {
-    mode: 0o700,
-  });
+  writeFileSync(
+    join(bin, "adb"),
+    `#!${process.execPath}\nconsole.log("List of devices attached");`,
+    {
+      mode: 0o700,
+    },
+  );
   const now = Date.now();
   const minutesAgo = (minutes: number) => now - minutes * 60_000;
   writeFileSync(
     join(root, "device-queue/state.json"),
     JSON.stringify({
       leases: {
-        leased: {
-          id: "leased",
+        "udid-leased": {
+          id: "udid-leased",
           platform: "ios",
           name: "leased",
           owner: "live thread",
@@ -350,10 +360,10 @@ test("reap stops only an unleased device past the warm ones and the grace, and n
       },
       tickets: {},
       unleasedSince: {
-        old: minutesAgo(20),
-        "fresh-1": minutesAgo(1),
-        "fresh-2": minutesAgo(2),
-        "fresh-3": minutesAgo(3),
+        "udid-old": minutesAgo(20),
+        "udid-fresh-1": minutesAgo(1),
+        "udid-fresh-2": minutesAgo(2),
+        "udid-fresh-3": minutesAgo(3),
       },
     }),
   );
@@ -365,6 +375,8 @@ test("reap stops only an unleased device past the warm ones and the grace, and n
         PATH: `${bin}:${process.env.PATH}`,
         ANDROID_HOME: join(root, "sdk"),
         XDG_STATE_HOME: root,
+        DEVICE_QUEUE_IOS_SLOTS: "5",
+        DEVICE_QUEUE_ANDROID_SLOTS: "2",
       },
       stdout: "pipe",
       stderr: "pipe",
@@ -374,10 +386,10 @@ test("reap stops only an unleased device past the warm ones and the grace, and n
 
     // Two warm devices stay with open lanes; fresh-3 is beyond them but still inside the 10-minute grace.
     expect(receipt.stopped).toMatchObject([
-      { id: "old", platform: "ios", reason: "enough warm devices are available" },
+      { id: "udid-old", platform: "ios", reason: "enough warm devices are available" },
     ]);
     expect(receipt.stopped[0].unleasedMs).toBeGreaterThanOrEqual(20 * 60_000);
-    expect(await Bun.file(join(root, "shutdowns")).text()).toBe("old\n");
+    expect(await Bun.file(join(root, "shutdowns")).text()).toBe("udid-old\n");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

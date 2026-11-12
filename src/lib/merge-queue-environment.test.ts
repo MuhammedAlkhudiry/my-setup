@@ -26,10 +26,7 @@ test("worker explicitly loads managed environment and preserves paths containing
       ]),
       { extendEnv: false, env: { HOME: root, PATH: "/usr/bin:/bin" } },
     );
-    expect(result.stdout.split("\n")).toEqual([
-      join(bin, "php"),
-      join(root, "php config"),
-    ]);
+    expect(result.stdout.split("\n")).toEqual([join(bin, "php"), join(root, "php config")]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

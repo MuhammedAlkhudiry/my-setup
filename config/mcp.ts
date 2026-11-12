@@ -24,30 +24,24 @@ export const WORK_MCP_SERVERS: Record<string, McpServer> = {
   atlassian: { type: "http", url: "https://mcp.atlassian.com/v1/mcp" },
 };
 
-/**
- * Servers install removes from Claude Code, which keeps a server until it is removed by name. Codex and OpenCode drop them
- * on their own, because install rewrites their whole managed MCP section. Maestro's server started one JVM per session.
- */
-export const RETIRED_MCP_SERVERS = ["maestro"];
+type OpencodeMcpServer =
+  | { type: "local"; command: [string, ...string[]]; enabled: true; timeout: number }
+  | { type: "remote"; url: string; enabled: true };
 
-export function createOpencodeMcpConfig(): Record<
-  string,
-  {
-    type: "local";
-    command: [string, ...string[]];
-    enabled: true;
-    timeout: number;
-  }
-> {
+export function createOpencodeMcpConfig(
+  servers: Record<string, McpServer>,
+): Record<string, OpencodeMcpServer> {
   return Object.fromEntries(
-    Object.entries(MCP_SERVERS).map(([name, server]) => [
+    Object.entries(servers).map(([name, server]): [string, OpencodeMcpServer] => [
       name,
-      {
-        type: server.type,
-        command: server.command,
-        enabled: true as const,
-        timeout: server.toolTimeoutSec * 1_000,
-      },
+      server.type === "http"
+        ? { type: "remote", url: server.url, enabled: true }
+        : {
+            type: "local",
+            command: server.command,
+            enabled: true,
+            timeout: server.toolTimeoutSec * 1_000,
+          },
     ]),
   );
 }

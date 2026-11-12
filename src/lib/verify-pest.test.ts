@@ -19,7 +19,6 @@ function run(id: string, daysAgo: number, slowest: TestTime[]): RunRecord {
     host: "main-mac",
     project: "awraq-project",
     branch: "b",
-    source: "check",
     report: {
       version: 1,
       command: "signoff",
@@ -32,7 +31,6 @@ function run(id: string, daysAgo: number, slowest: TestTime[]): RunRecord {
       exitCode: 0,
       errors: [],
     },
-    waits: {},
     pest: { tests: slowest.length, seconds: 1, slowest },
   };
 }

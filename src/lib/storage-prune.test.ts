@@ -973,12 +973,7 @@ test("AVD configs, Gradle files, and browsers.json name what tool caches keep", 
         { name: "webkit", revision: "2200", revisionOverrides: { "mac14-arm64": "2105" } },
       ],
     }),
-  ).toEqual([
-    "chromium-1248",
-    "chromium_headless_shell-1248",
-    "webkit-2200",
-    "webkit-2105",
-  ]);
+  ).toEqual(["chromium-1248", "chromium_headless_shell-1248", "webkit-2200", "webkit-2105"]);
   expect(playwrightBuildDirs({ unexpected: true })).toEqual([]);
 });
 

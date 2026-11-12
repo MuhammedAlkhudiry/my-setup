@@ -274,50 +274,42 @@ cli
     }
     for (const repository of repos) {
       const backend = githubBackend(repository);
-      if (options.dryRun) {
-        const queued = readMergeQueue().entries.filter(
-          (entry) => entry.repo === repository && entry.status === "queued",
-        );
-        const open = JSON.parse(
-          (
-            await execa("gh", [
-              "pr",
-              "list",
-              "--repo",
-              repository,
-              "--state",
-              "open",
-              "--limit",
-              "100",
-              "--json",
-              "number,reviewDecision,isDraft,headRefOid",
-            ])
-          ).stdout,
-        );
-        const plan = {
-          repo: repository,
-          base: await backend.base(),
-          queued: queued.map((entry) => entry.pr),
-          approvedOpen: open.filter(
-            (pr: { reviewDecision: string; isDraft: boolean }) =>
-              pr.reviewDecision === "APPROVED" && !pr.isDraft,
-          ),
-          action: queued.length
-            ? "build candidate, verify with local sign-off, squash in order, then mise run deploy"
-            : "no queued PRs; no merge planned",
-        };
-        plans.push(plan);
-      } else await processRepository(repository, backend);
+      const queued = readMergeQueue().entries.filter(
+        (entry) => entry.repo === repository && entry.status === "queued",
+      );
+      const open = JSON.parse(
+        (
+          await execa("gh", [
+            "pr",
+            "list",
+            "--repo",
+            repository,
+            "--state",
+            "open",
+            "--limit",
+            "100",
+            "--json",
+            "number,reviewDecision,isDraft,headRefOid",
+          ])
+        ).stdout,
+      );
+      const plan = {
+        repo: repository,
+        base: await backend.base(),
+        queued: queued.map((entry) => entry.pr),
+        approvedOpen: open.filter(
+          (pr: { reviewDecision: string; isDraft: boolean }) =>
+            pr.reviewDecision === "APPROVED" && !pr.isDraft,
+        ),
+        action: queued.length
+          ? "build candidate, verify with sign-off on a sign-off host, squash in order, then mise run deploy"
+          : "no queued PRs; no merge planned",
+      };
+      plans.push(plan);
     }
     output(
-      {
-        dryRun: Boolean(options.dryRun),
-        plans,
-        directory: mergeQueueDirectory(),
-      },
-      options.dryRun
-        ? `merge-queue: dry-run ${JSON.stringify(plans)}`
-        : "merge-queue: pass complete",
+      { dryRun: true, plans, directory: mergeQueueDirectory() },
+      `merge-queue: dry-run ${JSON.stringify(plans)}`,
       options.json,
     );
   });

@@ -19,7 +19,7 @@ Complete when <a check anyone can run>. Roll back by <steps>, or <why it cannot 
 ## Checking pending actions
 
 Before a release or deploy, or when asked for pending release work, read every file in `docs/release/`. Check open triggers against real sources.
-Report each as due now, waiting on a named event, or done. Mark done items and delete completed files.
+Report each as due now, waiting on a named event, or done. Mark done items, then prune completed files as in [Pruning](#pruning).
 
 ## Pruning
 

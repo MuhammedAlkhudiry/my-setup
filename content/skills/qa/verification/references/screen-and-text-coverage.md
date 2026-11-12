@@ -2,7 +2,7 @@
 
 Start with one typical phone size on iOS; Android needs the owner's approval (see $browser-simulator-routing). Add compact screens,
 enlarged text, other breakpoints, or orientations only when the change affects layout or text size, or a failure warrants them. Capture
-affected screens once; do not repeat before/after sets for unchanged screens.
+affected screens once at 1x, cropped to the inspected region; do not repeat before/after sets for unchanged screens.
 
 Record device/simulator, viewport, orientation, locale, and font/display settings before changing them. Use common enlarged text, never the largest:
 iOS [Dynamic Type](https://developer.apple.com/design/human-interface-guidelines/typography) xxLarge (two steps above default, below accessibility

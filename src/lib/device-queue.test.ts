@@ -253,11 +253,16 @@ test("extra lanes open with CPU and memory headroom and close below the lower th
   expect(updateHeadroom(roomy, { cpuIdle: 35, memoryFree: 39 }, NOW + 1).open).toBe(false);
   expect(updateHeadroom(undefined, { cpuIdle: 25, memoryFree: 90 }, NOW).open).toBe(false);
 
+  // The ceilings differ per Mac (HOST_ANDROID_SLOTS), so judge against this Mac's.
+  const max = DEVICE_QUEUE.maxRunning;
   expect(laneLimits(false)).toEqual({
     warmDevices: 1,
-    slots: { ios: 2, android: 2 },
+    slots: { ios: Math.min(2, max.ios), android: Math.min(2, max.android) },
   });
-  expect(laneLimits(true)).toEqual({ warmDevices: 2, slots: { ios: 5, android: 2 } });
+  expect(laneLimits(true)).toEqual({
+    warmDevices: 2,
+    slots: { ios: max.ios, android: max.android },
+  });
 });
 
 test("two released devices stay warm while the host has headroom", () => {
@@ -356,7 +361,11 @@ test("a missing simulator falls back to the closest iPhone its runtime supports"
 });
 
 test("a pool simulator goes on the newest runtime that supports its device type, not the newest runtime", () => {
-  const type = (name: string) => ({ identifier: `type.${name.replaceAll(" ", "-")}`, name, productFamily: "iPhone" });
+  const type = (name: string) => ({
+    identifier: `type.${name.replaceAll(" ", "-")}`,
+    name,
+    productFamily: "iPhone",
+  });
   const runtime = (version: string, ...names: string[]) => ({
     identifier: `ios-${version}`,
     version,
@@ -372,7 +381,10 @@ test("a pool simulator goes on the newest runtime that supports its device type,
   const main = { kind: "main", deviceType: "type.iPhone-17-Pro" };
   const small = { kind: "small", deviceType: "type.iPhone-SE-(3rd-generation)" };
 
-  expect(simulatorTarget(main, runtimes)).toMatchObject({ runtime: { version: "27.0" }, deviceType: "type.iPhone-17-Pro" });
+  expect(simulatorTarget(main, runtimes)).toMatchObject({
+    runtime: { version: "27.0" },
+    deviceType: "type.iPhone-17-Pro",
+  });
   expect(simulatorTarget(small, runtimes)?.runtime.version).toBe("27.0");
   // No runtime has the configured type: the newest runtime's closest iPhone stands in.
   expect(simulatorTarget({ kind: "main", deviceType: "type.iPhone-99" }, runtimes)).toMatchObject({
@@ -450,4 +462,17 @@ test("a claim marks a simulator by UDID and an emulator by adb serial", () => {
   markClaimed(fleet, ["udid-1", "emulator-5556"]);
 
   expect([...fleet.values()].map((device) => device.claimed)).toEqual([true, true, false]);
+});
+
+test("an unleased device a live process drives is never reclaimed for idling or extra warmth", () => {
+  const state = emptyQueueState();
+  const fleet = devices(["adhoc", true, "android"], ["idle", true, "android"]);
+  const busy = new Map([["adhoc", new Set([77])]]);
+
+  const reclaimed = [NOW, NOW + DEVICE_QUEUE.warmIdleMs + 1].flatMap((at) =>
+    reapQueue(state, fleet, at, alive, busy, THREE_SLOTS).map(({ device }) => device.id),
+  );
+
+  expect(reclaimed).toEqual(["idle"]);
+  expect(fleet.get("adhoc")!.booted).toBe(true);
 });

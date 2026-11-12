@@ -20,7 +20,12 @@ agentOutput("pk", {
     process.argv.includes("--format=json") ||
     (process.argv.includes("--format") &&
       process.argv[process.argv.indexOf("--format") + 1] === "json"),
-  summary: (output) => (process.argv[2] === "new" ? output.trim().split("\n")[0] : "pk: ok"),
+  summary: (output) => {
+    const command = process.argv[2] ?? "";
+    if (command === "new") return output.trim().split("\n")[0];
+
+    return ["find", "status", "check"].includes(command) ? output.trimEnd() || "pk: ok" : "pk: ok";
+  },
 });
 
 const cli = cac("pk");

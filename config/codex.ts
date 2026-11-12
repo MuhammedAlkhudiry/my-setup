@@ -10,12 +10,7 @@ export const CODEX_CONFIG = {
   },
   features: {
     default_mode_request_user_input: true,
-    // Agents run no hooks, so Codex never runs one or asks to trust one, including hooks a repo ships.
+    // Codex runs no hooks, so it never runs one or asks to trust one, including hooks a repo ships.
     hooks: false,
   },
 } as const;
-
-/**
- * Top-level keys my-setup used to manage; install deletes them from existing Codex configs.
- */
-export const CODEX_RETIRED_TOP_LEVEL_KEYS = ["model_verbosity"] as const;

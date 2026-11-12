@@ -49,7 +49,12 @@ const PASTE_LIMIT = 3;
 
 const normalize = (text: string) => text.replace(/\s+/g, " ").trim().toLowerCase();
 
-export function validate(inventory: string[], dimensions: string[], rows: LedgerRow[], root: string): Result {
+export function validate(
+  inventory: string[],
+  dimensions: string[],
+  rows: LedgerRow[],
+  root: string,
+): Result {
   const problems: Problem[] = [];
   const known = new Set(inventory);
   const cells = new Map<string, LedgerRow>();
@@ -58,7 +63,10 @@ export function validate(inventory: string[], dimensions: string[], rows: Ledger
   const readLines = (file: string) => {
     if (!fileLines.has(file)) {
       const path = resolve(root, file);
-      fileLines.set(file, existsSync(path) && statSync(path).isFile() ? readFileSync(path, "utf8").split("\n") : null);
+      fileLines.set(
+        file,
+        existsSync(path) && statSync(path).isFile() ? readFileSync(path, "utf8").split("\n") : null,
+      );
     }
 
     return fileLines.get(file) ?? null;
@@ -67,11 +75,13 @@ export function validate(inventory: string[], dimensions: string[], rows: Ledger
   for (const row of rows) {
     const cell = { item: row.item, dimension: row.dimension, slice: row.slice };
     if (!known.has(row.item)) problems.push({ ...cell, reason: "item is not in the inventory" });
-    if (!dimensions.includes(row.dimension)) problems.push({ ...cell, reason: "dimension is not in the list" });
+    if (!dimensions.includes(row.dimension))
+      problems.push({ ...cell, reason: "dimension is not in the list" });
     cells.set(`${row.item}\u0000${row.dimension}`, row);
 
     if (row.verdict === "na") {
-      if (normalize(row.note ?? "").length < MIN_NOTE) problems.push({ ...cell, reason: "na needs a note saying why" });
+      if (normalize(row.note ?? "").length < MIN_NOTE)
+        problems.push({ ...cell, reason: "na needs a note saying why" });
       continue;
     }
     if (row.verdict !== "issue" && row.verdict !== "ok") {
@@ -81,7 +91,10 @@ export function validate(inventory: string[], dimensions: string[], rows: Ledger
 
     const quote = normalize(row.quote ?? "");
     if (!row.file || !Number.isInteger(row.line) || quote.length < MIN_QUOTE) {
-      problems.push({ ...cell, reason: `${row.verdict} needs file, line, and a quote of at least ${MIN_QUOTE} characters` });
+      problems.push({
+        ...cell,
+        reason: `${row.verdict} needs file, line, and a quote of at least ${MIN_QUOTE} characters`,
+      });
       continue;
     }
 
@@ -92,13 +105,17 @@ export function validate(inventory: string[], dimensions: string[], rows: Ledger
     }
 
     const line = row.line as number;
-    const window = normalize(lines.slice(Math.max(0, line - 1 - QUOTE_WINDOW), line + QUOTE_WINDOW).join(" "));
-    if (!window.includes(quote)) problems.push({ ...cell, reason: `quote not found near ${row.file}:${line}` });
+    const window = normalize(
+      lines.slice(Math.max(0, line - 1 - QUOTE_WINDOW), line + QUOTE_WINDOW).join(" "),
+    );
+    if (!window.includes(quote))
+      problems.push({ ...cell, reason: `quote not found near ${row.file}:${line}` });
   }
 
   for (const item of inventory) {
     for (const dimension of dimensions) {
-      if (!cells.has(`${item}\u0000${dimension}`)) problems.push({ item, dimension, reason: "missing cell" });
+      if (!cells.has(`${item}\u0000${dimension}`))
+        problems.push({ item, dimension, reason: "missing cell" });
     }
   }
 
@@ -109,18 +126,32 @@ export function validate(inventory: string[], dimensions: string[], rows: Ledger
     const note = normalize(row.note ?? "");
     if (note.length >= MIN_NOTE) byNote.set(note, [...(byNote.get(note) ?? []), row]);
     const quote = normalize(row.quote ?? "");
-    if (quote) byQuote.set(`${row.item}\u0000${quote}`, [...(byQuote.get(`${row.item}\u0000${quote}`) ?? []), row]);
+    if (quote)
+      byQuote.set(`${row.item}\u0000${quote}`, [
+        ...(byQuote.get(`${row.item}\u0000${quote}`) ?? []),
+        row,
+      ]);
   }
   for (const group of byNote.values()) {
     if (new Set(group.map((row) => row.item)).size < PASTE_LIMIT) continue;
     for (const row of group) {
-      problems.push({ item: row.item, dimension: row.dimension, slice: row.slice, reason: "note pasted across items" });
+      problems.push({
+        item: row.item,
+        dimension: row.dimension,
+        slice: row.slice,
+        reason: "note pasted across items",
+      });
     }
   }
   for (const group of byQuote.values()) {
     if (group.length < PASTE_LIMIT) continue;
     for (const row of group) {
-      problems.push({ item: row.item, dimension: row.dimension, slice: row.slice, reason: "one quote reused for several dimensions" });
+      problems.push({
+        item: row.item,
+        dimension: row.dimension,
+        slice: row.slice,
+        reason: "one quote reused for several dimensions",
+      });
     }
   }
 
@@ -133,13 +164,22 @@ export function validate(inventory: string[], dimensions: string[], rows: Ledger
     if (row.verdict === "issue") stats.issues += 1;
     slices.set(row.slice, stats);
   }
-  const rates = [...slices.values()].map((stats) => stats.issues / stats.cells).sort((a, b) => a - b);
+  const rates = [...slices.values()]
+    .map((stats) => stats.issues / stats.cells)
+    .sort((a, b) => a - b);
   const median = rates.length ? rates[Math.floor(rates.length / 2)] : 0;
   const lowSlices = [...slices.entries()]
-    .filter(([, stats]) => median > 0 && stats.cells >= 10 && stats.issues / stats.cells < median / 3)
+    .filter(
+      ([, stats]) => median > 0 && stats.cells >= 10 && stats.issues / stats.cells < median / 3,
+    )
     .map(([slice]) => slice);
   for (const slice of lowSlices) {
-    problems.push({ item: "*", dimension: "*", slice, reason: "issue rate under a third of the median slice" });
+    problems.push({
+      item: "*",
+      dimension: "*",
+      slice,
+      reason: "issue rate under a third of the median slice",
+    });
   }
 
   const sliceOf = new Map(rows.map((row) => [row.item, row.slice]));
@@ -187,19 +227,35 @@ function main(argv: string[]) {
     return 2;
   }
 
-  const inventory = [...new Set(readFileSync(inventoryPath, "utf8").split("\n").map((line) => line.trim()).filter(Boolean))];
-  const dimensions = dimensionList.split(",").map((name) => name.trim()).filter(Boolean);
+  const inventory = [
+    ...new Set(
+      readFileSync(inventoryPath, "utf8")
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean),
+    ),
+  ];
+  const dimensions = dimensionList
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
   const result = validate(inventory, dimensions, rows, resolve(flag("root") ?? "."));
 
   if (argv.includes("--json")) {
     console.log(JSON.stringify(result, null, 2));
   } else if (result.problems.length === 0) {
-    console.log(`ledger complete: ${result.items} items × ${result.dimensions} dimensions, ${result.cells} cells`);
+    console.log(
+      `ledger complete: ${result.items} items × ${result.dimensions} dimensions, ${result.cells} cells`,
+    );
   } else {
     for (const problem of result.problems) {
-      console.log(`${problem.item} [${problem.dimension}]${problem.slice === undefined ? "" : ` slice ${problem.slice}`}: ${problem.reason}`);
+      console.log(
+        `${problem.item} [${problem.dimension}]${problem.slice === undefined ? "" : ` slice ${problem.slice}`}: ${problem.reason}`,
+      );
     }
-    console.log(`reopen slices: ${result.reopenSlices.join(", ") || "none (fix cells without a slice)"}`);
+    console.log(
+      `reopen slices: ${result.reopenSlices.join(", ") || "none (fix cells without a slice)"}`,
+    );
   }
 
   return result.problems.length === 0 ? 0 : 1;

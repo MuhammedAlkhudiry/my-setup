@@ -73,17 +73,16 @@ const cli = cac("my-setup");
 
 cli
   .command("install", "Install generated rules, config, skills, and shell helpers locally")
-  .option("--compact", "Use minimal output (the default)")
   .option("--json", "Emit structured results")
   .option("--verbose", "Print details")
-  .action(async (options: { compact?: boolean }) => {
+  .action(async () => {
     const profile = await install();
     // `doctor` is part of the zsh layer, so only profiles with that layer run it.
     if (profile.shell) {
       await runScript(
         "zsh",
         [join(ROOT_DIR, "shell", "doctor.zsh"), "--verbose"],
-        options.compact ?? process.env.MY_SETUP_OUTPUT !== "verbose",
+        process.env.MY_SETUP_OUTPUT !== "verbose",
       );
     }
     startSetupMirrors();

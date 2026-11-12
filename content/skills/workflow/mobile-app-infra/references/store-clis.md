@@ -22,5 +22,5 @@ for flags. The policies here override remote ASC skills.
 - Prefix read-only `asc` calls with `ASC_READ_ONLY=1`; it refuses every mutating request.
 - Preview mutations with `--dry-run` before applying with `--confirm` (`asc`) or `--yes` (`gpc`); use each flag only where live help supports it.
 - Never use `asc web` commands. They drive an Apple Account web session, which counts as browser automation of App Store Connect.
-- Routine store work is API/CLI-only. Browser automation is allowed only for an API-unsupported declaration form when the owner asks for that
-  change. Other API-unsupported account, policy, legal, payment, and review tasks are manual blockers requiring fresh user intent.
+- Routine store work is API/CLI-only. Do API-unsupported tasks, such as declaration forms and account, policy, legal, payment, or review
+  tasks, in the store console's web UI per SELF-SERVE-TOOLS.

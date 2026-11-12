@@ -374,18 +374,34 @@ test("review runs Claude unattended with no tools and structured output", () => 
   expect(flag("--model")).toBe(MAC_WATCHER.claude.model);
   expect(flag("--effort")).toBe(MAC_WATCHER.claude.effort);
   expect(flag("--output-format")).toBe("json");
-  expect(JSON.parse(flag("--json-schema") ?? "")).toMatchObject({ required: ["runNote", "alerts"] });
+  expect(JSON.parse(flag("--json-schema") ?? "")).toMatchObject({
+    required: ["runNote", "alerts"],
+  });
 });
 
 test("review output reads the structured diagnosis and surfaces Claude errors", () => {
   const review: Review = {
     runNote: "Quiet Mac.",
-    alerts: [{ key: "low-disk", severity: "warning", title: "Low disk", evidence: "8 GiB free", fix: "Prune caches" }],
+    alerts: [
+      {
+        key: "low-disk",
+        severity: "warning",
+        title: "Low disk",
+        evidence: "8 GiB free",
+        fix: "Prune caches",
+      },
+    ],
   };
 
-  expect(parseReviewOutput(JSON.stringify({ is_error: false, structured_output: review }))).toEqual(review);
+  expect(parseReviewOutput(JSON.stringify({ is_error: false, structured_output: review }))).toEqual(
+    review,
+  );
   expect(() =>
-    parseReviewOutput(JSON.stringify({ is_error: true, result: "Not logged in", structured_output: null })),
+    parseReviewOutput(
+      JSON.stringify({ is_error: true, result: "Not logged in", structured_output: null }),
+    ),
   ).toThrow("Claude review failed: Not logged in");
-  expect(() => parseReviewOutput(JSON.stringify({ structured_output: { runNote: "x" } }))).toThrow();
+  expect(() =>
+    parseReviewOutput(JSON.stringify({ structured_output: { runNote: "x" } })),
+  ).toThrow();
 });

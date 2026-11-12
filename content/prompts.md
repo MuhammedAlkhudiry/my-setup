@@ -167,7 +167,7 @@ Map each one's states and transitions; flag impossible or unreachable states, mi
 **Running cost**
 
 ```text
-Audit infrastructure, third-party and usage-priced APIs including AI, and CI minutes. Rank the top 5 savings by estimated monthly impact.
+Audit infrastructure, third-party and usage-priced APIs including AI. Rank the top 5 savings by estimated monthly impact.
 ```
 
 ## Tests and verification

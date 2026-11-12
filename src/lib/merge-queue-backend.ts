@@ -55,7 +55,6 @@ export function githubBackend(
 ): QueueBackend {
   const gh = async (args: string[]) => (await execute("gh", args, { timeout: 60_000 })).stdout;
   const project = projectForRepo(repo);
-  const marker = join(mergeQueueDirectory(), `candidate-${repo.replaceAll("/", "-")}.json`);
   const slug = repo.replaceAll("/", "-");
   // Checks confirmed failing on a main SHA, so bisection does not rerun them for every half.
   const brokenOnMain = new Set<string>();
@@ -121,19 +120,6 @@ export function githubBackend(
       }),
       { mode: 0o600 },
     );
-    try {
-      const stale = JSON.parse(await readFile(marker, "utf8"));
-      if (
-        typeof stale.root !== "string" ||
-        !stale.root.startsWith(join(tmpdir(), "merge-queue-")) ||
-        stale.root.includes("/../")
-      )
-        throw new Error("Invalid candidate cleanup marker");
-      await rm(stale.root, { recursive: true, force: true });
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    }
-    await rm(marker, { force: true });
   };
   const signedSha = async (sha: string) => {
     const status = JSON.parse(await gh(["api", `repos/${repo}/commits/${sha}/status`]));

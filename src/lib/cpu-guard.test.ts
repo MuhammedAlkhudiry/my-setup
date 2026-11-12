@@ -58,19 +58,37 @@ test("ps output keeps the multi-word start time and the full command", () => {
 test("only this user's leftover agent tooling is a guard target", () => {
   expect(isOrphanedAgentTooling(row({}), UID)).toBe(true);
   expect(isOrphanedAgentTooling(row({ command: "node ./node_modules/.bin/vite" }), UID)).toBe(true);
-  expect(isOrphanedAgentTooling(row({ command: "bash /Users/x/Herd/bin/herd php artisan horizon" }), UID)).toBe(true);
+  expect(
+    isOrphanedAgentTooling(
+      row({ command: "bash /Users/x/Herd/bin/herd php artisan horizon" }),
+      UID,
+    ),
+  ).toBe(true);
   expect(isOrphanedAgentTooling(row({ command: "php artisan queue:work redis" }), UID)).toBe(true);
   expect(isOrphanedAgentTooling(row({ command: "php artisan migrate" }), UID)).toBe(false);
   expect(isOrphanedAgentTooling(row({ command: "tail -n0 -F /tmp/e2e/run.log" }), UID)).toBe(true);
   expect(isOrphanedAgentTooling(row({ command: "/usr/bin/tail -fn100 app.log" }), UID)).toBe(true);
-  expect(isOrphanedAgentTooling(row({ command: "ugrep -G --ignore-files --hidden -I error" }), UID)).toBe(true);
-  expect(isOrphanedAgentTooling(row({ command: "/opt/homebrew/bin/idb_companion --udid C235 --only simulator" }), UID)).toBe(true);
+  expect(
+    isOrphanedAgentTooling(row({ command: "ugrep -G --ignore-files --hidden -I error" }), UID),
+  ).toBe(true);
+  expect(
+    isOrphanedAgentTooling(
+      row({ command: "/opt/homebrew/bin/idb_companion --udid C235 --only simulator" }),
+      UID,
+    ),
+  ).toBe(true);
   expect(isOrphanedAgentTooling(row({ command: "tail -n 20 /tmp/e2e/run.log" }), UID)).toBe(false);
   expect(isOrphanedAgentTooling(row({ ppid: 4242 }), UID)).toBe(false);
   expect(isOrphanedAgentTooling(row({ uid: 0 }), UID)).toBe(false);
-  expect(isOrphanedAgentTooling(row({ command: "/path/emulator/qemu-system-aarch64 -avd vite" }), UID)).toBe(false);
-  expect(isOrphanedAgentTooling(row({ command: "/Applications/Some mcp.app/Contents/MacOS/Some" }), UID)).toBe(false);
-  expect(isOrphanedAgentTooling(row({ command: "/Users/test/.local/bin/codex mcp-server" }), UID)).toBe(false);
+  expect(
+    isOrphanedAgentTooling(row({ command: "/path/emulator/qemu-system-aarch64 -avd vite" }), UID),
+  ).toBe(false);
+  expect(
+    isOrphanedAgentTooling(row({ command: "/Applications/Some mcp.app/Contents/MacOS/Some" }), UID),
+  ).toBe(false);
+  expect(
+    isOrphanedAgentTooling(row({ command: "/Users/test/.local/bin/codex mcp-server" }), UID),
+  ).toBe(false);
   expect(isOrphanedAgentTooling(row({ command: "/usr/libexec/diagnosticd" }), UID)).toBe(false);
 });
 
@@ -94,13 +112,31 @@ test("a leftover is stopped once idle for the whole window, and any work restart
     tracked: { "100": { started: STARTED, cpuSeconds, sampledAt, idleSince } },
   });
 
-  const almost = stepGuard(idle(5, 23 * HOUR, 0), [row({ cpuSeconds: 5 })], UID, 23 * HOUR + MINUTE, options);
+  const almost = stepGuard(
+    idle(5, 23 * HOUR, 0),
+    [row({ cpuSeconds: 5 })],
+    UID,
+    23 * HOUR + MINUTE,
+    options,
+  );
   expect(almost.stop).toEqual([]);
 
-  const day = stepGuard(idle(5, 24 * HOUR - MINUTE, 0), [row({ cpuSeconds: 5.1 })], UID, 24 * HOUR, options);
+  const day = stepGuard(
+    idle(5, 24 * HOUR - MINUTE, 0),
+    [row({ cpuSeconds: 5.1 })],
+    UID,
+    24 * HOUR,
+    options,
+  );
   expect(day.stop[0]).toMatchObject({ reason: "idle", percent: 0, minutes: 24 * 60 });
 
-  const used = stepGuard(idle(5, 24 * HOUR - MINUTE, 0), [row({ cpuSeconds: 20 })], UID, 24 * HOUR, options);
+  const used = stepGuard(
+    idle(5, 24 * HOUR - MINUTE, 0),
+    [row({ cpuSeconds: 20 })],
+    UID,
+    24 * HOUR,
+    options,
+  );
   expect(used.stop).toEqual([]);
   expect(used.next.tracked["100"].idleSince).toBeUndefined();
 });
@@ -117,7 +153,11 @@ test("a cool minute or a reused pid restarts the window", () => {
   expect(hot.next.tracked["100"].hotSince).toBeUndefined();
 
   const reused = stepGuard(
-    { tracked: { "100": { started: "Mon Sep 28 08:00:00 2026", cpuSeconds: 0, sampledAt: 0, hotSince: 0 } } },
+    {
+      tracked: {
+        "100": { started: "Mon Sep 28 08:00:00 2026", cpuSeconds: 0, sampledAt: 0, hotSince: 0 },
+      },
+    },
     [row({ cpuSeconds: 10_000 })],
     UID,
     11 * MINUTE,
@@ -135,7 +175,9 @@ test("busy devices are reported as sustained CPU users, never as guard targets",
   });
   const idle = row({ pid: 2, cpuSeconds: 10, ageSeconds: 53_000 });
   const young = row({ pid: 3, cpuSeconds: 600, ageSeconds: 600 });
-  expect(sustainedCpuProcesses([idle, young, emulator], 80, 30).map((entry) => entry.pid)).toEqual([17466]);
+  expect(sustainedCpuProcesses([idle, young, emulator], 80, 30).map((entry) => entry.pid)).toEqual([
+    17466,
+  ]);
   expect(stepGuard({ tracked: {} }, [emulator], UID, 0, options).next.tracked).toEqual({});
 });
 
@@ -146,5 +188,7 @@ test("only this user's scheduled watcher runs past the time limit count as stuck
   const manual = row({ pid: 12, command: `${watcher} prune --dry-run`, ageSeconds: 90 * 60 });
   const otherUser = row({ pid: 13, uid: 0, command: `${watcher} run`, ageSeconds: 90 * 60 });
 
-  expect(stuckWatcherRuns([stuck, recent, manual, otherUser], UID, 60).map((entry) => entry.pid)).toEqual([10]);
+  expect(
+    stuckWatcherRuns([stuck, recent, manual, otherUser], UID, 60).map((entry) => entry.pid),
+  ).toEqual([10]);
 });

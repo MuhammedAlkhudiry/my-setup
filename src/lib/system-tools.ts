@@ -454,9 +454,7 @@ export const SYSTEM_TOOL_GROUPS = [
         why: "Runs the device-queue Android pool. Canary channel: stable 37.2.12 froze about 3 minutes after boot in its adb/JDWP handling; canary 37.3.6 stays up.",
         versionArgs: ["-version"],
         update: {
-          commands: [
-            'sdkmanager --sdk_root="$HOME/Library/Android/sdk" --channel=3 emulator',
-          ],
+          commands: ['sdkmanager --sdk_root="$HOME/Library/Android/sdk" --channel=3 emulator'],
           note: "Keep --channel=3: a plain sdkmanager --update stays on the stable channel. Return to stable once its version passes 37.3.6.",
         },
       },
@@ -708,7 +706,7 @@ export const SYSTEM_TOOL_GROUPS = [
       {
         name: "gh",
         level: "optional",
-        why: "Used for GitHub pull requests, the local merge queue, CI runner switching, fresh PR evidence in worktree-cleanup, and local sign-off through basecamp/gh-signoff.",
+        why: "Used for GitHub pull requests, the local merge queue, fresh PR evidence in worktree-cleanup, and local sign-off through basecamp/gh-signoff.",
         versionArgs: ["--version"],
         latest: {
           type: "homebrew",

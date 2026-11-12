@@ -48,8 +48,6 @@ export const SHARED_VERIFICATION = {
     "scripts/check-tests/reuse.test.ts",
     "scripts/check-tests/runtime.test.ts",
     "scripts/check-tests/tracking.test.ts",
-    ".github/scripts/changed-files.sh",
-    ".github/scripts/test-mysql.sh",
     "scripts/lint/test-order-oxlint-plugin.mjs",
     "scripts/test-order-lint.test.ts",
   ],

@@ -72,11 +72,14 @@ keeps the old name until `tailscale serve reset` and the mapping is added again.
 
 ## Talking between Macs
 
-- **Main Mac to spare:** `t3 thread start <project path> - < brief` (with `--provider` and `--model`), `t3 thread send <id> -`, and
-  `t3 thread show <id>`, all over SSH.
+- **Main Mac to spare:** link it once with a pairing code minted over SSH (above):
+  `t3 environment link https://<host>.<tailnet>.ts.net --pairing-code <token> --access full-access`. Links last 30 days;
+  `t3 environment list` shows each one's expiry and whether it answers. Then pass its `environmentId` to T3 tools (`t3_thread_launch`,
+  `t3_thread_send`, `t3_thread_read`, `delegate_task` with `target.environmentId`, device tools). `t3 thread` over SSH is the
+  fallback when a link is down.
 - **Spare to main:** give each spare Mac its own `~/.ssh/main-mac-inbox` key and a `main-mac-inbox` host entry. On the main Mac, authorize
-  it as `restrict,command="<setup>/shell/t3-inbox.zsh <name>" <key>`; it can then only post to the Housekeeper, with
-  `ssh main-mac-inbox send` and the message on stdin. The main Mac needs Remote Login and key-only SSH.
+  it as `restrict,command="<setup>/shell/t3-inbox.zsh <name>" <key>`; it can then only post to a keeper thread, with
+  `ssh main-mac-inbox send [ops|business]` (the Housekeeper by default) and the message on stdin, and use the merge queue below. The main Mac needs Remote Login and key-only SSH.
 - **Merge queue:** only the main Mac runs a queue worker; install removes it from spare Macs. There, `merge-queue add` and
   `merge-queue status` go to the main Mac's queue through the same inbox key, and each entry records the spare Mac as `host`.
 - T3's own MCP endpoint (`https://<host>.<tailnet>.ts.net/mcp`, with OAuth sign-ins renewed every 30 days) and its upstream
@@ -87,6 +90,8 @@ keeps the old name until `tailscale serve reset` and the mapping is added again.
 Add the spare Mac's SSH host to `"mirrors"` in the main Mac's `device.json`. Every install on the main Mac then copies its checkout,
 including uncommitted changes, its Herd PHP, and its Typesense config to each mirror and installs it there in the background (log:
 `~/Library/Logs/my-setup-mirror.log`).
+Also add it to `mergeQueue.signoffHosts` there, so `verify signoff` and the merge queue can sign off on it; a new name must first join
+that list's allowed names in this setup's device schema.
 Mirrors are read-only: the copy is non-writable except during the sync, and a Claude hook blocks writes to it off the main Mac with
 the inbox command to send the change instead. As a backstop for anything that still changed it, the mirror saves those edits as a
 patch in the spare Mac's `~/.local/state/my-setup/mirror-edits/`, sends them to the Housekeeper through the inbox, and notes them

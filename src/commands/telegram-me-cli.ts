@@ -311,13 +311,12 @@ cli
   .action(async (id: string) => printDraft(await context((ctx) => sendDraft(ctx, id)), "sent"));
 
 cli.help();
-cli.addEventListener("command:*", () => {
-  throw new Error("Unknown command; run telegram-me --help");
-});
 
 try {
   requireMainMac();
   cli.parse(process.argv, { run: false });
+  if (!cli.matchedCommand && cli.args[0])
+    throw new Error("Unknown command; run telegram-me --help");
   await cli.runMatchedCommand();
 } catch (error) {
   // mtcute errors can echo request details; keep only the message, never the stack.

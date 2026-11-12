@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import { emptyQueueState, type QueueState } from "./device-queue";
 
-// Both queues retain the existing device-queue state file. The kernel releases the
+// The device queue keeps its state in one file. The kernel releases the
 // short transaction lock on crashes; a slow live writer is never evicted by age.
 
 export const queueDirectory = () =>

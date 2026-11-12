@@ -43,6 +43,10 @@ Pause for login, OAuth, 2FA, CAPTCHA, or missing permissions. Get approval befor
 
 - Use the Ads API (`https://ads-api.x.com/12`) when `$SERVICE_CREDENTIALS_HOME/x-ads/oauth.json` exists: OAuth 1.0a user context
   (HMAC-SHA1) with its consumer key/secret and access token/secret. Verify by listing `/accounts`.
+- One login can manage several brands' ads accounts. The `handle` in `oauth.json` names only the login user, so list `/accounts` and each
+  account's `promotable_users` before concluding a brand has no X account.
+- `POST accounts/:id/tweet` with `as_user_id` and `nullcast=false` posts publicly as a promotable user the login can compose for
+  (`authenticated_user_access` shows `TWEET_COMPOSER`). It cannot reply, so a thread needs that user's own OAuth token.
 - Ads API IDs are base36 and differ from the numeric IDs in Ads Manager URLs; list campaigns and line items (ad groups) to map them. Budgets
   usually live on the line item, in local micros.
 - Access is granted per developer app through X's Ads API access form; regenerating keys in the developer console invalidates the stored

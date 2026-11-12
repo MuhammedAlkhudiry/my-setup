@@ -674,7 +674,7 @@ test("owners hear about their failed and merged PRs, the Housekeeper about deplo
   expect(messages).toEqual([
     "[owning-thread] merge-queue: owner/repo#2 failed: Candidate sign-off failed. Log: /signoff.log. You own this PR: fix it, push, and run merge-queue add again; tell the Housekeeper only if you cannot.",
     "merge-queue: owner/repo: PRs #1 merged; main is merge1; deployed merge1. Run the post-merge checks on it.",
-    "[owning-thread] merge-queue: owner/repo#1 merged in main merge1, deployed merge1. Run your change's own post-merge check: what you changed, on production or the next build. The Housekeeper runs the batch health checks.",
+    "[owning-thread] merge-queue: owner/repo#1 merged in main merge1, deployed merge1. Run your change's own post-merge check: what you changed, on production or the next build. The Ops keeper runs the batch health checks.",
   ]);
 
   messages.length = 0;

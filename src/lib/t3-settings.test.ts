@@ -35,7 +35,7 @@ test("merges managed settings and keeps each device's own settings", async () =>
       JSON.stringify({ favorites: [{ provider: "codex", model: "gpt" }], wordWrap: true }),
     );
 
-    const result = await installT3Settings({ home, env: {} });
+    const result = await installT3Settings({ home, profile: "personal", env: {} });
 
     const settings = readJson(join(stateDir, "settings.json"));
     expect(settings.providers).toEqual({ opencode: { enabled: false } });
@@ -53,7 +53,8 @@ test("re-applies the theme only when the managed theme changes", async () => {
   await withHome(async (home) => {
     const stateDir = t3StateDir(home, {});
     mkdirSync(stateDir, { recursive: true });
-    const install = (iso: string) => installT3Settings({ home, env: {}, now: () => new Date(iso) });
+    const install = (iso: string) =>
+      installT3Settings({ home, profile: "personal", env: {}, now: () => new Date(iso) });
 
     await install("2026-01-01T00:00:00.000Z");
     const rerun = await install("2026-01-02T00:00:00.000Z");
@@ -72,7 +73,9 @@ test("re-applies the theme only when the managed theme changes", async () => {
 
 test("skips devices without T3 Code", async () => {
   await withHome(async (home) => {
-    expect(await installT3Settings({ home, env: {} })).toEqual({ installed: false });
+    expect(await installT3Settings({ home, profile: "personal", env: {} })).toEqual({
+      installed: false,
+    });
     expect(existsSync(t3StateDir(home, {}))).toBe(false);
   });
 });

@@ -10,8 +10,8 @@ for 10 minutes. Scheduled passes prune disk and raise threshold alerts.
   and cleanup held while mobile tooling or a live agent session is active; those holds are intentional.
 - Report `cpu.sustained` processes without obvious active work, including devices busy for hours, stuck helpers, or tools pinning a core.
   Name the process, busy duration, and fix, such as shutting down a device after QA, slimming it, or repairing the spinning tool.
-- High CPU, load, RAM use, or swap use alone means busy, not unresponsive. Report repeated stops of the same tool in `cpu.guardStops`; fix that tool.
+- High CPU, load, RAM use, or swap use alone means busy, not unresponsive. Report repeated stops of the same tool in `cpu.guardStops`, which also lists leftovers stopped for sitting idle and recordings stopped for running too long; fix that tool.
 - Report large processes outside memcap's control that remain near the top of `topProcesses` with critical memory pressure, such as browsers, IDEs, or apps.
-- Always report `diskFreeGib` below 10; name the biggest entries in `largestDiskUsers` or known caches.
+- Always report `diskFreeGib` below 40; name the biggest entries in `largestDiskUsers` or known caches.
 - Order issues by importance under kebab-case `key` values. Explain the causes of open threshold alerts instead of repeating them.
 - `evidence` quotes snapshot numbers or log lines; `fix` names a concrete source change; `runNote` describes the snapshot in one sentence.

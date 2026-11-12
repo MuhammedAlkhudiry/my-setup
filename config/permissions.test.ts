@@ -21,7 +21,6 @@ test("renders one allowlist into every agent permission surface", () => {
   expect(claude).toContain("Bash(git *)");
   expect(claude).toContain("Edit(~/PhpstormProjects/**)");
   expect(claude).toContain("Read(**/.env*)");
-  expect(claude).not.toContain("Bash(ddev *)");
 
   const rules = renderCodexRules(profile);
   expect(rules).toContain('prefix_rule(pattern=["git"], decision="allow")');

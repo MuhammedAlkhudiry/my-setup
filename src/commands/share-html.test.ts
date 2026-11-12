@@ -230,8 +230,7 @@ describe("share-html", () => {
       return Promise.reject(new Error("still down"));
     };
 
-    expect(withRetry(failing, 2, () => 0)).rejects.toThrow("still down");
-    await Bun.sleep(5);
+    await expect(withRetry(failing, 2, () => 0)).rejects.toThrow("still down");
     expect(calls).toBe(2);
   });
 });

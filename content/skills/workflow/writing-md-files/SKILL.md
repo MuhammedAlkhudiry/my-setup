@@ -5,7 +5,7 @@ description: Use before creating or editing Markdown files.
 
 ## Minimal by default
 
-A line stays only if removing it would cause a wrong action or wasted time. Follow shared response guidance.
+A line stays only if removing it would cause a wrong action or wasted time.
 
 - Keep lasting decisions and reasons, boundaries, non-obvious steps, and completion criteria.
 - Cut what code, command help, or linked sources already explain; remove obvious steps, background, history, and motivation that change no action.
@@ -16,7 +16,7 @@ A line stays only if removing it would cause a wrong action or wasted time. Foll
 
 ## Accuracy
 
-- Verify facts before editing; use one authoritative source per fact/instruction and link instead of copying. Mark unverifiable claims unresolved.
+- Verify facts before editing; mark unverifiable claims unresolved.
 - Fix stale or repeated documentation as you find it.
 - Read the result and diff for lost or invented meaning. Run available Markdown/link checks; report structural changes, factual corrections,
   and unresolved gaps.

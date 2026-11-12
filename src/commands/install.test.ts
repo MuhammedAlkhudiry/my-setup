@@ -175,8 +175,10 @@ test("skill reinstall replaces stale files, preserves custom skills, and omits s
 });
 
 test("install drops only the Herd and Bun lines tools add to .zshrc", () => {
-  const importLine = '[ -f "$HOME/.config/zsh-sync/custom.zsh" ] && source "$HOME/.config/zsh-sync/custom.zsh"';
-  const herd = 'export HERD_PHP_85_INI_SCAN_DIR="/Users/x/Library/Application Support/Herd/config/php/85"';
+  const importLine =
+    '[ -f "$HOME/.config/zsh-sync/custom.zsh" ] && source "$HOME/.config/zsh-sync/custom.zsh"';
+  const herd =
+    'export HERD_PHP_85_INI_SCAN_DIR="/Users/x/Library/Application Support/Herd/config/php/85"';
 
   expect(onlyKnownToolAdditions([importLine, herd])).toBe(true);
   expect(onlyKnownToolAdditions([importLine, herd, "alias ll='ls -l'"])).toBe(false);

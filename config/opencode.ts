@@ -30,7 +30,7 @@ export function createOpencodeConfig(profile: DeviceProfile, homeDir: string): O
     $schema: "https://opencode.ai/config.json",
     instructions: [],
     plugin: [],
-    mcp: createOpencodeMcpConfig(),
+    mcp: createOpencodeMcpConfig(profile.mcpServers),
     tools: {},
     model: MODELS.opencode.smart,
     small_model: MODELS.opencode.fast,

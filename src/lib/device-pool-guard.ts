@@ -12,7 +12,8 @@ export function simpleCommands(text: string): string[][] {
   const heredocs: Array<{ delimiter: string; indented: boolean }> = [];
   const endWord = () => {
     if (redirect && (word || quoted)) {
-      if (redirect !== "file") heredocs.push({ delimiter: word, indented: redirect === "indented-heredoc" });
+      if (redirect !== "file")
+        heredocs.push({ delimiter: word, indented: redirect === "indented-heredoc" });
       redirect = undefined;
     } else if (word || quoted) words.push(word);
     word = "";
@@ -117,7 +118,9 @@ export function invokedProgram(words: string[]): { name: string; args: string[] 
     const [first, ...tail] = rest;
     if (/^[A-Za-z_]\w*=/.test(first!) || KEYWORDS.has(first!)) rest = tail;
     else if (WRAPPERS.has(basename(first!)))
-      rest = tail.includes("--") ? tail.slice(tail.indexOf("--") + 1) : tail.filter((word) => !word.startsWith("-"));
+      rest = tail.includes("--")
+        ? tail.slice(tail.indexOf("--") + 1)
+        : tail.filter((word) => !word.startsWith("-"));
     else break;
   }
   const [program = "", ...args] = rest;
@@ -141,7 +144,8 @@ function deviceCreation(words: string[]): string | undefined {
   if (name === "xcrun" || name === "simctl") {
     const simctl = name === "simctl" ? args : args.slice(args.indexOf("simctl") + 1);
     const [subcommand] = operands(simctl);
-    return (name === "simctl" || args.includes("simctl")) && (subcommand === "create" || subcommand === "clone")
+    return (name === "simctl" || args.includes("simctl")) &&
+      (subcommand === "create" || subcommand === "clone")
       ? `simctl ${subcommand}`
       : undefined;
   }

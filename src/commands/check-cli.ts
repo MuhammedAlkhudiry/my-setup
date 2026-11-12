@@ -10,10 +10,11 @@ agentOutput("check", {
 });
 
 const formatFiles = [
-  "src/cli.ts",
-  "src/commands",
-  "src/lib",
-  "config",
+  // Globs only: oxfmt skips plain directories once any glob is listed.
+  "src/**/*.ts",
+  "config/**/*.ts",
+  "config/**/*.json",
+  "content/**/*.ts",
   "**/*.md",
   "package.json",
   "tsconfig.json",

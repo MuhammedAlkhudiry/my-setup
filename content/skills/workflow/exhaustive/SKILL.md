@@ -38,9 +38,6 @@ It fails missing cells, quotes absent from the cited line, bare `na` cells, past
 below the rest. Rerun the sweep for the slices it reopens, with only their items, at most twice; anything still failing is unresolved.
 Confirm each `unlisted` item from the blind re-inventory, add those in scope to the inventory, and sweep them too.
 
-When CODEX-WORK allows Codex for analysis, also send 20 clean cells, half from the last slices, to a Codex `delegate_task` for a second
-model's spot-check.
-
 ## 5. Synthesis and report
 
 Build conclusions only from the ledger; never re-read code to summarize it. Report:

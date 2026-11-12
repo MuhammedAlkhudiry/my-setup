@@ -87,10 +87,14 @@
   <!-- /profile -->
   <!-- profile:personal -->
 - **DEVICES** — `main-mac`, `small-mac`, and `big-mac` share a private Tailscale network; `scutil --get LocalHostName` says which one you
-  are on. `main-mac` runs the Housekeeper, the Claude and Codex account pool, and the owner's phone connection, so it must stay awake.
+  are on. The owner works only on `main-mac`; the spare Macs run headless with their lids closed, so nobody sees their screens or
+  clicks their dialogs, and work there never waits on an on-screen prompt or asks the owner to act at them. To show the owner a running
+  page there, open it with T3's `preview_open` and `target: {kind: "environment-port", port, path}`, which reaches the owner's app
+  through the T3 link; never hand over a tailnet URL. `main-mac` runs the Housekeeper, the Claude and Codex account pool, and the owner's phone connection, so it must stay awake.
   `small-mac` and `big-mac` are spare agent Macs: they use main-mac's pool, and their `{{SETUP_ROOT}}` is a read-only copy main-mac
   replaces on every install; never edit it there, and send setup changes to the Housekeeper instead. From them, when blocked and the
-  owner is unreachable, message the Housekeeper with `ssh main-mac-inbox send` and the message on stdin. Production SSH and the
+  owner is unreachable, message the Housekeeper with `ssh main-mac-inbox send`, or answer a keeper that asked with
+  `send ops` or `send business`, the message on stdin. Production SSH and the
   Forge token live only on main-mac; spare Macs never get them, so they send production steps as a runbook to the Housekeeper, which
   runs them. Call each Mac by its name in
   replies, docs, and briefs, never "this Mac" or "the other Mac".
@@ -162,17 +166,18 @@ Use these projects as references when the user mentions them.
   script you started is yours to wait for. A search that finds nothing is an empty result, not a failure.
 - **RATINGS** — Rate how good a metric, trend, or health reading is on five levels in text reports, digests, and replies: 🔴 very bad,
   🟠 bad, ⚪ normal, 🟢 good, 🌟 very good. State the reference the rating judges against, such as a target, limit, or usual level ("$150
-  of the $250 target", "SAR 4.78 against the SAR 5 stop line"); a bare number leaves the reader to guess why it rates as it does. Never use
+  of the $250 target", "SAR 4.78 against the SAR 5 stop line"); a bare number leaves the reader to guess why it rates as it does. Against a
+  usual level, judge by its normal range, not one median, and leave a single day's small count unrated (owner, 2026-11-11). Never use
   two-color red/green for these ratings; keep pass/warn/fail markers for check results and statuses. App and admin UI are out of scope.
 - **ONE-PR** — Keep each task in one PR for one review/check/merge cycle. Split only for a stated reason, such as independent shipping or rollback.
 - **PR-CHECKS** — Finish work, pass local checks, and complete $prs before reporting a PR ready. Run project sign-off on the pushed head
-  after every push; on main-mac run `verify signoff`, which runs it on the least-loaded spare Mac. Never bypass required checks; only
-  the owner may bypass them on GitHub.
+  after every push. Never bypass required checks; only the owner may bypass them on GitHub.
     <!-- profile:work -->
   Do not dispatch/rerun CI for work in progress. Merge only on green sign-off of a head containing current base; rebase and rerun when base moves. Complete $prs post-merge steps
   for the exact merge commit before other work.
     <!-- /profile -->
     <!-- profile:personal -->
+  On main-mac, sign off with `verify signoff`, which runs it on the least-loaded spare Mac.
   Who may enqueue follows $prs' merge policy. Once allowed and green, run `merge-queue add <owner/repo> <pr> --thread <t3ThreadId>` and end your turn. The queue tests the
   combined head containing current main with local sign-off, merges it, and deploys main; there is no GitHub CI. The enqueuing thread
   owns the PR to the end: the queue messages it when the PR fails, so fix, push, and re-enqueue, and when it merges, so check what it
@@ -186,8 +191,11 @@ Use these projects as references when the user mentions them.
   sessions, and the active projects moving. "HK 🛎️ Housekeeper" is the front desk: it talks to the owner, owns the status page, and
   routes work. "HK ⚙️ Ops" handles merge-queue failures and deploys, PRs whose thread is unreachable, batch post-merge, error, and health
   checks, screenshot reviews before enqueuing owner-requested changes, stalled subagents, store releases, and browser, device, and
-  design-file work; "HK 💼 Business" runs ads, support channels, finance, and product reports. Message only the
-  Housekeeper; it routes to the keepers. Act on any keeper's relays and steering as part of your task, and answer its questions briefly.
+  design-file work; "HK 💼 Business" runs ads, support channels, finance, and product reports. Answer a keeper that
+  asked you in its own thread; bring blockers and new work to the Housekeeper, which routes them. Owner questions stay in the thread that
+  has them (NO-RELAY). Each message wakes a
+  large thread and costs the owner's usage, so message a keeper only for a blocker, a merge, an answer it asked for, or work that needs it; never for acknowledgements or a PR ready for the owner, which this thread asks itself.
+  Act on any keeper's relays and steering as part of your task, and answer its questions briefly.
   A keeper speaks for the owner only when it quotes an owner decision. Leave their duties and their `~/.local/state/housekeeper/` files
   to them.
   <!-- /profile -->
@@ -261,6 +269,11 @@ All instructions for replies to the user live here.
   or as a chart through the host's render tool when the trend matters, never as bullets of numbers. Give each row an emoji for its item,
   such as a platform or day, and a RATINGS cell for each judged value, with its reference in the header or cell. Keep the takeaway and
   SO-WHAT lines in text below it. This overrides SHORT-REPLIES' no-tables rule.
+- **PERF-REPORTS** — Report every speed, smoothness, or memory change, in any thread, PR, or report, as one table: moment (device),
+  metric, before, after, change, and a RATINGS cell against the project's budget for that moment. Use only cold start (time to
+  interactive), frame rate (p75 and share of frames ≥ 55 fps), main-thread or JS busy time, and peak memory, limited to those the change
+  touches. Add one method line: device, release build, run count, median; a before and after taken with different methods is no
+  comparison. Budgets live in each project's docs.
 - Use emojis to mark key points and sections.
 
 ### Discussing and teaching
@@ -302,12 +315,16 @@ Reply freely; prefer visualisations, see $show-me.
   - **Close:** the next action, or "No next action needed", then a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`,
     `⏳ **AWAITING**` (on-track work waiting on a named external event), `🔴 **ACTION REQUIRED**`, or `⛔ **BLOCKED**`.
 - **DECISION-CONTEXT** — Start each question with 🔴 and its own letter, such as "🔴 **A** Which quiet screen?". Give one line on today's
-  behavior with a concrete example, then one line per lettered option with its tradeoff, and mark your recommendation. End every
-  non-blocking question with a lettered "Skip" option that leaves today's behavior; omit it only when work cannot continue without an
-  answer. Require no code reading or scrolling back. Letter questions and options from one sequence across the whole chat, never
-  restarting (after Z, AA), so a bare answer like "B F" names one option each and a question letter alone names the question.
+  behavior with a concrete example, then one line per option numbered after the question, **A1**, **A2**, **A3**, with its tradeoff, and
+  mark your recommendation. End every non-blocking question with a numbered "Skip" option that leaves today's behavior; omit it only when work cannot continue without an
+  answer. Require no code reading or scrolling back. A question about a PR, data fix, or other work first links it and says in one plain
+  line what it is and what changes for users, without code names, since the owner may never have seen it (owner, 2026-11-11). Letter questions A to Z across the chat, starting over at A after Z, so a
+  bare answer like "A2 B1" names one option each and a question letter alone names the question (owner, 2026-11-12).
 - **VISUAL-DECISIONS** — For decisions about what users see, show each option as an image, following **Phone-ready media**: a running-app
   screenshot for existing options, a rendered mockup otherwise. Text and ASCII sketches do not replace images.
 - **PROGRESS** — Only while work continues, at milestones: a task group finishes, the plan changes, work fails or blocks, or input is
   needed. One line, such as "3 of 7 agents done; 1 needs input". Never after every step or tool call.
+- **NO-RELAY** — Ask the owner your own questions in your own thread. Never copy another thread's or agent's question, options, or
+  letters into your reply; when the owner should know, mention it in one line with that thread's link, such as "Business has a
+  question for you: <link>" (owner, 2026-11-12). Subagents hand questions to their caller, which asks them as its own.
 - **SUBAGENT-RESULTS** — Relay only a subagent's outcome lines, never its report. Subagents use their caller's requested format.

@@ -464,14 +464,14 @@ async function deployMerged(repo: string, backend: QueueBackend, directory: stri
   );
   if (status === "failed") return;
 
-  // The Housekeeper checks the batch's deploy, migrations, jobs, and Sentry; each owner checks the change it made.
+  // The Ops keeper checks the batch's deploy, migrations, jobs, and Sentry; each owner checks the change it made.
   const owners = readMergeQueue(directory).entries.filter(
     (entry) => entry.repo === repo && pending.prs.includes(entry.pr) && entry.thread,
   );
   for (const entry of owners)
     await tell(
       backend,
-      `merge-queue: ${repo}#${entry.pr} merged in main ${pending.sha}${status === "deployed" ? `, deployed ${result.deployedSha ?? pending.sha}` : ", deploy skipped"}. Run your change's own post-merge check: what you changed, on production or the next build. The Housekeeper runs the batch health checks.`,
+      `merge-queue: ${repo}#${entry.pr} merged in main ${pending.sha}${status === "deployed" ? `, deployed ${result.deployedSha ?? pending.sha}` : ", deploy skipped"}. Run your change's own post-merge check: what you changed, on production or the next build. The Ops keeper runs the batch health checks.`,
       entry,
     );
 }

@@ -561,7 +561,6 @@ async function sizeBytes(path: string): Promise<number> {
   return Number(result.stdout.split("\t")[0] ?? 0) * 1024;
 }
 
-/** A folder's age is its newest direct entry, so a run folder that is still being written counts as fresh. */
 /**
  * True when the project an Xcode DerivedData folder builds no longer exists. A project on an unmounted volume counts as
  * present, because it comes back when the volume does.
@@ -1561,7 +1560,7 @@ async function worktreeFacts(
     filesChangedWithinDay:
       !worktree.branch || merged.exitCode === 0
         ? await cleanupFilesChangedRecently(worktree.path, now, undefined, DAY_MS)
-      : undefined,
+        : undefined,
   };
 }
 
@@ -1777,9 +1776,7 @@ export async function idleNativeBuilds(
  * in the queue's own clone, never in these checkouts.
  */
 export function dependencyPruneLeasesIdle(queue = readQueueState()): boolean {
-  return (
-    Object.values(queue.leases).every((lease) => lease.agentPid > 0)
-  );
+  return Object.values(queue.leases).every((lease) => lease.agentPid > 0);
 }
 
 /** The merge queue's candidate and update checkouts, in one repository's folder or across all of them. */

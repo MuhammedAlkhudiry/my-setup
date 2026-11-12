@@ -1,5 +1,5 @@
 // `verify signoff`: the agent's sign-off, run on the least-loaded spare Mac and posted as a local one would be.
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -13,6 +13,7 @@ import {
   type RemoteSignoffRun,
 } from "../lib/agent-signoff";
 import { readSignoffHosts } from "../lib/device";
+import { acquireQueueLock } from "../lib/merge-queue";
 import { remoteSignoffCommand, type HostLoad } from "../lib/merge-queue-hosts";
 
 export const SIGNOFF_HELP = `Usage: verify signoff [--local] [--json] [--verbose] [<mise run signoff options>]
@@ -25,6 +26,8 @@ it, the least loaded for its size; it runs here only when none is reachable, or 
   --verbose    print the sign-off's own output after the result line
 Other options, such as --full, --fresh, and --no-update, go to \`mise run signoff\`.`;
 
+const LOG_DAYS = 14;
+
 const git = async (cwd: string, ...args: string[]) =>
   (await execa("git", args, { cwd, reject: false })).stdout.trim();
 
@@ -35,9 +38,7 @@ export async function verifySignoff(argv: string[]): Promise<number> {
   }
   const json = argv.includes("--json");
   const verbose = argv.includes("--verbose");
-  const args = argv.filter(
-    (arg) => !["--json", "--verbose", "--local"].includes(arg),
-  );
+  const args = argv.filter((arg) => !["--json", "--verbose", "--local"].includes(arg));
   const root = await git(process.cwd(), "rev-parse", "--show-toplevel");
   if (!root) {
     console.error("verify signoff: run it inside a project checkout");
@@ -63,18 +64,12 @@ export async function verifySignoff(argv: string[]): Promise<number> {
   }
   if (
     spares.length &&
-    (await git(root, "ls-remote", "origin", `refs/heads/${branch}`)).split(
-      /\s/,
-    )[0] !== sha
+    (await git(root, "ls-remote", "origin", `refs/heads/${branch}`)).split(/\s/)[0] !== sha
   ) {
-    const pushed = await execa(
-      "git",
-      ["push", "--quiet", "origin", `HEAD:refs/heads/${branch}`],
-      {
-        cwd: root,
-        reject: false,
-      },
-    );
+    const pushed = await execa("git", ["push", "--quiet", "origin", `HEAD:refs/heads/${branch}`], {
+      cwd: root,
+      reject: false,
+    });
     if (pushed.failed) {
       notes.push("push failed");
       spares = [];
@@ -83,10 +78,15 @@ export async function verifySignoff(argv: string[]): Promise<number> {
 
   const logs = join(agentSignoffDirectory(), "logs");
   await mkdir(logs, { recursive: true });
-  const log = join(
-    logs,
-    `${repo?.replaceAll("/", "-") ?? "local"}-${sha.slice(0, 9)}-${started}`,
-  );
+  // Nothing else cleans these: drop logs past two weeks on every run.
+  for (const name of await readdir(logs)) {
+    const path = join(logs, name);
+    const age = started - ((await stat(path).catch(() => undefined))?.mtimeMs ?? started);
+    if (age > LOG_DAYS * 86_400_000) await rm(path, { force: true });
+  }
+  // Spare Macs that cannot take the run now: unreachable, or already tried.
+  const reserved = new Set<string>();
+  const log = join(logs, `${repo?.replaceAll("/", "-") ?? "local"}-${sha.slice(0, 9)}-${started}`);
   const run = await agentSignoff(
     { repo: repo ?? "", branch, sha, args },
     {
@@ -96,17 +96,36 @@ export async function verifySignoff(argv: string[]): Promise<number> {
           timeout: 20_000,
           reject: false,
         });
-        if (result.failed) throw new Error(`unreachable ${host}`);
-        return { ...JSON.parse(result.stdout), host } as HostLoad;
+        if (result.failed) {
+          reserved.add(host);
+          throw new Error(`unreachable ${host}`);
+        }
+
+        // A held reservation marks the Mac busy, so the choice prefers a free one over waiting on it.
+        const release = acquireQueueLock(`signoff-host-${host}`);
+        release?.();
+        const sample = JSON.parse(result.stdout) as HostLoad;
+        return { ...sample, host, busy: sample.busy || !release };
       },
       remote: async (host, request) => {
+        // Hold the queue's per-host reservation, so a queue sign-off never shares this Mac with us.
+        let release = acquireQueueLock(`signoff-host-${host}`);
+        // A queue sign-off holds this Mac: try the next spare Mac first, and wait only on the last one.
+        reserved.add(host);
+        if (!release && spares.some((spare) => !reserved.has(spare)))
+          throw new Error("reserved by a queue sign-off");
+        if (!release) notes.push(`waiting for ${host}'s reservation`);
+        while (!release) {
+          await Bun.sleep(10_000);
+          release = acquireQueueLock(`signoff-host-${host}`);
+        }
+
         const result = await execa("ssh", agentSignoffCommand(host), {
           input: JSON.stringify(request),
           timeout: 14_400_000,
           reject: false,
-        });
-        if (result.failed)
-          throw new Error(`SSH failed: ${result.stderr.trim().slice(-300)}`);
+        }).finally(release);
+        if (result.failed) throw new Error(`SSH failed: ${result.stderr.trim().slice(-300)}`);
         const envelope = JSON.parse(result.stdout) as RemoteSignoffRun & {
           error?: string;
         };
@@ -137,27 +156,20 @@ export async function verifySignoff(argv: string[]): Promise<number> {
   let mainLog = `${log}.log`;
   if (run.logs) {
     const localized = localizeLogs(run.output, run.logs, log);
-    for (const file of localized.files)
-      await writeFile(file.path, file.content);
+    for (const file of localized.files) await writeFile(file.path, file.content);
     output = localized.output;
     mainLog = localized.files[0]?.path ?? mainLog;
   }
 
   // The spare Mac merged main into the branch and pushed it: bring this checkout to that head.
   if (run.host !== "main-mac" && branch) {
-    const tip = (
-      await git(root, "ls-remote", "origin", `refs/heads/${branch}`)
-    ).split(/\s/)[0];
+    const tip = (await git(root, "ls-remote", "origin", `refs/heads/${branch}`)).split(/\s/)[0];
     if (tip && tip !== sha) {
       await git(root, "fetch", "--quiet", "origin", `refs/heads/${branch}`);
-      const merged = await execa(
-        "git",
-        ["merge", "--quiet", "--ff-only", "FETCH_HEAD"],
-        {
-          cwd: root,
-          reject: false,
-        },
-      );
+      const merged = await execa("git", ["merge", "--quiet", "--ff-only", "FETCH_HEAD"], {
+        cwd: root,
+        reject: false,
+      });
       notes.push(
         merged.failed
           ? `origin/${branch} moved to ${tip.slice(0, 9)}; pull it`

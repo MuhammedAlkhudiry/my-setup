@@ -14,10 +14,40 @@ function repo() {
 }
 
 const okRows: LedgerRow[] = [
-  { item: "a.ts", dimension: "errors", verdict: "issue", file: "a.ts", line: 2, quote: "return fetch('/api/items')", slice: 0 },
-  { item: "a.ts", dimension: "types", verdict: "ok", file: "a.ts", line: 1, quote: "export function load()", slice: 0 },
-  { item: "b.ts", dimension: "errors", verdict: "issue", file: "b.ts", line: 3, quote: "} catch {}", slice: 1 },
-  { item: "b.ts", dimension: "types", verdict: "na", note: "no types in a plain call site", slice: 1 },
+  {
+    item: "a.ts",
+    dimension: "errors",
+    verdict: "issue",
+    file: "a.ts",
+    line: 2,
+    quote: "return fetch('/api/items')",
+    slice: 0,
+  },
+  {
+    item: "a.ts",
+    dimension: "types",
+    verdict: "ok",
+    file: "a.ts",
+    line: 1,
+    quote: "export function load()",
+    slice: 0,
+  },
+  {
+    item: "b.ts",
+    dimension: "errors",
+    verdict: "issue",
+    file: "b.ts",
+    line: 3,
+    quote: "} catch {}",
+    slice: 1,
+  },
+  {
+    item: "b.ts",
+    dimension: "types",
+    verdict: "na",
+    note: "no types in a plain call site",
+    slice: 1,
+  },
 ];
 
 test("passes a complete ledger whose quotes exist", () => {
@@ -50,9 +80,17 @@ test("fails missing cells, invented quotes, and bare na", () => {
 test("flags a note pasted across items", () => {
   const root = repo();
   const items = ["a.ts", "b.ts", "c.ts"];
-  const rows = items.map((item) => ({ item, dimension: "types", verdict: "na" as const, note: "not applicable here", slice: 0 }));
+  const rows = items.map((item) => ({
+    item,
+    dimension: "types",
+    verdict: "na" as const,
+    note: "not applicable here",
+    slice: 0,
+  }));
   const result = validate(items, ["types"], rows, root);
   rmSync(root, { recursive: true });
 
-  expect(result.problems.filter((problem) => problem.reason === "note pasted across items")).toHaveLength(3);
+  expect(
+    result.problems.filter((problem) => problem.reason === "note pasted across items"),
+  ).toHaveLength(3);
 });

@@ -12,6 +12,11 @@ export interface PoolDevice extends PoolMember {
 
 const IPHONE = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
 const SMALL_IPHONE = "com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation";
+/**
+ * A plain iPhone for store and announcement screenshots. A runtime that supports only iPhone Duo would give the other
+ * kinds a Duo, whose status pill spoils marketing shots; the queue then picks the newest runtime that still has it.
+ */
+const STANDARD_IPHONE = "com.apple.CoreSimulator.SimDeviceType.iPhone-17";
 
 /**
  * Each project has as many simulators as iOS slots, so five concurrent leases never run out. Extra devices repeat a kind
@@ -21,7 +26,13 @@ export const DEVICE_POOL: PoolDevice[] = [
   { project: "harium", platform: "ios", kind: "main", name: "Harium Main", deviceType: IPHONE },
   { project: "harium", platform: "ios", kind: "main", name: "Harium Main 2", deviceType: IPHONE },
   { project: "harium", platform: "ios", kind: "main", name: "Harium Main 3", deviceType: IPHONE },
-  { project: "harium", platform: "ios", kind: "small", name: "Harium Small", deviceType: SMALL_IPHONE },
+  {
+    project: "harium",
+    platform: "ios",
+    kind: "small",
+    name: "Harium Small",
+    deviceType: SMALL_IPHONE,
+  },
   {
     project: "harium",
     platform: "ios",
@@ -30,12 +41,38 @@ export const DEVICE_POOL: PoolDevice[] = [
     deviceType: IPHONE,
     locale: "ar_SA",
   },
+  {
+    project: "harium",
+    platform: "ios",
+    kind: "standard",
+    name: "Harium Standard",
+    deviceType: STANDARD_IPHONE,
+  },
   { project: "harium", platform: "android", kind: "main", name: "Harium_Main" },
   { project: "awraq", platform: "ios", kind: "main", name: "Awraq Main", deviceType: IPHONE },
   { project: "awraq", platform: "ios", kind: "main", name: "Awraq Main 2", deviceType: IPHONE },
   { project: "awraq", platform: "ios", kind: "main", name: "Awraq Main 3", deviceType: IPHONE },
-  { project: "awraq", platform: "ios", kind: "small", name: "Awraq Small", deviceType: SMALL_IPHONE },
-  { project: "awraq", platform: "ios", kind: "small", name: "Awraq Small 2", deviceType: SMALL_IPHONE },
+  {
+    project: "awraq",
+    platform: "ios",
+    kind: "small",
+    name: "Awraq Small",
+    deviceType: SMALL_IPHONE,
+  },
+  {
+    project: "awraq",
+    platform: "ios",
+    kind: "small",
+    name: "Awraq Small 2",
+    deviceType: SMALL_IPHONE,
+  },
+  {
+    project: "awraq",
+    platform: "ios",
+    kind: "standard",
+    name: "Awraq Standard",
+    deviceType: STANDARD_IPHONE,
+  },
   { project: "awraq", platform: "android", kind: "main", name: "Awraq_Main" },
 ];
 

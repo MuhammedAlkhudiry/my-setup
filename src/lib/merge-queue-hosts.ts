@@ -46,7 +46,8 @@ export type HostCommand = (
 
 const worker =
   'source "$HOME/PhpstormProjects/my-setup/shell/zsh-custom.zsh" >/dev/null || exit; exec bun --no-env-file "$HOME/PhpstormProjects/my-setup/src/commands/merge-queue-signoff-worker.ts"';
-export const remoteSignoffCommand = (host: string, probe = false) => [
+/** SSH options for every sign-off connection: never prompt, and drop a dead link within a minute. */
+export const SIGNOFF_SSH_OPTIONS = [
   "-o",
   "BatchMode=yes",
   "-o",
@@ -55,6 +56,9 @@ export const remoteSignoffCommand = (host: string, probe = false) => [
   "ServerAliveInterval=15",
   "-o",
   "ServerAliveCountMax=3",
+];
+export const remoteSignoffCommand = (host: string, probe = false) => [
+  ...SIGNOFF_SSH_OPTIONS,
   host,
   `${worker}${probe ? " --probe" : ""}`,
 ];
@@ -113,7 +117,7 @@ export async function dispatchSignoff(options: {
     if (!host || !release) {
       if (!available.length || now() >= deadline)
         throw new QueueTransientError(
-          `No eligible sign-off Mac; unavailable: ${excluded.join(", ")}`,
+          `No eligible sign-off Mac${excluded.length ? `; unavailable: ${excluded.join(", ")}` : ""}`,
         );
       await pause(Math.min(5000, Math.max(1, deadline - now())));
       continue;

@@ -43,7 +43,7 @@ Reject these; remove existing ones using [Pruning](#pruning):
 - Keep tests independent so they run in parallel. Time each new or changed test file before reporting.
 - If a suite exceeds [its stage budget](../CHECKLIST.md#stage-budgets), speed up or prune slow tests, or record a follow-up with $project-docs.
   Never raise the budget.
-- Run end-to-end journeys, device flows, mutation testing, and coverage only as manual commands before a release.
+- Run end-to-end journeys, device flows, mutation testing, and coverage only as manual commands, when requested.
 
 ## Pruning
 

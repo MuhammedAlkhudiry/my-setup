@@ -24,7 +24,7 @@ a major change or rewrite can be a valid finding.
 - **Completeness** (high): unfinished work, unusable/weakened/deleted tests, and shortcuts hiding incomplete work. Judge added tests with
   $verification; report rejected tests.
 - **Performance** (high): unnecessary work, resource use, and slowdowns introduced by the diff.
-- **Security** (low): exposed data and unauthorized access or actions.
+- **Security** (low, but always report real security problems): exposed data and unauthorized access or actions.
 - **Backward compatibility** (high): existing clients, integrations, and stored data.
 - **Complexity** (very high, auto-fix): simplify or rewrite with $simplify while preserving functionality.
 - **Proportionality** (very high): each fix sized to how often real users hit its problem. Flag fixes that slow or break a common path,

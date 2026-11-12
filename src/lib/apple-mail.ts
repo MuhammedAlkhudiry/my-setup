@@ -216,15 +216,12 @@ export async function readMessage(
 
   const summary = toSummary(row, names);
   const file = findEmlx(root, row.url, id);
-  if (!file)
-    return { ...summary, to: [], cc: [], text: "", attachments: [], bodyMissing: true };
+  if (!file) return { ...summary, to: [], cc: [], text: "", attachments: [], bodyMissing: true };
 
   const email = await PostalMime.parse(emlxMessage(readFileSync(file)));
   const addresses = (list: typeof email.to) =>
     (list ?? []).map((entry) =>
-      "address" in entry && entry.address
-        ? formatAddress(entry.address, entry.name)
-        : entry.name,
+      "address" in entry && entry.address ? formatAddress(entry.address, entry.name) : entry.name,
     );
 
   return {

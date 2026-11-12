@@ -19,10 +19,7 @@ cd app && bunx jest <path>
 mise run api:check
 ```
 
-Where spare Macs take sign-offs, agents run `verify signoff`, which runs the project's sign-off on the least-loaded one.
-
 - Replace examples using project configuration and installed help. Use `#` comments for groups/conditions; put explanations in task descriptions.
-- Benchmarks share the Mac with other agents' jobs; timings can be noisy, so compare repeated runs or medians. See $verification.
 - Provide one gate for changed areas, running independent checks in parallel and fixing formatting; one full command for all areas and CI checks;
   and an iterate command per test runner, using impact analysis when available, such as Pest `--tia` or Jest `--findRelatedTests`.
 - Limit PR CI to changed areas. Exclude end-to-end journeys, mutation testing, coverage, and paid evals.
@@ -30,7 +27,7 @@ Where spare Macs take sign-offs, agents run `verify signoff`, which runs the pro
   green/red `signoff` commit status.
 - Sign-off runs only the stages a changed path can affect, including dependents such as generated clients, shared fixtures, and build inputs.
   Unknown paths, runner scripts, and tool versions select every stage. List the path-to-stage mapping in the checklist. `--full` runs every
-  stage; merge-queue batch verification always passes it.
+  stage.
 - Gate/sign-off may reuse results only for identical code, installed dependencies, and CI mode; provide a force-rerun flag. Run generators consumed
   by checks whenever anything else runs. The full command never skips checks.
 - Isolate test databases, ports, and caches per worktree so concurrent commands cannot reuse or drop each other's data.

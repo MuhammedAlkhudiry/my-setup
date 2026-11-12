@@ -8,9 +8,8 @@ description: Use before browser, simulator, or emulator automation.
 - Use the named tool; repair setup and report blockers instead of substituting. Otherwise follow [Tools](#tools).
 - To QA a project's own app, use its QA runbook commands first, such as `mise run qa:ios` or `mise run qa:web`: they start the checkout's
   servers with a seeded sign-in and lease the device or a `playwright-cli` session; `mise run qa:stop` cleans up.
-- Prefer a connector, API, or CLI when no UI is needed; text snapshots otherwise. Capture affected screens at 1x on one phone size
-  by default, cropped to the inspected region. Add compact or enlarged-text shots only for layout or text-size
-  changes; do not repeat before/after sets for unchanged screens.
+- Prefer a connector, API, or CLI when no UI is needed; text snapshots otherwise. Capture screens per $verification's screen and text
+  coverage.
 - Accept needed cookie banners and standard terms. Ask before terms that cost money, sign a contract, or share personal data.
 - Run `playwright-cli` headless in a named session; close sessions you opened when done.
 - Prefer iOS unless the work is Android-specific. Keep device windows visible.
@@ -30,15 +29,14 @@ device-queue acquire <project> <ios|android> [--kind <kind>] --owner "<thread ti
 - The grant is a JSON receipt with the device `id` (simulator UDID or AVD name), `serial` for an emulator, and `ready: true`: the queue has
   booted and slimmed the device. Use the `id` for builds, `run`, and `release`.
 - Run `acquire` in the background when queued. On exit 75, retry within two minutes to keep your place.
-- Acquire before building onto the device.
 - Renew with the same `acquire` before each round; it returns your device. After 15 idle minutes, a waiting agent can take it.
 - Run device-driving commands through `device-queue run <id> --owner "<thread title>" --timeout-seconds 120 -- <argv...>`;
   timeout kills the command group. Add `--json` before `--` when you need the command output.
 - `device-queue release <id>` keeps the device warm for up to 30 minutes: one device, or two while the host has headroom. A waiting lease
   that needs the slot evicts it.
-- This Mac runs up to five iOS simulators and two Android emulators at once. Two simulators always run; each slot above two opens only while
-  CPU idle (smoothed over three minutes) is at least 30% and memory at least 45% free. Each AVD has 2 GiB RAM. Set `DEVICE_QUEUE_IOS_SLOTS`
-  or `DEVICE_QUEUE_ANDROID_SLOTS` for another host.
+- A host runs up to five iOS simulators and two Android emulators at once (big-mac: one emulator). Two simulators always run; each
+  slot above two opens only while CPU idle (smoothed over three minutes) is at least 30% and memory at least 45% free. Each AVD has
+  2 GiB RAM. Set `DEVICE_QUEUE_IOS_SLOTS` or `DEVICE_QUEUE_ANDROID_SLOTS` for another host.
 
 ## Tools
 

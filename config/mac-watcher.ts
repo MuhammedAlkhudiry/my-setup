@@ -34,7 +34,7 @@ export const MAC_WATCHER = {
     /** Physical footprint including compressed memory when available; otherwise ps RSS. */
     maxFseventsdMemoryGib: 2,
     maxSystemDaemonMemoryGib: 4,
-    /** Pruning/diagnostic floor; alerts use criticalDiskFreeGib. */
+    /** Diagnostic floor shown in status; alerts use criticalDiskFreeGib. */
     minDiskFreeGib: 60,
     criticalDiskFreeGib: 40,
     /** Processes whose parent died, matching agent tooling, older than this, count as leaks. */
@@ -229,7 +229,9 @@ export const MEMCAP_CONFIG: Record<string, string | number> = {
   GC_IDLE_SEC: 600,
   SIM_ACTIVE_CPU_SEC: 2,
   MOBILE_TOOLING_IDLE_SEC: 300,
-  TIER3_REQUIRE_NO_SESSION: 0,
+  // device-queue owns simulator and emulator shutdown and never stops a leased device; memcap ignores leases,
+  // so tier 3 only reaps simulators while no agent session is alive.
+  TIER3_REQUIRE_NO_SESSION: 1,
   STALE_PASS_SEC: 300,
   LOG_THROTTLE_SEC: 1800,
   TIER1_MIN_AGE_SEC: 300,

@@ -13,9 +13,6 @@ export const passed = (run: RunRecord) => run.report.exitCode === 0;
 /** Steps the run actually executed, as opposed to passes reused from an earlier run on the same code. */
 const ranSteps = (run: RunRecord) =>
   run.report.checks.filter((check) => !check.reused && check.status !== "skipped");
-const waitOf = (run: RunRecord, task: string) => run.waits[task] ?? 0;
-const ranSecondsOf = (run: RunRecord, task: string, seconds: number) =>
-  Math.max(0, seconds - waitOf(run, task));
 
 export function median(values: number[]): number | null {
   if (!values.length) return null;
@@ -143,7 +140,7 @@ function usualStep(
       continue;
     for (const check of run.report.checks)
       if (check.task === task && check.status === "passed" && !check.reused)
-        samples.push(ranSecondsOf(run, task, check.seconds));
+        samples.push(check.seconds);
   }
 
   return {
@@ -157,7 +154,6 @@ export interface StepProfile {
   status: "passed" | "failed" | "skipped";
   reused: boolean;
   startedSeconds: number | null;
-  waitSeconds: number;
   ranSeconds: number;
   usual: Usual;
   /** The run time's absolute band (rateStepTime); reused and skipped steps are ⚪. */
@@ -170,7 +166,7 @@ export interface StepProfile {
 export function profile(runs: RunRecord[], run: RunRecord) {
   const usual = usualRun(runs, run.project, run.report.command, at(run));
   const steps: StepProfile[] = run.report.checks.map((check) => {
-    const ranSeconds = check.reused ? 0 : ranSecondsOf(run, check.task, check.seconds);
+    const ranSeconds = check.reused ? 0 : check.seconds;
     const stepUsual = usualStep(runs, run.project, check.task, at(run) + 1, run.id);
 
     return {
@@ -178,7 +174,6 @@ export function profile(runs: RunRecord[], run: RunRecord) {
       status: check.status,
       reused: check.reused,
       startedSeconds: check.startedSeconds ?? null,
-      waitSeconds: check.reused ? 0 : waitOf(run, check.task),
       ranSeconds,
       usual: stepUsual,
       rating: check.reused || check.status === "skipped" ? "⚪" : rateStepTime(ranSeconds),
@@ -196,7 +191,6 @@ export function profile(runs: RunRecord[], run: RunRecord) {
     rating: ran ? rateRunTime(run.report.seconds) : ("⚪" as Rating),
     change: ran ? changeVsUsual(run.report.seconds, usual.seconds) : null,
     steps,
-    waitSeconds: Object.values(run.waits).reduce((total, wait) => total + wait, 0),
   };
 }
 
@@ -238,7 +232,7 @@ function peakConcurrency(steps: StepProfile[]): number {
     .filter((step) => step.startedSeconds !== null)
     .flatMap((step) => [
       [step.startedSeconds!, 1],
-      [step.startedSeconds! + stepLength(step), -1],
+      [step.startedSeconds! + step.ranSeconds, -1],
     ])
     .sort((a, b) => a[0]! - b[0]! || a[1]! - b[1]!);
   let running = 0;
@@ -249,24 +243,22 @@ function peakConcurrency(steps: StepProfile[]): number {
   return peak;
 }
 
-const stepLength = (step: StepProfile) => step.waitSeconds + step.ranSeconds;
-
 /** First start to last end; without start times, the one-by-one phases' summed length or the parallel one's longest. */
 function phaseSeconds(phase: Phase, steps: StepProfile[]): number {
   if (steps.length && steps.every((step) => step.startedSeconds !== null))
     return (
-      Math.max(...steps.map((step) => step.startedSeconds! + stepLength(step))) -
+      Math.max(...steps.map((step) => step.startedSeconds! + step.ranSeconds)) -
       Math.min(...steps.map((step) => step.startedSeconds!))
     );
-  if (phase === "parallel") return Math.max(0, ...steps.map(stepLength));
+  if (phase === "parallel") return Math.max(0, ...steps.map((step) => step.ranSeconds));
 
-  return steps.reduce((sum, step) => sum + stepLength(step), 0);
+  return steps.reduce((sum, step) => sum + step.ranSeconds, 0);
 }
 
 /**
  * Groups a run's executed steps by the phase check.ts ran them in: the first ones in order, the rest `jobs` at a time,
  * then the isolated and last ones alone. The critical path is the shortest the run could be with unlimited parallel
- * slots: every one-by-one step plus the slowest parallel one, queue wait excluded.
+ * slots: every one-by-one step plus the slowest parallel one.
  */
 export function phaseProfile(item: Profile, plan: CheckPlan | null) {
   const ran = item.steps.filter((step) => !step.reused && step.status !== "skipped");
@@ -304,8 +296,6 @@ export function phaseProfile(item: Profile, plan: CheckPlan | null) {
     otherSeconds: Math.max(0, item.run.report.seconds - phases.reduce((t, p) => t + p.seconds, 0)),
   };
 }
-
-export type PhaseView = ReturnType<typeof phaseProfile>;
 
 export interface RepeatingFailure {
   project: string;
@@ -377,7 +367,7 @@ export interface TrendDay {
   timeRating: Rating;
 }
 
-/** One row per local day for the last `days` days of one command in one project, judged against the 30 days before. */
+/** One row per local day for the last `days` days of one command in one project, judged against the last 30 days, those days included. */
 export function trend(runs: RunRecord[], project: string, command: string, now: number, days = 7) {
   const mine = runs.filter((run) => run.project === project && run.report.command === command);
   const baseline = mine.filter((run) => now - at(run) < USUAL_DAYS * DAY);
@@ -418,7 +408,6 @@ export interface SlowStep {
   task: string;
   medianSeconds: number;
   runs: number;
-  medianWait: number;
   /** The share of executed sign-offs this step ran in. */
   share: number;
 }
@@ -429,23 +418,21 @@ export function slowSteps(runs: RunRecord[], project: string, now: number, days 
     (run) =>
       run.project === project && run.report.command === "signoff" && now - at(run) < days * DAY,
   );
-  const byTask = new Map<string, { ran: number[]; wait: number[] }>();
+  const byTask = new Map<string, number[]>();
 
   for (const run of signoffs)
     for (const check of ranSteps(run)) {
-      const entry = byTask.get(check.task) ?? { ran: [], wait: [] };
-      entry.ran.push(ranSecondsOf(run, check.task, check.seconds));
-      entry.wait.push(waitOf(run, check.task));
-      byTask.set(check.task, entry);
+      const ran = byTask.get(check.task) ?? [];
+      ran.push(check.seconds);
+      byTask.set(check.task, ran);
     }
 
   return [...byTask.entries()]
-    .map(([task, { ran, wait }]) => ({
+    .map(([task, ran]) => ({
       project,
       task,
       medianSeconds: median(ran)!,
       runs: ran.length,
-      medianWait: median(wait)!,
       share: signoffs.length ? ran.length / signoffs.length : 0,
     }))
     .sort((a, b) => b.medianSeconds - a.medianSeconds);
@@ -492,8 +479,6 @@ export function pestProfile(runs: RunRecord[], run: RunRecord) {
 
   return { run, pest: run.pest!, tests };
 }
-
-export type PestProfile = ReturnType<typeof pestProfile>;
 
 export interface SlowerTest extends TestTime {
   runs: number;

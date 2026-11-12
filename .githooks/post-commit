@@ -16,4 +16,4 @@ fi
 printf '%s\n' "[my-setup] Running mise run install after commit..."
 
 cd "$repo_root"
-mise run install -- --compact
+mise run install

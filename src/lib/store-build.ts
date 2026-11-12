@@ -35,7 +35,11 @@ export function parseEasVariables(output: string): EasVariable[] {
 export function missingSecrets(
   variables: EasVariable[],
   env: Record<string, string | undefined>,
-  options: { allowMissing: string[]; hasSentryLogin: boolean; fileExists: (path: string) => boolean },
+  options: {
+    allowMissing: string[];
+    hasSentryLogin: boolean;
+    fileExists: (path: string) => boolean;
+  },
 ): string[] {
   const missing: string[] = [];
 
@@ -73,7 +77,9 @@ export function xcodePinBlocksLocal(image: string | undefined, localXcode: strin
 // A local build's shell overrides the EAS environment, so a development URL or analytics flag exported in the shell
 // would reach the store build; every EXPO_PUBLIC_ variable must come from EAS.
 export function storeBuildEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([name]) => !name.startsWith("EXPO_PUBLIC_")));
+  return Object.fromEntries(
+    Object.entries(env).filter(([name]) => !name.startsWith("EXPO_PUBLIC_")),
+  );
 }
 
 type Entitlements = Record<string, unknown>;
@@ -89,7 +95,12 @@ interface AppExtension {
 export interface IntrospectedConfig {
   name?: string;
   ios?: { bundleIdentifier?: string; entitlements?: Entitlements };
-  extra?: { eas?: { projectId?: string; build?: { experimental?: { ios?: { appExtensions?: AppExtension[] } } } } };
+  extra?: {
+    eas?: {
+      projectId?: string;
+      build?: { experimental?: { ios?: { appExtensions?: AppExtension[] } } };
+    };
+  };
 }
 
 export interface SigningTarget {
@@ -142,7 +153,9 @@ export const EAS_IOS_PROFILES_QUERY = `
 
 interface IosAppCredentials {
   appleAppIdentifier: { bundleIdentifier: string };
-  iosAppBuildCredentialsList: { provisioningProfile: { provisioningProfile: string | null } | null }[];
+  iosAppBuildCredentialsList: {
+    provisioningProfile: { provisioningProfile: string | null } | null;
+  }[];
 }
 
 export interface EasIosProfilesResponse {
@@ -155,7 +168,8 @@ export function easProfiles(response: EasIosProfilesResponse): Map<string, strin
   const profiles = new Map<string, string>();
 
   for (const credentials of response.data?.app?.byId?.iosAppCredentials ?? []) {
-    const profile = credentials.iosAppBuildCredentialsList[0]?.provisioningProfile?.provisioningProfile;
+    const profile =
+      credentials.iosAppBuildCredentialsList[0]?.provisioningProfile?.provisioningProfile;
     const { bundleIdentifier } = credentials.appleAppIdentifier;
 
     if (profile && !profiles.has(bundleIdentifier)) {
@@ -170,7 +184,9 @@ export function easProfiles(response: EasIosProfilesResponse): Map<string, strin
 // `<array/>` grants none.
 export function profileAppGroups(profileBase64: string): string[] {
   const plist = Buffer.from(profileBase64, "base64").toString("latin1");
-  const list = plist.match(/<key>com\.apple\.security\.application-groups<\/key>\s*<array>([\s\S]*?)<\/array>/)?.[1];
+  const list = plist.match(
+    /<key>com\.apple\.security\.application-groups<\/key>\s*<array>([\s\S]*?)<\/array>/,
+  )?.[1];
 
   return [...(list ?? "").matchAll(/<string>([^<]*)<\/string>/g)].map((match) => match[1]);
 }

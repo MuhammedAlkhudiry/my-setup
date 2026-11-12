@@ -21,9 +21,11 @@ export function recordingKind(command: string): string | undefined {
   const words = command.split(/\s+/);
   const program = words[0]?.slice(words[0].lastIndexOf("/") + 1);
 
-  if (program === "ffmpeg" && /(^|\s)-f\s+avfoundation(\s|$)/.test(command)) return "ffmpeg screen recording";
+  if (program === "ffmpeg" && /(^|\s)-f\s+avfoundation(\s|$)/.test(command))
+    return "ffmpeg screen recording";
   if (/(^|[\s/])simctl\s+io\s+\S+\s+recordVideo(\s|$)/.test(command)) return "simulator recording";
-  if (program === "screencapture" && words.some((word) => /^-\w*[vV]/.test(word))) return "screencapture recording";
+  if (program === "screencapture" && words.some((word) => /^-\w*[vV]/.test(word)))
+    return "screencapture recording";
   return undefined;
 }
 
@@ -33,7 +35,8 @@ export type RecordingOwner =
   | { kind: "agent-device"; pid: number }
   | { kind: "none" };
 
-const MERGE_QUEUE_RUN = /merge-queue(-cli\.ts)?\s+run(\s|$)/;
+/** The queue worker on the main Mac, or the sign-off worker it or `verify signoff` starts on a spare Mac. */
+const MERGE_QUEUE_RUN = /merge-queue(-cli\.ts)?\s+run(\s|$)|(merge-queue|agent)-signoff-worker\.ts/;
 const AGENT_CLI = /(^|\/)(claude|codex|opencode)(\s|$)/;
 const AGENT_DEVICE_DAEMON = /agent-device\/.*daemon\.js/;
 
@@ -89,7 +92,9 @@ export function staleRecordings(
 /** Rounds a duration to the unit a person reads it in, such as "45m" or "2h47m". */
 export function formatDuration(ms: number): string {
   const minutes = Math.round(ms / 60_000);
-  return minutes < 60 ? `${minutes}m` : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m`;
+  return minutes < 60
+    ? `${minutes}m`
+    : `${Math.floor(minutes / 60)}h${String(minutes % 60).padStart(2, "0")}m`;
 }
 
 export interface StoppedDevice {
@@ -106,7 +111,8 @@ export function reaperMessage(
 ): string | undefined {
   const parts = [
     ...devices.map(
-      (device) => `${device.name} (${device.platform}, unleased ${formatDuration(device.unleasedMs)})`,
+      (device) =>
+        `${device.name} (${device.platform}, unleased ${formatDuration(device.unleasedMs)})`,
     ),
     ...recordings.map(
       ({ row, kind, owner, stoppedBy }) =>

@@ -54,11 +54,12 @@ log(`${args.items.length} items × ${args.dimensions.length} dimensions in ${sli
 const dimensionText = args.dimensions.map(d => `- ${d.name}: ${d.check}`).join('\n')
 const key = (item, dimension) => `${item}\u0000${dimension}`
 
-const auditPrompt = (items, extra = '') => `Task: ${args.task}
+// `missing` narrows a retry to the cells the first pass left out, so it does not re-audit the whole slice.
+const auditPrompt = (items, missing) => `Task: ${args.task}
 Repository root: ${args.root}
 
 Judge each item below on each dimension. Read every item in full yourself, in the order given; give the last item the same depth as
-the first. Return exactly one row per item × dimension (${items.length * args.dimensions.length} rows).
+the first. ${missing ? `Return exactly one row for each of the ${missing.length} cells listed under Missing cells, and no other rows.` : `Return exactly one row per item × dimension (${items.length * args.dimensions.length} rows).`}
 - issue or ok: file (relative to the root), line, and a verbatim quote of the code that shows it, copied from that line or within
   2 lines of it. The quote must show the thing judged, not a nearby signature.
 - na: a note saying why the dimension cannot apply to this item.
@@ -68,7 +69,7 @@ Dimensions:
 ${dimensionText}
 
 Items:
-${items.map((item, i) => `${i + 1}. ${item}`).join('\n')}${extra}`
+${items.map((item, i) => `${i + 1}. ${item}`).join('\n')}${missing ? `\n\nMissing cells:\n${missing.join('\n')}` : ''}`
 
 function gaps(items, rows) {
   const have = new Set(rows.map(r => key(r.item, r.dimension)))
@@ -83,7 +84,7 @@ async function audit(items, index, label) {
   let rows = first ? first.rows : []
   const missing = gaps(items, rows)
   if (missing.length) {
-    const retry = await agent(auditPrompt(items, `\n\nOnly these cells are missing; return rows for them:\n${missing.join('\n')}`),
+    const retry = await agent(auditPrompt(items.filter(item => missing.some(cell => cell.startsWith(`${item} [`))), missing),
       { label: `${label} ${index} gaps`, phase: 'Audit', schema: ROWS })
     rows = rows.concat(retry ? retry.rows : [])
   }

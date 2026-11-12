@@ -6,7 +6,8 @@ description: Use to triage open pull requests or keep them mergeable.
 ## Triage
 
 1. Run `bun <skill-dir>/scripts/triage-prs.ts <repo-path> --json`; `<skill-dir>` is the installed $triage-prs directory.
-   Use its size, stack, CI, conflict, and overlap assessments to build a parent-first merge order; `--verbose` prints the proposed order.
+   Use its size, stack, sign-off, conflict, and overlap assessments to build a parent-first merge order; `--verbose` prints the proposed order.
+   Sign-off is the head commit's `signoff` status; a failing one blocks the PR, and none means the head was never signed off.
 2. Check what the script cannot judge:
    - Unresolved review feedback/questions, owner decisions, and requests to keep, pause, or close PRs.
    - Unusual release steps, released-client compatibility, migrations, blast radius, security, privacy, and QA needs.
@@ -23,7 +24,7 @@ After triage, run only when asked to babysit PRs or keep them mergeable.
 
 For approved PRs with green sign-off, follow $prs: enqueue with `merge-queue add`, then stop. Do not refresh queued PRs solely because
 main moved; the queue tests their combined candidate and merges main into a queued PR that falls behind. Use the steps below for
-conflicts the queue reports by file, or checks before enqueue.
+conflicts the queue reports by file, or sign-off before enqueue.
 
 <!-- /profile -->
 <!-- profile:work -->
@@ -33,17 +34,16 @@ Never merge; the user merges.
 <!-- /profile -->
 
 1. Parents first, check owner holds, review feedback, drafts, and checkout ownership. In a clean PR worktree, run
-   `bun <skill-dir>/scripts/pr-refresh.ts <pr-url> --repo <checkout> --expected-head <full-pr-head-sha> --json`;
-   See `--help` for prerequisites, receipts, and exits; `--dry-run` is read-only.
+   `bun <skill-dir>/scripts/pr-refresh.ts <pr-url> --repo <checkout> --expected-head <full-pr-head-sha> --json`.
+   It signs off with `verify signoff` where installed, otherwise `mise run signoff`. See `--help` for prerequisites, receipts, and exits;
+   `--dry-run` is read-only.
    - **Behind its base or parent:** let the script merge the actual base, check, push normally, and sign off.
    - **Conflicting:** resolve and commit mechanical conflicts, then rerun with the original expected head. Inspect exit 4 before restarting:
      the remote head/base or local checkout changed.
    - **Parent squash-merged:** rebase the child onto the default branch with `git rebase --onto` and push with `--force-with-lease`.
-   - **Failing CI:** fix mechanical lint, type, and test failures.
+   - **Failing sign-off:** fix mechanical lint, type, and test failures from its logs, then rerun.
    - **Drafts:** mark ready only when requested and checks pass.
-2. Handle squash-restacking and CI fixes yourself: local checks before every push, pushed-head sign-off afterward. The script never
-   force-pushes or answers feedback.
-3. Stop for logic decisions, behavior changes, or review feedback; use $code-review and $prs for an authorized follow-up. Coordinate only
-   conflicting work in the same checkout or shared resources.
-4. Watch open PRs with the harness watcher, or rerun on a schedule when unavailable. Repeat from step 1 after a merge, CI failure, or conflict.
+2. The script never force-pushes or answers feedback; restacks and fixes follow $prs.
+3. Stop for logic decisions, behavior changes, or review feedback; use $code-review and $prs for an authorized follow-up.
+4. Watch open PRs with the harness watcher, or rerun on a schedule when unavailable. Repeat from step 1 after a merge, failed sign-off, or conflict.
 5. Stop when every PR is mergeable, merged, closed, or waiting on the user; resend the PR status blocks that changed.

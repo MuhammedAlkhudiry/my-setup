@@ -11,5 +11,4 @@ export const print = {
   success: detail,
   info: detail,
   warning: (message: string) => console.log(message),
-  dim: detail,
 };

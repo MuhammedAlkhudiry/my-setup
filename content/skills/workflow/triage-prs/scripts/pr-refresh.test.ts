@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const script = fileURLToPath(new URL("./pr-refresh.ts", import.meta.url));
 
-function fixture(conflict = false) {
+function fixture(conflict = false, verify = true) {
   const root = mkdtempSync(join(tmpdir(), "pr-refresh-test-"));
   const source = join(root, "source");
   const cwd = join(root, "checkout");
@@ -44,7 +44,8 @@ function fixture(conflict = false) {
   const realGit = Bun.spawnSync(["which", "git"]).stdout.toString().trim();
   const env = {
     ...process.env,
-    PATH: `${bin}:${process.env.PATH}`,
+    // Without the verify stub, leave the real verify off PATH so the mise fallback runs.
+    PATH: verify ? `${bin}:${process.env.PATH}` : `${bin}:${dirname(realGit)}:/bin`,
     FIXTURE: root,
     FIXTURE_GIT: realGit,
   };
@@ -76,14 +77,30 @@ if(a[1]==='signoff' && existsSync(root+'/behind-main')) {
   writeFileSync(root+'/source/'+(mode==='conflict'?'app.txt':'queued.txt'), 'main moved '+Date.now());
   git('add','.'); git('commit','-m','main moved while queued');
   if(mode!=='always') unlinkSync(root+'/behind-main');
-  console.log(JSON.stringify({command:'signoff',errors:[{item:'signoff-behind-main'}]})); process.exit(1);
+  if(a.includes('--json')) console.log(JSON.stringify({command:'signoff',errors:[{item:'signoff-behind-main'}]}));
+  else console.log('FAIL signoff-behind-main log=/tmp/signoff.log');
+  process.exit(1);
 }
-console.log(a[1]==='signoff' ? JSON.stringify({command:'signoff',errors:[]}) : 'check output');
+console.log(a[1]==='signoff' ? (a.includes('--json') ? JSON.stringify({command:'signoff',errors:[]}) : 'signoff passed') : 'check output');
 if(a[1]==='check' && existsSync(root+'/move-base')) spawnSync(process.env.FIXTURE_GIT,['update-ref','refs/heads/main','refs/heads/feature'],{cwd:root+'/source'});
 if(existsSync(root+'/fail-'+a[1])) process.exit(1); }
 `,
     { mode: 0o755 },
   );
+  // Like verify signoff: runs the project's sign-off without --json and wraps its output in one JSON object.
+  if (verify)
+    writeFileSync(
+      join(bin, "verify"),
+      `#!${process.execPath}
+const { spawnSync } = require('node:child_process');
+const a = process.argv.slice(2);
+if (a[0] !== 'signoff' || !a.includes('--json')) process.exit(9);
+const run = spawnSync('mise', ['run','signoff'], {encoding:'utf8'});
+console.log(JSON.stringify({ok: run.status === 0, host: 'main-mac', output: run.stdout.trim(), notes: []}));
+process.exit(run.status);
+`,
+      { mode: 0o755 },
+    );
   const invoke = (...extra: string[]) => {
     const result = Bun.spawnSync(
       [
@@ -134,6 +151,7 @@ test("dry-run is read-only; a real refresh merges, pushes normally, certifies th
     const pushed = f.git(f.source, "rev-parse", "feature");
     expect(pushed).not.toBe(f.head);
     expect(result.receipt.checkReceipt.head).toBe(pushed);
+    expect(result.receipt.checkReceipt.signoff).toBe("verify signoff");
     expect(f.git(f.cwd, "rev-parse", "HEAD")).toBe(pushed);
     expect(f.calls()).toBe("check\nsignoff\n");
     expect(existsSync(join(f.cwd, ".git", "pr-refresh-state.json"))).toBe(false);
@@ -234,8 +252,13 @@ test("base movement during checks stops with exit 4 before push or certification
 }, 20000);
 
 test("main moving while sign-off waits is refreshed and pushed; retries are bounded and conflicts stop", () => {
-  for (const mode of ["once", "always", "conflict"]) {
-    const f = fixture();
+  for (const [mode, verify] of [
+    ["once", true],
+    ["once", false],
+    ["always", true],
+    ["conflict", true],
+  ] as const) {
+    const f = fixture(false, verify);
     try {
       writeFileSync(join(f.root, "behind-main"), mode);
       const result = f.invoke();
@@ -248,6 +271,9 @@ test("main moving while sign-off waits is refreshed and pushed; retries are boun
           f.git(f.cwd, "merge-base", "--is-ancestor", f.git(f.source, "rev-parse", "main"), "HEAD"),
         ).toBe("");
         expect(f.git(f.source, "rev-parse", "feature")).toBe(result.receipt.checkReceipt.head);
+        expect(result.receipt.checkReceipt.signoff).toBe(
+          verify ? "verify signoff" : "mise run signoff",
+        );
       }
       if (mode === "conflict") {
         expect(result.receipt.resume.conflicts).toEqual(["app.txt"]);

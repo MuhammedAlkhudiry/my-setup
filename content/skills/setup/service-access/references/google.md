@@ -19,9 +19,9 @@ Read mail with `mail-read`; see [Email](others.md#email).
 
 ## Google Play
 
-Use `gpc` through $mobile-app-infra. Reserve Play Console browser work for explicit user-run account, policy, legal, payment, or review tasks outside
-the API. Load the project's service account from `mobile-release.env`; verify with `gpc --ci releases status --app <package>`. Keep keys in
-agent-managed storage; pause for key creation or Play Console grants.
+Use `gpc` through $mobile-app-infra. Use the Play Console in the browser yourself only for account, policy, legal, payment, or review tasks
+the API lacks. Load the project's service account from `mobile-release.env`; verify with `gpc --ci releases status --app <package>`.
+Keep keys in agent-managed storage; pause for key creation or Play Console grants.
 
 ### Android vitals and crash clusters
 

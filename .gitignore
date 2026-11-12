@@ -1,16 +1,10 @@
-# Editor local history
-.history
-
 # IntelliJ project files
 .idea
 *.iml
-out
-gen
 
 # JavaScript dependencies
 node_modules
 
-# macOS metadata and disposable scratch space
+# macOS metadata
 .DS_Store
-tmp/
 .asc/

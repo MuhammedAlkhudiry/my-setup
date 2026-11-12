@@ -38,8 +38,7 @@ Report checklist results in a line.
 
 ## Merge policy
 
-[The merge policy](references/merge-policy.md) is the only place that says who may enqueue a PR: any PR over 100 changed lines or 5
-files, and every feature or product change, needs the owner's go by PR number. Read it before every enqueue or approval ask.
+[The merge policy](references/merge-policy.md) says who may enqueue a PR. Read it before every enqueue or approval ask.
 
 <!-- /profile -->
 
@@ -52,8 +51,8 @@ Before other work, run the [post-merge steps](references/post-merge.md) that app
 <!-- /profile -->
 <!-- profile:personal -->
 
-The Housekeeper's Ops keeper runs the [post-merge steps](references/post-merge.md) once per repository batch on its final main SHA:
-the queue's deploy, then migrations, jobs, and error tracking for changes that reach them. Never revert automatically.
+The Housekeeper's Ops keeper runs the [post-merge steps](references/post-merge.md) for each batch; the owning thread checks only what
+its PR changed. Never revert automatically.
 
 <!-- /profile -->
 

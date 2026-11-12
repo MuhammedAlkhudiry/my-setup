@@ -145,8 +145,6 @@ export interface Ticket {
   kind?: string;
   /** Devices that satisfy the request. */
   candidates?: string[];
-  /** The one device a caller from before the pool asked for. */
-  id?: string;
   owner: string;
   agentPid: number;
   createdAt: number;
@@ -256,7 +254,7 @@ const ticketKey = (
 ) =>
   `${request.project}:${request.platform}:${request.kind ?? "*"}:${request.agentPid}:${request.owner}`;
 
-const ticketCandidates = (ticket: Ticket) => ticket.candidates ?? (ticket.id ? [ticket.id] : []);
+const ticketCandidates = (ticket: Ticket) => ticket.candidates ?? [];
 
 const sameHolder = (a: Pick<Lease, "agentPid" | "owner">, b: Pick<Lease, "agentPid" | "owner">) =>
   a.agentPid === b.agentPid && a.owner === b.owner;
@@ -307,9 +305,14 @@ export function reapQueue(
   const warm = [...devices.values()]
     .filter((device) => device.booted && !state.leases[device.id])
     .sort((a, b) => (state.unleasedSince[b.id] ?? now) - (state.unleasedSince[a.id] ?? now));
-  for (const device of warm) state.unleasedSince[device.id] ??= now;
+  // An unleased device a live process still drives, such as an ad-hoc AVD outside every pool, only yields to a waiting lease.
+  const inUse = (device: Device) => Boolean(busy.get(device.id)?.size);
+  for (const device of warm) {
+    if (inUse(device)) state.unleasedSince[device.id] = now;
+    else state.unleasedSince[device.id] ??= now;
+  }
   for (const device of warm.slice(warmDevices)) {
-    if (now - state.unleasedSince[device.id]! >= graceMs)
+    if (!inUse(device) && now - state.unleasedSince[device.id]! >= graceMs)
       reclaim(device, "enough warm devices are available");
   }
 

@@ -6,10 +6,10 @@ import { join } from "node:path";
 import {
   type Assessment,
   assess,
-  ciFromChecks,
   isCodePath,
   mergeOrder,
   type PullRequest,
+  signoffFromRollup,
   stackOf,
   tierFor,
 } from "./triage-prs";
@@ -70,7 +70,7 @@ describe("triage-prs", () => {
           headRefName: "codex/fix",
           headRefOid: headSha,
           isDraft: false,
-          statusCheckRollup: [{ conclusion: "SUCCESS" }],
+          statusCheckRollup: [{ context: "signoff", state: "SUCCESS" }],
         },
       ];
       writeFileSync(
@@ -87,6 +87,7 @@ describe("triage-prs", () => {
         testLines: 1,
         migrations: 1,
         mainConflicts: ["app.ts"],
+        signoff: "success",
         tier: "blocked",
       });
       expect(git(clone, "config", "--get-all", "remote.origin.fetch")).toBe(
@@ -116,7 +117,7 @@ describe("triage-prs", () => {
         pr: item,
         ...(stacks.get(item.number) as { parent: number | null; root: number }),
         behindParent: false,
-        ci: "success",
+        signoff: "success",
         mainConflicts: item.number === 4 ? ["a.ts"] : [],
         codeLines: 10,
         testLines: 0,
@@ -130,13 +131,13 @@ describe("triage-prs", () => {
     expect(mergeOrder(assessments)).toEqual([[1, 2, 3], [4]]);
   });
 
-  it("sizes by code and migrations, and blocks failing, conflicting or draft PRs", () => {
-    const base = { ci: "success" as const, mainConflicts: 0, draft: false, migrations: 0 };
+  it("sizes by code and migrations, and blocks failing sign-off, conflicting or draft PRs", () => {
+    const base = { signoff: "success" as const, mainConflicts: 0, draft: false, migrations: 0 };
 
     expect(tierFor({ ...base, codeLines: 120 })).toBe("small");
     expect(tierFor({ ...base, codeLines: 120, migrations: 1 })).toBe("medium");
     expect(tierFor({ ...base, codeLines: 2000 })).toBe("large");
-    expect(tierFor({ ...base, codeLines: 10, ci: "failure" })).toBe("blocked");
+    expect(tierFor({ ...base, codeLines: 10, signoff: "failure" })).toBe("blocked");
     expect(tierFor({ ...base, codeLines: 10, draft: true })).toBe("blocked");
     expect(isCodePath("app/tests/Feature/FooTest.php")).toBe(false);
     expect(isCodePath("src/foo.spec.ts")).toBe(false);
@@ -144,30 +145,14 @@ describe("triage-prs", () => {
     expect(isCodePath("src/services/foo.ts")).toBe(true);
   });
 
-  it("fails CI on any failed check and waits on unfinished ones", () => {
-    expect(ciFromChecks([])).toBe("none");
-    expect(ciFromChecks([{ conclusion: "SUCCESS", status: "COMPLETED" }])).toBe("success");
-    expect(ciFromChecks([{ conclusion: "success" }, { conclusion: "failure" }])).toBe("failure");
-    expect(ciFromChecks([{ conclusion: "SUCCESS" }, { status: "IN_PROGRESS" }])).toBe("pending");
+  it("reads only the head's signoff status", () => {
+    expect(signoffFromRollup([])).toBe("none");
+    expect(signoffFromRollup([{ context: "ci/build", state: "FAILURE" }])).toBe("none");
+    expect(signoffFromRollup([{ context: "signoff", state: "SUCCESS" }])).toBe("success");
+    expect(signoffFromRollup([{ context: "signoff", state: "PENDING" }])).toBe("pending");
 
-    for (const state of ["PENDING", "QUEUED", "IN_PROGRESS", "EXPECTED", "REQUESTED", "WAITING"]) {
-      expect(ciFromChecks([{ state: "SUCCESS" }, { state }])).toBe("pending");
-    }
-    for (const conclusion of ["ACTION_REQUIRED", "STALE", "STARTUP_FAILURE"]) {
-      expect(ciFromChecks([{ state: "PENDING" }, { conclusion }])).toBe("failure");
-    }
-    for (const conclusion of ["NEUTRAL", "SKIPPED"]) {
-      expect(ciFromChecks([{ conclusion, status: "COMPLETED" }])).toBe("success");
-      expect(ciFromChecks([{ conclusion, status: "QUEUED" }])).toBe("pending");
-    }
-    for (const check of [
-      {},
-      { conclusion: null, status: "COMPLETED" },
-      { conclusion: "", status: "completed" },
-      { state: "NEW_STATE" },
-      { conclusion: "NEW_CONCLUSION", status: "COMPLETED" },
-    ]) {
-      expect(ciFromChecks([check])).toBe("pending");
+    for (const state of ["FAILURE", "ERROR"]) {
+      expect(signoffFromRollup([{ context: "signoff", state }])).toBe("failure");
     }
   });
 });

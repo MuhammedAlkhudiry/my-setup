@@ -144,7 +144,6 @@ p() {
 # Adds OpenCode's own install location and launcher environment, then exposes an
 # `ai` helper that can jump to a selected project before starting OpenCode.
 export PATH="$HOME/.opencode/bin:$PATH"
-[ -f "$HOME/.local/bin/env" ] && . "$HOME/.local/bin/env"
 
 ai() {
     local query="$*"
@@ -173,7 +172,7 @@ _macq_once() {
 
 macq() {
     if [[ "$1" == "-w" ]]; then
-        watch -n 5 -t "zsh -ic _macq_once 2>/dev/null"
+        while :; do clear; _macq_once; sleep 5; done
     else
         _macq_once
     fi

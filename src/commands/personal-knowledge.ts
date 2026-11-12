@@ -18,7 +18,8 @@ export interface PersonalKnowledgeFindOptions extends PersonalKnowledgeOptions {
 }
 
 export interface PersonalKnowledgeNewOptions extends PersonalKnowledgeOptions {
-  noIndex?: boolean;
+  /** cac sets this to false for `--no-index`. */
+  index?: boolean;
 }
 
 interface CommandResult {
@@ -266,7 +267,7 @@ export async function personalKnowledgeNew(
 
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, content);
-  if (!options.noIndex) {
+  if (options.index !== false) {
     await updateIndex(root, normalizedType, noteTitle, slug);
   }
   console.log(`Created personal knowledge note: ${relative(root, path)}`);

@@ -66,9 +66,7 @@ function run(
     host: "main-mac",
     project: "harium-project",
     branch: `branch-${id}`,
-    source: "check",
     report: report(overrides),
-    waits: {},
     ...extra,
   };
 }
@@ -105,9 +103,9 @@ describe("recording", () => {
 
     expect(nightly.tag).toBe("nightly");
     expect(runTier(nightly)).toBe("nightly");
-    expect(
-      runTier(recordRun(report({ mode: "signoff-full" }), origin, { directory })!),
-    ).toBe("full");
+    expect(runTier(recordRun(report({ mode: "signoff-full" }), origin, { directory })!)).toBe(
+      "full",
+    );
     expect(runTier(recordRun(report(), origin, { directory })!)).toBe("gate");
   });
 
@@ -137,7 +135,6 @@ describe("recording", () => {
     expect(readFileSync(historyPath(directory), "utf8")).not.toContain('"old"');
     expect(readHistory(directory).runs.map((r) => r.id)).toEqual(["new"]);
   });
-
 });
 
 describe("stats", () => {
@@ -146,24 +143,19 @@ describe("stats", () => {
       run("1", 3),
       run("2", 2),
       run("3", 1),
-      run(
-        "now",
-        0,
-        {
-          seconds: 200,
-          checks: [
-            {
-              task: "backend:test",
-              status: "passed",
-              seconds: 190,
-              reused: false,
-              log: null,
-              startedSeconds: 1,
-            },
-          ],
-        },
-        { waits: { "backend:test": 40 } },
-      ),
+      run("now", 0, {
+        seconds: 200,
+        checks: [
+          {
+            task: "backend:test",
+            status: "passed",
+            seconds: 150,
+            reused: false,
+            log: null,
+            startedSeconds: 1,
+          },
+        ],
+      }),
     ];
     const result = profile(runs, runs.at(-1)!);
 
@@ -171,7 +163,6 @@ describe("stats", () => {
     // Ratings are absolute bands; the usual shows as a change: 200s is ⚪ for a run, 150s 🔴 for one step.
     expect(result).toMatchObject({ rating: "⚪", change: 200 / 101 - 1 });
     expect(result.steps[0]).toMatchObject({
-      waitSeconds: 40,
       ranSeconds: 150,
       rating: "🔴",
       change: 0.5,

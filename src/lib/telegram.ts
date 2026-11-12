@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync } from "node:fs";
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Readable, Transform } from "node:stream";
@@ -63,7 +71,11 @@ export async function telegramApi(method: string, body: object = {}): Promise<un
       signal: AbortSignal.timeout(15_000),
     });
     const data = z
-      .object({ ok: z.boolean(), result: z.unknown().optional(), description: z.string().optional() })
+      .object({
+        ok: z.boolean(),
+        result: z.unknown().optional(),
+        description: z.string().optional(),
+      })
       .parse(await response.json());
     if (!response.ok || !data.ok) {
       reason = safeTelegramReason(data.description, token) ?? reason;
@@ -126,7 +138,8 @@ export async function checkTelegramWebhook(now = Date.now()): Promise<number> {
 function chatId(support: boolean): string | number {
   const { owner_chat_id, support_chat_id } = credentials();
   if (!support) return owner_chat_id;
-  if (support_chat_id === undefined) throw new Error("No support_chat_id in the ops bot credentials");
+  if (support_chat_id === undefined)
+    throw new Error("No support_chat_id in the ops bot credentials");
 
   return support_chat_id;
 }
@@ -182,7 +195,8 @@ export interface Transcript {
 }
 
 export function validateFileId(fileId: string): void {
-  if (!/^[\w-]{10,200}$/.test(fileId)) throw new Error("File id must be a Telegram Bot API file_id");
+  if (!/^[\w-]{10,200}$/.test(fileId))
+    throw new Error("File id must be a Telegram Bot API file_id");
 }
 
 export function ffmpegArgs(input: string, output: string): string[] {
@@ -243,9 +257,12 @@ async function downloadTelegramFile(fileId: string, destination: string): Promis
 
   try {
     // The file URL contains the bot token; never print or log it.
-    const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.data.file_path}`, {
-      signal: AbortSignal.timeout(60_000),
-    });
+    const response = await fetch(
+      `https://api.telegram.org/file/bot${token}/${file.data.file_path}`,
+      {
+        signal: AbortSignal.timeout(60_000),
+      },
+    );
     if (!response.ok || !response.body) throw new Error();
     await Bun.write(destination, response);
   } catch {
@@ -290,12 +307,16 @@ export async function ensureWhisperModel(path = whisperModelPath()): Promise<str
 }
 
 /** Transcribes a local audio file; pass `fileId` instead to fetch a Telegram voice note first. */
-export async function transcribeAudio(source: { fileId?: string; file?: string }): Promise<Transcript> {
+export async function transcribeAudio(source: {
+  fileId?: string;
+  file?: string;
+}): Promise<Transcript> {
   if (!source.fileId === !source.file) throw new Error("Pass either a file id or --file <path>");
   if (source.fileId) validateFileId(source.fileId);
   if (source.file && !existsSync(source.file)) throw new Error("Audio file not found");
   for (const tool of ["whisper-cli", "ffmpeg"])
-    if (!Bun.which(tool)) throw new Error(`${tool} is not installed; transcription is unavailable here`);
+    if (!Bun.which(tool))
+      throw new Error(`${tool} is not installed; transcription is unavailable here`);
 
   const directory = mkdtempSync(join(tmpdir(), "telegram-transcribe-"));
 
@@ -305,7 +326,10 @@ export async function transcribeAudio(source: { fileId?: string; file?: string }
     const model = await ensureWhisperModel();
 
     const wav = join(directory, "voice.wav");
-    const converted = await execa("ffmpeg", ffmpegArgs(input, wav), { reject: false, timeout: 120_000 });
+    const converted = await execa("ffmpeg", ffmpegArgs(input, wav), {
+      reject: false,
+      timeout: 120_000,
+    });
     if (converted.exitCode !== 0) throw new Error("ffmpeg could not convert the audio");
 
     const outputBase = join(directory, "transcript");

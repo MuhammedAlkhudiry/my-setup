@@ -3,10 +3,15 @@
 import { agentOutput, parseCli } from "../lib/agent-output";
 import { cac } from "cac";
 
-import { collectSystemToolStatuses, systemToolStatusLabel } from "../lib/system-tools";
+import {
+  collectSystemToolStatuses,
+  SYSTEM_TOOL_GROUPS,
+  systemToolStatusLabel,
+} from "../lib/system-tools";
 
 agentOutput("system-tools", {
   nativeJson: true,
+  summary: (output) => output.trimEnd() || "system-tools: ok",
   failures: (_output, errors) => errors.trim().split("\n").filter(Boolean),
 });
 
@@ -64,6 +69,13 @@ cli.command("status", "Show installed external CLI tool versions").action(() => 
 cli
   .command("update-plan", "Print safe update commands for external CLI tools")
   .action(() => reportTools(true));
+
+cli
+  .command("inventory", "Print each tool's name, level, and purpose, tab-separated, for doctor")
+  .action(() => {
+    for (const tool of SYSTEM_TOOL_GROUPS.flatMap((group) => [...group.tools]))
+      console.log([tool.name, tool.level, tool.why].join("\t"));
+  });
 
 cli.option("--json", "Emit structured results");
 cli.option("--verbose", "Print details");

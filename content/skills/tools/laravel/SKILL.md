@@ -26,7 +26,8 @@ Prefer route → controller → Form Request → typed data object → service/i
 Prefer class constants for code-bound values, then config values when redeploying is acceptable, then environment variables for runtime-specific
 values. Call `env()` only in config files; use `config()` elsewhere.
 
-Add feature flags or on/off environment variables only when agreed in the plan or defined by an installed package.
+Add feature flags or on/off environment variables only when agreed in the plan, required by $product-taste's launch flag, or defined by an
+installed package.
 
 ## Eloquent
 

@@ -15,9 +15,6 @@ export interface RemoteSkillSource {
   skills: RemoteSkill[];
 }
 
-// Skills supplied by an agent runtime rather than installed or managed by this repository.
-export const OPTIONAL_EXTERNAL_SKILL_NAMES = ["chrome:control-chrome"] as const;
-
 // Remote skills intentionally track upstream branches: current guidance takes priority over
 // reproducible snapshots, especially when skills accompany CLIs that update independently.
 // Keep periodic upstream refreshes so installation does not preserve stale instructions;

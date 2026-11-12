@@ -23,7 +23,10 @@ export async function replaceDirectory(
     if (entry.isDirectory()) {
       await replaceDirectory(sourcePath, destinationPath, transformMarkdown);
     } else if (entry.isFile() && transformMarkdown && entry.name.endsWith(".md")) {
-      await writeFile(destinationPath, transformMarkdown(await readFile(sourcePath, "utf-8"), sourcePath));
+      await writeFile(
+        destinationPath,
+        transformMarkdown(await readFile(sourcePath, "utf-8"), sourcePath),
+      );
     } else if (entry.isFile()) {
       await copyFile(sourcePath, destinationPath);
     }

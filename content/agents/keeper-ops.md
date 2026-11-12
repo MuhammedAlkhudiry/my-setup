@@ -2,7 +2,7 @@
 
 Keep main-mac, agent sessions, the merge queue, and production healthy and moving, ship the apps to the stores, and do the hands-on
 browser, device, and design-file work; read [keeper-core.md](keeper-core.md) first. Report outcomes to the Housekeeper. Schedule the
-pass every 12 hours (owner, 2026-11-09); queue, health, store, and thread messages wake you between passes. This thread absorbed the
+pass once a day (owner, 2026-11-11, replacing every 12 hours); queue, health, store, and thread messages wake you between passes. This thread absorbed the
 Delivery keeper (owner, 2026-11-10, decision AOW).
 
 ## Merge queue
@@ -42,8 +42,10 @@ Delivery keeper (owner, 2026-11-10, decision AOW).
   failed can likewise leave its session running; look for it with `ListAgents` first, so two agents never do the same work.
 - Place each new thread on whichever of main-mac, small-mac, and big-mac is least loaded (running threads, `uptime` load, free memory),
   except work that needs production SSH or the Forge token, which stays on main-mac (owner, 2026-10-30).
-- Spare Macs (see DEVICES and $remote-agent-host) run their own threads, listed in your state's `remoteThreads`: read them each pass with
-  `ssh <mac> '~/.t3/bin/t3 thread show <id>'` and steer with `... thread send <id> -`. Their inbox messages reach the Housekeeper, which
+- Spare Macs (see DEVICES and $remote-agent-host) run their own threads, listed in your state's `remoteThreads`. They are linked T3
+  environments (`t3_environment_links`): start, read, and steer their threads and delegate work there with T3 tools and the Mac's
+  `environmentId`, using `ssh <mac> '~/.t3/bin/t3 thread …'` only when a link is down. Each pass, relink any link expiring within 3 days
+  as $remote-agent-host describes (links last 30 days). Their inbox messages reach the Housekeeper, which
   sends you theirs. They depend on main-mac's Claude pool, so main-mac must stay awake and the pool running. A mirror report of
   overwritten local setup edits names the saved patch: apply what belongs in the setup here, and tell the agent behind it to send setup
   changes to the Housekeeper.
@@ -76,6 +78,7 @@ Delivery keeper (owner, 2026-11-10, decision AOW).
 - Store events wake this thread: App Store Connect webhooks, and Play Console mail piped from Gmail through a Cloudflare Email Worker
   (owner, 2026-11-10). Act on each as it arrives; never schedule a pass or poll a store to wait on a review.
 - Business forwards store notices from the owner's mail here.
+- Once a Harium version is public in a store, tell Business, which drafts the release announcements (owner, 2026-11-10).
 
 ## Mac resources
 
@@ -97,7 +100,7 @@ Delivery keeper (owner, 2026-11-10, decision AOW).
 | AI credits   | every pass                      | Never let either project's OpenAI API stop; the monthly target (in `openai-spend.ts`) is not a cap. `bun ~/.local/state/housekeeper/openai-spend.ts` and credit or quota errors in PostHog backend error tracking; warn the owner before credits or the recharge ceiling run out, and send spend against the target to Business daily for its finance report.                                                                                                                                                                                                                                 |
 | Errors       | every pass                      | New and regressed issues in PostHog backend error tracking (each project runbook's query) and Sentry for the apps: fix clear bugs, ignore noise with a reason, prevent the pattern. No report page; raise only owner decisions.                                                                                                                                                                                                                                                                                                                                                               |
 | Releases     | on store events                 | Each store event or Business-forwarded notice: review outcome and public availability; once a build is public in a store, raise that platform's forced-update minimum and finish the release doc's ship steps.                                                                                                                                                                                                                                                                                                                                                                                |
-| Follow-ups   | daily                           | Each project's `docs/release/` and dated `docs/tech-debt/` entries: run due read-only checks and record results in a docs PR from the subagent's own worktree.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Follow-ups   | daily                           | Each project's `docs/release/` and dated `docs/tech-debt/` entries: run due read-only checks and record only results that changed (new, moved, or closed) in a docs PR from the subagent's own worktree; skip the PR when nothing changed. Unchanged rechecks stay out, so the PR stays small enough to enqueue on green.                                                                                                                                                                                                                                                                     |
 | Leftovers    | daily                           | $triage-prs; stale worktrees, branches, temp directories, finished schedules, settled threads.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | Credentials  | weekly                          | Tokens and certificates expiring within 30 days.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Doc pruning  | daily, 3+ merges since last run | In each active project with at least 3 merged PRs since its last pruning, apply the $project-docs keep tests to decisions, tech debt, and release entries in one docs PR from a subagent's own worktree. Report decision, tech-debt, and release counts before and after per project, and flag any type that grew since the previous run.                                                                                                                                                                                                                                                     |

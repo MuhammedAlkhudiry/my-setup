@@ -5,25 +5,32 @@
  */
 
 // Server settings (`settings.json`). T3 reloads this file while it runs.
-export const T3_SERVER_SETTINGS = {
+const COMMIT_STYLE =
+  "Commits: one plain sentence naming what changed for the user, in the product's words, with no type prefix, label, or trailing period.";
+// Personal only: the work profile's titles carry the ticket key instead ($prs).
+const PERSONAL_PR_TITLE_STYLE =
+  'Pull request titles: start with one best-fit label, [✨ FEAT], [🐛 FIX], [♻️ REFACTOR], [⚡ PERF], [🔒 SECURITY], [🧪 TEST], [📝 DOCS], or [🔧 TOOLING], then name what the user notices in the product\'s words, such as "[✨ FEAT] Rate finished sessions".';
+
+export const t3ServerSettings = (profile: "personal" | "work") => ({
   sourceControlWritingStyle: {
     mode: "custom",
-    customInstructions: [
-      "Commits: one plain sentence naming what changed for the user, in the product's words, with no type prefix, label, or trailing period.",
-      'Pull request titles: start with one best-fit label, [✨ FEAT], [🐛 FIX], [♻️ REFACTOR], [⚡ PERF], [🔒 SECURITY], [🧪 TEST], [📝 DOCS], or [🔧 TOOLING], then name what the user notices in the product\'s words, such as "[✨ FEAT] Rate finished sessions".',
-    ].join("\n"),
+    customInstructions: (profile === "personal"
+      ? [COMMIT_STYLE, PERSONAL_PR_TITLE_STYLE]
+      : [COMMIT_STYLE]
+    ).join("\n"),
   },
   storageCleanup: {
     worktreeOnMerge: true,
     browserArtifactsAfterDays: 8,
     logsAfterDays: 8,
   },
+  fastWorktreeCheckout: true,
   continueThreadsAfterServerUpdate: true,
   autoResumeLimitedThreads: true,
-  sidebarAutoSettleAfterDays: 20,
+  sidebarAutoSettleAfterDays: 2,
   sidebarAutoSettleKeepPullRequests: true,
-  sidebarAutoSettleOnMerge: false,
-} as const;
+  sidebarAutoSettleOnMerge: true,
+});
 
 // App settings (`client-settings.json`). T3 reads this file only when the app starts.
 export const T3_CLIENT_SETTINGS = {

@@ -9,7 +9,7 @@ Document only what code, tests, and git history cannot show. Give each fact one 
 
 | Knowledge                            | Home                              | Leaves when                           |
 | ------------------------------------ | --------------------------------- | ------------------------------------- |
-| Rules every session needs            | `AGENTS.md`                       | a lint rule, test, or hook takes over |
+| Rules every session needs            | `AGENTS.md`                       | a lint rule, type, or test takes over |
 | Why the product works this way       | `docs/decisions/<area>/<slug>.md` | it fails the keep test                |
 | Postponed work and follow-ups        | `docs/tech-debt/<slug>.md`        | it fails the keep test                |
 | Actions a deploy does not perform    | `docs/release/<slug>.md`          | the release is public, steps done     |
@@ -30,7 +30,7 @@ Use one file per decision, tech-debt entry, or release action with a short kebab
 
 - Search before adding a fact, decisions with `decisions search "<fact>"`; update its home and link to it elsewhere.
 - Give each `AGENTS.md` rule a one-clause reason so cleanup can assess whether it still applies.
-- Prevent agent mistakes with lint, tests, or hooks; add a written rule only when none can catch them.
+- Prevent agent mistakes with lint, types, or tests; add a written rule only when none can catch them.
 - Follow $writing-md-files.
 
 ## In every change

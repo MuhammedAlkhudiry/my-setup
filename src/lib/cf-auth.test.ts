@@ -68,10 +68,9 @@ describe("runCf", () => {
 
   test("throws a second authentication error and never retries other failures", async () => {
     const twice = fakeCf(["auth", "auth"]);
-    expect(runCf(["r2", "objects", "get"], {}, twice.deps)).rejects.toMatchObject({
+    await expect(runCf(["r2", "objects", "get"], {}, twice.deps)).rejects.toMatchObject({
       stderr: AUTH_ERROR,
     });
-    await Bun.sleep(5);
     expect(twice.log).toHaveLength(2);
 
     const missing = fakeCf(["other"]);

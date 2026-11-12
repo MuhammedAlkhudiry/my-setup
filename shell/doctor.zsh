@@ -15,11 +15,6 @@ typeset -i optional_ok=0
 typeset -i optional_missing=0
 typeset -i link_ok=0
 typeset -i link_missing=0
-MY_SETUP_ROOT="${MY_SETUP_ROOT:-${0:A:h:h}}"
-
-print_header() {
-  return 0
-}
 
 print_ok() {
   printf '[ok] %s %s\n' "$1" "$2"
@@ -252,64 +247,23 @@ check_credentials_home() {
 }
 
 main() {
-  print_header "Core repo tools"
-  check_tool bun required "Runtime used internally by mise run install."
-  check_tool git required "Needed for remote skill checkout, hooks, and shared git helpers."
-  check_tool mise required "Needed for the supported local task workflow and global runtime management."
-  check_tool node required "Hosts npm itself and the npm-installed agent CLIs."
-  check_tool zsh required "Needed by all installed shared shell commands."
+  # src/lib/system-tools.ts is the one tool inventory; its levels already allow for Macs without the Android SDK.
+  local inventory name level why
+  if inventory="$(bun "$MY_SETUP_ROOT/src/commands/system-tools-cli.ts" inventory 2>&1)"; then
+    while IFS=$'\t' read -r name level why; do
+      [[ -n "$name" ]] && check_tool "$name" "$level" "$why"
+    done <<< "$inventory"
+  else
+    print_missing required system-tools "inventory unavailable: $inventory"
+    (( required_missing++ ))
+  fi
 
-  print_header "Shell and helper integrations"
-  check_tool rtk required "OpenCode shell output compression; install with brew install rtk."
-  check_tool phpstorm optional "Used by the synced zsh config as the editor command."
-  check_tool herd optional "Used by Laravel aliases in the synced zsh config."
   check_herd_php
-  check_tool forge optional "Manages Laravel Forge servers and sites through the cli-tools skill."
-  check_tool cf required "Cloudflare CLI: share-html uploads, deploys, and the whole Cloudflare API through the cli-tools skill."
-  check_tool opencode optional "Used by the ai/opencode launcher and OpenCode workflows."
-  check_tool codex optional "Used by Codex workflows and as a configured agent target."
-  check_tool claude optional "Used by Claude Code workflows and as a configured agent target."
-  check_tool cliproxyapi optional "Pools Claude OAuth accounts for the local T3 Code Claude provider."
-  check_tool tailscale optional "Install the standalone app from tailscale.com so the phone and other Macs reach T3 Code."
-  check_tool playwright-cli required "Fallback headless browser automation CLI."
-  check_tool agent-device required "Default AI-agent mobile and device automation CLI."
-  check_tool simslim required "Install with brew install mobai-app/tap/simslim; device-queue slims pool simulators with it."
-  # Only Macs that run Android emulators need it; spare agent Macs have none.
-  local avdslim_level=optional
-  [[ -d "$HOME/Library/Android/sdk/emulator" ]] && avdslim_level=required
-  check_tool avdslim "$avdslim_level" "Install from the kdbhalala/avdslim Homebrew tap; device-queue slims pool emulators with it."
-  check_tool memcap required "Install with brew install alextitov19/memcap/memcap; mise run install manages its config and service."
-  check_tool asc required "Install with brew install asc for App Store Connect releases and status."
-  check_tool eas required "Install with bun add -g eas-cli for local store builds, EAS Submit, and updates."
-  check_tool gpc required "Install with brew install yasserstudio/tap/gpc for Google Play releases and status."
-  check_tool fzf optional "Used by the zsh fzf plugin and the project picker."
-  check_tool sg optional "Install ast-grep for AST-shaped code search."
-  check_tool magick optional "Used to inspect and measure raster UI references."
-  check_tool ffmpeg optional "Used to edit demo recordings, render promo videos, and convert Telegram voice notes."
-  check_tool whisper-cli optional "Install with brew install whisper-cpp to transcribe Telegram voice notes."
-  check_tool mo optional "Install with brew install mole for macOS storage auditing and cleanup."
-  check_tool wacli optional "Used to read and export WhatsApp data for authorized personal knowledge workflows."
-  check_tool imsg optional "Used to read and export local SMS and iMessage data for authorized personal knowledge workflows."
-  check_tool qmd required "Provides local keyword, semantic, and hybrid search for maintained personal knowledge and recorded project decisions."
-  check_tool gcloud optional "Used for Google Cloud project, API, service account, and IAM workflows."
 
-  print_header "Observability CLIs"
-  check_tool posthog-cli required "Install the CLI for PostHog access without MCP."
-  check_tool sentry required "Install the agent-oriented Sentry CLI for access without MCP."
-  check_tool sentry-cli optional "Used by legacy Sentry SDK and CI build integrations."
-
-  print_header "Credential storage"
   check_credentials_home
 
-  print_header "Git workflow helpers"
-  check_tool gh optional "Used for GitHub pull requests, CI runner switching and fresh PR evidence in worktree-cleanup."
-  check_tool lsof required "Checks open files before worktree-cleanup removes finished work."
-  check_tool du required "Measures worktree storage during cleanup; doctor reads cached sizes."
-  check_tool find required "Checks file-change grace periods before worktree cleanup or storage pruning."
-  check_tool mergiraf optional "Syntax-aware merge driver the merge queue uses when it merges main into a PR left behind."
   check_gh_extension signoff optional "Install with gh extension install basecamp/gh-signoff; sets up the branch rule that requires the local sign-off status."
 
-  print_header "My Setup links"
   check_link zsh "$HOME/.config/zsh-sync/custom.zsh" "$MY_SETUP_ROOT/shell/zsh-custom.zsh"
   check_link my-setup "$HOME/bin/my-setup" "$MY_SETUP_ROOT/shell/my-setup.zsh"
   check_link system-tools "$HOME/bin/system-tools" "$MY_SETUP_ROOT/shell/system-tools.zsh"
@@ -323,19 +277,18 @@ main() {
   check_link device-queue "$HOME/bin/device-queue" "$MY_SETUP_ROOT/shell/device-queue.zsh"
   check_link telegram-send "$HOME/bin/telegram-send" "$MY_SETUP_ROOT/shell/telegram-send.zsh"
   check_link verify "$HOME/bin/verify" "$MY_SETUP_ROOT/shell/verify.zsh"
+  check_link decisions "$HOME/bin/decisions" "$MY_SETUP_ROOT/shell/decisions.zsh"
   check_link claude-skills "$HOME/.claude_cliproxy/skills" "$HOME/.agents/skills"
 
-  print_header "Managed skills"
   check_installed_skills
 
-  print_header "Local hygiene"
   check_local_hygiene
   local telegram_output
   if telegram_output="$(bun "$MY_SETUP_ROOT/src/commands/telegram-send-cli.ts" webhook check 2>&1)"; then
-    print_ok "Telegram ops bot" "$telegram_output"
+    print_ok telegram-bot "$telegram_output"
     (( required_ok++ ))
   else
-    print_missing required "Telegram ops bot" "$telegram_output"
+    print_missing required telegram-bot "$telegram_output"
     (( required_missing++ ))
   fi
 

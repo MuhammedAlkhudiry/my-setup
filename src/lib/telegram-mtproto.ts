@@ -1,7 +1,15 @@
 // Downloads Telegram files of up to 2 GB by signing the ops bot in over MTProto; the Bot API stops at 20 MB.
 // Signing in over MTProto never calls the Bot API's logOut and leaves the webhook alone, so the cloud Bot API keeps working.
 
-import { chmodSync, existsSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { z } from "zod";
@@ -40,8 +48,12 @@ export function readMtprotoApp(): { apiId: number; apiHash: string } {
   }
 }
 
-export function parseDownloadTarget(chatId: string, messageId: string): { chatId: number; messageId: number } {
-  if (!/^-?\d{1,20}$/.test(chatId)) throw new Error("Chat id must be an integer, such as -1001234567890");
+export function parseDownloadTarget(
+  chatId: string,
+  messageId: string,
+): { chatId: number; messageId: number } {
+  if (!/^-?\d{1,20}$/.test(chatId))
+    throw new Error("Chat id must be an integer, such as -1001234567890");
   if (!/^[1-9]\d{0,9}$/.test(messageId)) throw new Error("Message id must be a positive integer");
 
   return { chatId: Number(chatId), messageId: Number(messageId) };

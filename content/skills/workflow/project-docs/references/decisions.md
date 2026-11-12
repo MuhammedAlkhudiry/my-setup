@@ -1,21 +1,12 @@
 # Decisions
 
-Read every decision in each area a change touches. `decisions search "<task in plain words>" --keywords "<terms>"` finds related
-ones across areas; pass glossary terms or identifiers as keywords, since the sentence alone misses some. `--full` prints the files.
+Read every decision in each area a change touches; `decisions search --full` prints whole files.
 
 ## What gets an entry
 
 Record a decision when a plausible change could reverse it and code, tests, or comments cannot explain its reason. Record it as soon as it
-rules out a change, even before implementation. Other content belongs elsewhere:
-
-| Content                                              | Home                         |
-| ---------------------------------------------------- | ---------------------------- |
-| Thresholds, limits, timings, and how a feature works | Code constants and tests     |
-| The bug or incident that led to a decision           | The pull request             |
-| When something was chosen, shipped, or changed       | Git history                  |
-| Release, deploy, and operations steps                | Release entries or a runbook |
-| Postponed work, such as dropping retired tables      | Tech-debt entries            |
-| Product terms                                        | The glossary                 |
+rules out a change, even before implementation. Other content goes to its [home](../SKILL.md#homes); thresholds, limits, timings, and
+how a feature works stay in code constants and tests, and when something was chosen stays in git history.
 
 ## Entry format
 
@@ -38,6 +29,6 @@ Keep a decision only when it constrains a plausible future change and someone wo
 - code, tests, lint rules, or comments already make it obvious;
 - a later decision or the current code supersedes it;
 - it is a one-off implementation note, incident story, or dated history;
-- its content belongs in another home from the table above, after that home holds it.
+- its content belongs in another home, after that home holds it.
 
 Merge near-duplicates into one file.

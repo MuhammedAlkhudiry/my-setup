@@ -13,19 +13,18 @@ settings that ask for the Mac password. Batch those into one short list with exa
    account; turn on Remote Login and Screen Sharing; run one setup command for the main Mac's SSH key, key-only SSH, and, if approved,
    passwordless `sudo`. Copy and paste doesn't work between Macs, so serve the command over the tailnet.
 2. **Identity:** a short, distinct name through `scutil` and `tailscale set --hostname`. Restart T3 and redo Tailscale Serve afterwards.
-3. **Never offline:** no sleep at all, no automatic macOS updates, and Tailscale and T3 starting at login. To come back after a power
-   cut without anyone there, it needs FileVault off and automatic login. Ask the owner first, because the disk then holds readable
-   project secrets.
+3. **Never offline:** no sleep, no automatic macOS updates, and Tailscale and T3 starting at login. Coming back unattended after a
+   power cut needs FileVault off and automatic login. Ask the owner first: the disk then holds readable project secrets.
 4. **Tools and projects:** match the main Mac's Homebrew packages and agent CLIs, install this setup with the `personal` profile, and
    clear `doctor` failures. Skip what its role doesn't need. Clone and prepare its projects.
 5. **Accounts:** Claude uses the main Mac's pool (`claudePoolUrl` in `device.json`), so the main Mac stays awake. Codex, `gh`,
-   and `cf` sign in on the spare Mac itself; never copy a sign-in that renews itself.
+   and `cf` sign in on the spare Mac; never copy a sign-in that renews itself.
 6. **T3:** pair the main Mac's app with it through a single-use link minted over SSH, and the phone separately: apps connect to each Mac
    directly. Add the Claude Pool provider and the projects.
-7. **Setup sync:** list the Mac under `"mirrors"` in the main Mac's `device.json`, so every install there copies this setup to it.
-8. **Talking between Macs:** the main Mac drives threads there with `t3 thread` over SSH. Agents there reach the main Mac only through a
-   message-only key that posts to the Housekeeper.
-9. **Moving work:** push the old thread's unpushed work right before the move, copy notes kept outside the repo, retire the old thread,
+7. **Setup sync and sign-offs:** add the Mac to `"mirrors"` and `mergeQueue.signoffHosts` in the main Mac's `device.json`.
+8. **Talking between Macs:** link the spare Mac from the main Mac as a T3 environment with full access, so the main Mac's agents use
+   T3 tools there with its `environmentId`. Agents there reach the main Mac only through a message-only key that posts to the Housekeeper.
+9. **Moving work:** push the old thread's work right before the move, copy notes kept outside the repo, retire the old thread,
    and start the new one with a self-contained brief.
 
 ## Done when

@@ -35,8 +35,16 @@ if (import.meta.main) {
   if (process.platform !== "darwin") process.exit(0);
   if (process.argv.includes("--probe")) {
     const release = acquireQueueLock("signoff");
+    // A Mac on battery can die mid-run and throttles its timing gates, so it reports busy until AC returns.
+    const onBattery = Bun.spawnSync(["pmset", "-g", "batt"])
+      .stdout.toString()
+      .includes("'Battery Power'");
     console.log(
-      JSON.stringify({ load: loadavg()[0], maxLoad: signoffPolicy().maxLoad, busy: !release }),
+      JSON.stringify({
+        load: loadavg()[0],
+        maxLoad: signoffPolicy().maxLoad,
+        busy: !release || onBattery,
+      }),
     );
     release?.();
   } else {

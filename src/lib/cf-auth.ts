@@ -14,7 +14,6 @@ export const CF_CONFIG = join(homedir(), "Library/Preferences/cloudflare/config/
 export const EXPIRY_MARGIN_MS = 15_000;
 const LOCK_PATH = join(homedir(), ".local", "state", "share-html", "cf-auth.lock");
 
-
 export type CfResult = Result<{ reject: false }>;
 
 export interface CfDeps {

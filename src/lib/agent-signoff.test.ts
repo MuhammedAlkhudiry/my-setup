@@ -1,10 +1,6 @@
 import { expect, test } from "bun:test";
 
-import {
-  agentSignoff,
-  chooseAgentSignoffHost,
-  localizeLogs,
-} from "./agent-signoff";
+import { agentSignoff, chooseAgentSignoffHost, localizeLogs } from "./agent-signoff";
 
 const request = {
   repo: "owner/repo",
@@ -71,9 +67,27 @@ test("with every spare Mac over its limit, a spare Mac still runs it, the least 
   expect(chooseAgentSignoffHost([])).toBeUndefined();
 });
 
-test("every spare Mac over its limit still runs remotely, never on main-mac", async () => {
+test("every spare Mac over its limit waits for one to drop under it", async () => {
+  let probes = 0;
+  const { calls, io: deps } = io({
+    probe: async (host) => ({
+      host,
+      load: host === "big-mac" && ++probes > 2 ? 4 : 40,
+      maxLoad: 10,
+    }),
+    pause: async () => {},
+  });
+  const run = await agentSignoff(request, deps);
+
+  expect(run.host).toBe("big-mac");
+  expect(calls).toEqual(["remote big-mac"]);
+  expect(run.notes).toContain("waiting for a spare Mac under its load limit");
+});
+
+test("every spare Mac still over its limit after the wait runs remotely, never on main-mac", async () => {
   const { calls, io: deps } = io({
     probe: async (host) => ({ host, load: host === "big-mac" ? 40 : 25, maxLoad: 10 }),
+    pause: async () => {},
   });
   const run = await agentSignoff(request, deps);
 
@@ -112,7 +126,11 @@ test("no reachable spare runs here and never refuses", async () => {
   const run = await agentSignoff(request, deps);
 
   expect(calls).toEqual(["local --full"]);
-  expect(run.notes).toEqual(["big-mac unreachable", "small-mac unreachable", "no spare Mac reachable"]);
+  expect(run.notes).toEqual([
+    "big-mac unreachable",
+    "small-mac unreachable",
+    "no spare Mac reachable",
+  ]);
 });
 
 test("no configured spare runs here", async () => {

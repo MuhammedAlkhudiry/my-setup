@@ -17,7 +17,8 @@ Follow consistent project patterns over these defaults.
 
 ## TanStack Query
 
-- Generate and commit API types and fetch functions from OpenAPI; enforce drift checks in CI. Do not use generated hooks or keys.
+- Generate and commit API types and fetch functions from OpenAPI; enforce drift checks in sign-off or CI. Do not use generated hooks or
+  keys.
 - Keep `queryOptions`/`mutationOptions` factories with hierarchical keys in `<feature>.queries.ts`. Components and cache reads use these factories,
   never inline keys.
 - Declare invalidations in `meta.invalidates`; handle them in one global `MutationCache` handler. After a write, store the

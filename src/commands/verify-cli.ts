@@ -5,7 +5,7 @@ import { homedir } from "node:os";
 
 import pc from "picocolors";
 
-import { readSetupMirrors } from "../lib/device";
+import { readRemoteClaudePoolUrl, readSetupMirrors } from "../lib/device";
 import {
   canonicalPlan,
   type CheckPlan,
@@ -188,7 +188,7 @@ const vsUsual = (
 function describeRun(run: RunRecord): string {
   const parts = [
     run.branch ?? (run.report.mergedMain ? run.report.mergedMain.branch : "detached"),
-    run.report.head?.slice(0, 8) ?? (run.source === "heavy-run" ? "seeded" : "no commit"),
+    run.report.head?.slice(0, 8) ?? "no commit",
     run.host,
     ago(run.recordedAt),
   ];
@@ -339,10 +339,7 @@ function dashboard(runs: RunRecord[], projects: string[]) {
     return data.map((item) => ({ ...item, last: item.last && jsonProfile(item.last) }));
 
   for (const item of data) {
-    section(
-      projectName(item.project),
-      dim(`${item.runs7d} runs in ${flags.days}d`),
-    );
+    section(projectName(item.project), dim(`${item.runs7d} runs in ${flags.days}d`));
 
     if (!item.last) {
       out(dim("  No sign-off recorded yet."));
@@ -359,7 +356,7 @@ function dashboard(runs: RunRecord[], projects: string[]) {
         out(`  Error           ${pc.red(error.item)} ${dim(error.log)}`);
       const ran = item.last.steps.filter((step) => !step.reused && step.status !== "skipped");
       out(
-        `  Steps           ${ran.length} ran, ${item.last.steps.length - ran.length} reused or skipped${item.last.waitSeconds ? `, ${duration(item.last.waitSeconds)} queue wait` : ""}`,
+        `  Steps           ${ran.length} ran, ${item.last.steps.length - ran.length} reused or skipped`,
       );
       const top = [...ran].sort((a, b) => b.ranSeconds - a.ranSeconds).slice(0, 3);
       if (top.length) {
@@ -372,7 +369,7 @@ function dashboard(runs: RunRecord[], projects: string[]) {
     if (!item.slowest.length) out(dim("    none recorded"));
     for (const step of item.slowest)
       out(
-        `    ${rateStepTime(step.medianSeconds)} ${pad(step.task, 26)} ${padStart(duration(step.medianSeconds), 6)}  ${dim(`in ${step.runs} sign-offs${step.medianWait ? `, waits ${duration(step.medianWait)}` : ""}`)}`,
+        `    ${rateStepTime(step.medianSeconds)} ${pad(step.task, 26)} ${padStart(duration(step.medianSeconds), 6)}  ${dim(`in ${step.runs} sign-offs`)}`,
       );
 
     out(
@@ -393,10 +390,7 @@ function dashboard(runs: RunRecord[], projects: string[]) {
 }
 
 function stepLine(step: Profile["steps"][number]): string {
-  const notes = dotted(
-    changeText(step.change, step.usual.seconds),
-    step.waitSeconds >= 1 && dim(`+${duration(step.waitSeconds)} queue`),
-  );
+  const notes = changeText(step.change, step.usual.seconds);
 
   return `${step.rating} ${pad(step.task, 26)} ${padStart(duration(step.ranSeconds), 6)}${notes ? `  ${notes}` : ""}`;
 }
@@ -464,9 +458,9 @@ function runFields(run: RunRecord) {
   for (const warning of run.report.warnings ?? []) field("warning", warning);
 }
 
-/** The phase table's columns after the name: took, share of the run, step count, then the slot wait. */
-const tableRow = (took: string, share: string, count: string, waited: string, notes: string) =>
-  `${padStart(took, 6)}  ${padStart(share, 6)}  ${padStart(count, 5)}  ${notes ? pad(padStart(waited, 6), 17) : padStart(waited, 6)}${notes ? `  ${notes}` : ""}`.trimEnd();
+/** The phase table's columns after the name: took, share of the run, step count, then notes. */
+const tableRow = (took: string, share: string, count: string, notes: string) =>
+  `${padStart(took, 6)}  ${padStart(share, 6)}  ${padStart(count, 5)}${notes ? `  ${notes}` : ""}`.trimEnd();
 
 async function showProfile(item: Profile) {
   const view = phaseProfile(item, await planOf(item.run));
@@ -490,13 +484,7 @@ async function showProfile(item: Profile) {
       ? `${rating} ${duration(run.report.seconds)}   ${dotted(plain(changeText(item.change, usual.seconds)), `critical path ${duration(view.criticalPath)}`)}`
       : `⚪ ${duration(run.report.seconds)}   nothing ran: every step reused an earlier pass (-- --fresh reruns them)`,
   );
-  field(
-    "waited",
-    dotted(
-      `queue ${duration(item.waitSeconds)}`,
-      view.otherSeconds >= 1 && `setup ${duration(view.otherSeconds)}`,
-    ),
-  );
+  if (view.otherSeconds >= 1) field("setup", duration(view.otherSeconds));
   field(
     "steps",
     dotted(
@@ -525,9 +513,7 @@ async function showProfile(item: Profile) {
   // Step rows start 6 columns further in ("     🟠 " against "  "), so phase times line up with step times.
   const labelWidth = nameWidth + 6;
   out("");
-  out(
-    dim(`  ${pad("", labelWidth)} ${tableRow("took", "of run", "steps", "waited for a slot", "")}`),
-  );
+  out(dim(`  ${pad("", labelWidth)} ${tableRow("took", "of run", "steps", "")}`));
   for (const phase of phases) {
     const label =
       phase.phase === "parallel"
@@ -538,7 +524,7 @@ async function showProfile(item: Profile) {
         ? `slots ${Math.round(view.efficiency * 100)}% used`
         : "";
     out(
-      `  ${pc.bold(pad(label, labelWidth))} ${tableRow(duration(phase.seconds), `${Math.round(phase.share * 100)}%`, String(phase.steps.length), "", used)}`,
+      `  ${pc.bold(pad(label, labelWidth))} ${tableRow(duration(phase.seconds), `${Math.round(phase.share * 100)}%`, String(phase.steps.length), used)}`,
     );
 
     for (const step of phase.steps) {
@@ -548,7 +534,7 @@ async function showProfile(item: Profile) {
         plain(changeText(step.change, step.usual.seconds)),
       );
       out(
-        `     ${step.rating} ${pad(step.task, nameWidth)} ${tableRow(duration(step.ranSeconds), "", "", step.waitSeconds >= 1 ? duration(step.waitSeconds) : "", notes)}`,
+        `     ${step.rating} ${pad(step.task, nameWidth)} ${tableRow(duration(step.ranSeconds), "", "", notes)}`,
       );
       if (step.status === "failed" && step.log) out(dim(`        log ${step.log}`));
     }
@@ -569,6 +555,14 @@ function changeText(change: number | null, usual: number | null, against = "usua
 
 /** Prints each run's profile in turn; with --json, returns them. */
 async function profiles(runs: RunRecord[], chosen: RunRecord[]) {
+  // A spare Mac (one using a remote pool) records only its own runs; main-mac pulls every Mac's.
+  if (!chosen.length)
+    fail(
+      readRemoteClaudePoolUrl(homedir())
+        ? "No runs recorded on this spare Mac; main-mac holds every Mac's sign-offs, so run verify profile there"
+        : "No runs recorded yet; try verify profile --run",
+    );
+
   const results = [];
   for (const run of chosen) results.push(await showProfile(profile(runs, run)));
   printBoxes();
@@ -648,7 +642,7 @@ async function stepsView(runs: RunRecord[], projects: string[]) {
     );
     out(
       dim(
-        `     ${pad("step", 26)} ${padStart("median", 6)} ${padStart("runs", 5)} ${padStart("in", 5)} ${padStart("wait", 6)}`,
+        `     ${pad("step", 26)} ${padStart("median", 6)} ${padStart("runs", 5)} ${padStart("in", 5)}`,
       ),
     );
     for (const step of steps.slice(0, flags.limit)) {
@@ -662,7 +656,7 @@ async function stepsView(runs: RunRecord[], projects: string[]) {
         ),
       );
       out(
-        `  ${rateStepTime(step.medianSeconds)} ${pad(step.task, 26)} ${padStart(duration(step.medianSeconds), 6)} ${padStart(String(step.runs), 5)} ${padStart(percent(step.share), 5)} ${padStart(step.medianWait ? duration(step.medianWait) : "·", 6)}${notes ? `  ${notes}` : ""}`,
+        `  ${rateStepTime(step.medianSeconds)} ${pad(step.task, 26)} ${padStart(duration(step.medianSeconds), 6)} ${padStart(String(step.runs), 5)} ${padStart(percent(step.share), 5)}${notes ? `  ${notes}` : ""}`,
       );
     }
     if (!steps.length) out(dim("  No sign-off steps recorded in this window."));

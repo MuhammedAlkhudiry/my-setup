@@ -5,7 +5,7 @@ import { parseMemoryPressure } from "../lib/host-load";
 /**
  * Mac resource watcher. `run` is the scheduled pass and `guard` the minute-by-minute CPU guard, each started by its own
  * LaunchAgent; `status`, `resolve`, `prune`, and `review` are for people. The guard also stops forgotten recordings and
- * runs `device-queue reap`, and on main-mac messages the Housekeeper one `leftover-reaper:` line when either stops something.
+ * runs `device-queue reap`, and on main-mac messages the Ops keeper one `leftover-reaper:` line when either stops something.
  *
  * Each run frees disk with the fixed storage rules, takes a snapshot, and opens or closes threshold alerts, all without AI.
  * `review` asks Claude for a read-only diagnosis of a fresh snapshot and stores nothing.
@@ -70,7 +70,9 @@ if (!["run", "guard"].includes(process.argv[2] ?? ""))
   agentOutput("mac-watcher", {
     nativeJson: false,
     summary: (output) =>
-      output.split("\n").find((line) => line.includes("] storage:")) ?? "mac-watcher: ok",
+      process.argv[2] === "prune"
+        ? (output.split("\n").find((line) => line.includes("] storage:")) ?? "mac-watcher: ok")
+        : output.trimEnd() || "mac-watcher: ok",
   });
 
 const ROOT_DIR = join(import.meta.dir, "..", "..");
@@ -542,18 +544,22 @@ async function reapDevices(): Promise<StoppedDevice[]> {
     if (result.failed) throw new Error(result.stderr || result.shortMessage);
     return (JSON.parse(result.stdout) as { stopped: StoppedDevice[] }).stopped;
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] device reap failed: ${error instanceof Error ? error.message : error}`);
+    console.error(
+      `[${new Date().toISOString()}] device reap failed: ${error instanceof Error ? error.message : error}`,
+    );
     return [];
   }
 }
 
 /** Only main-mac's T3 holds the keeper threads; leftover stops go to the Ops keeper, and spare Macs only log theirs. */
-async function notifyHousekeeper(host: string, message: string): Promise<void> {
+async function notifyOps(host: string, message: string): Promise<void> {
   if (host !== "main-mac") return;
   try {
     await queueNotifier(ROOT_DIR)(message);
   } catch (error) {
-    console.error(`[${new Date().toISOString()}] Housekeeper message failed: ${error instanceof Error ? error.message : error}`);
+    console.error(
+      `[${new Date().toISOString()}] Ops keeper message failed: ${error instanceof Error ? error.message : error}`,
+    );
   }
 }
 
@@ -599,7 +605,7 @@ async function guardOnce(): Promise<void> {
 
   const host = (await run("scutil", ["--get", "LocalHostName"])).trim() || hostname();
   const message = reaperMessage(host, await reapDevices(), recordings);
-  if (message) await notifyHousekeeper(host, message);
+  if (message) await notifyOps(host, message);
 }
 
 function printStatus(): void {

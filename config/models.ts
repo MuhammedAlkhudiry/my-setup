@@ -8,13 +8,6 @@ export const MODELS = {
     smart: "opencode-go/glm-5.3-flash",
     fast: "opencode-go/deepseek-v4.1-flash",
   },
-  codex: {
-    review: {
-      id: "gpt-6.1-sol",
-      displayName: "GPT Sol",
-      shortName: "Sol",
-    },
-  },
   claudePool: {
     haiku: {
       id: "claude-haiku-4-5-20251001",

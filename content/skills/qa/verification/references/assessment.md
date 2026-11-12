@@ -20,4 +20,4 @@ stronger areas targeted actions.
 - **Formatting:** Identify formatters and covered file types. Run formatting checks; count unformatted files. Assess editor, pre-commit, and CI
   enforcement and rules shared by formatter and linter. Recommend one formatter per file type with automatic enforcement.
 - **Test coverage:** Check whether business rules and core journeys have checks that fail when broken. Use line coverage to locate gaps;
-  recommend neither coverage floors nor mutation testing.
+  never recommend coverage floors; suggest mutation testing only on request.

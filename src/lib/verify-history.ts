@@ -56,7 +56,7 @@ export interface CheckPlan {
   full: string[];
 }
 
-/** One stored run. `source: "heavy-run"` rows were seeded from the retired host queue's totals and carry no report areas or reuse. */
+/** One stored run. */
 export interface RunRecord {
   schema: 1;
   id: string;
@@ -64,10 +64,7 @@ export interface RunRecord {
   host: string;
   project: string;
   branch: string | null;
-  source: "check" | "heavy-run";
   report: CheckReport;
-  /** Seconds each step waited for a host slot, by task; only rows from the retired host queue have any. */
-  waits: Record<string, number>;
   /** The Pest check's slowest tests, when it ran in this run rather than being reused. */
   pest?: PestRecord;
   /** Set from VERIFY_RUN_TAG: the merge queue tags its nightly full sign-off of main. */
@@ -78,8 +75,7 @@ const DAY = 24 * 60 * 60 * 1000;
 const KEEP_DAYS = 180;
 const MAX_BYTES = 40_000_000;
 
-const stateDirectory = () =>
-  process.env.VERIFY_STATE_DIR ?? join(homedir(), ".local/state/verify");
+const stateDirectory = () => process.env.VERIFY_STATE_DIR ?? join(homedir(), ".local/state/verify");
 export const historyPath = (directory = stateDirectory()) => join(directory, "runs.jsonl");
 
 function git(cwd: string, ...args: string[]): string | null {
@@ -136,9 +132,7 @@ export function recordRun(
     host: shortHost(),
     project,
     branch: report.mergedMain?.branch ?? git(cwd, "branch", "--show-current"),
-    source: "check",
     report: compact(report),
-    waits: {},
   };
   const pest = readPestTimings((report as { artifacts?: { logs?: string } }).artifacts?.logs);
   if (pest) record.pest = pest;

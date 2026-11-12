@@ -48,5 +48,5 @@ description = "Print safe update commands for external CLI tools"
 run = "bun src/commands/system-tools-cli.ts update-plan"
 
 [tasks.watcher]
-description = "Show the Mac watcher's alerts and memory, run it now, or resolve an alert"
+description = "Show the Mac watcher's alerts and memory, run it or its CPU guard now, prune storage, review a snapshot, or resolve an alert"
 run = "bun src/commands/mac-watcher.ts"

@@ -8,7 +8,7 @@ Capture through $browser-simulator-routing and edit with tools of your choice. R
 - Check the final cut for wrong text, stale states, and private data.
 
 Include media only when reviewers need it. Put all media on one $html-artifacts demo page: labeled blocks per changed surface (platform,
-theme, RTL), before/after side by side, captions above media. Follow the parent skill's inline-preview preference for chat review.
+theme, RTL), before/after side by side, captions above media.
 Never upload media to GitHub or ask the user to upload it.
 
 <!-- profile:personal -->

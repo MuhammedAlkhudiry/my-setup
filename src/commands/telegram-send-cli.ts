@@ -23,7 +23,9 @@ agentOutput("telegram-send", { nativeJson: true, summary: (output) => output.tri
 const json = process.argv.includes("--json");
 
 function report(line: string): void {
-  console.log(json ? JSON.stringify({ command: "telegram-send", status: "success", output: [line] }) : line);
+  console.log(
+    json ? JSON.stringify({ command: "telegram-send", status: "success", output: [line] }) : line,
+  );
 }
 
 function mtprotoBotClient(): BotFileClient {
@@ -61,7 +63,10 @@ cli
     report("telegram-send: sent");
   });
 cli
-  .command("react <messageId> [emoji]", "React to one of the owner's messages (default 👍) instead of replying")
+  .command(
+    "react <messageId> [emoji]",
+    "React to one of the owner's messages (default 👍) instead of replying",
+  )
   .action(async (messageId: string, emoji: string | undefined, options: { support?: boolean }) => {
     await reactToTelegramMessage(messageId, emoji, options.support);
     report("telegram-send: reacted");
@@ -90,7 +95,9 @@ cli
   .option("--file <path>", "Transcribe a local audio file instead of a Telegram file")
   .action(async (fileId: string | undefined, options: { file?: string }) => {
     const transcript = await transcribeAudio({ fileId, file: options.file });
-    console.log(json ? JSON.stringify(transcript) : transcript.text || "telegram-send: no speech found");
+    console.log(
+      json ? JSON.stringify(transcript) : transcript.text || "telegram-send: no speech found",
+    );
   });
 cli
   .command(
@@ -98,10 +105,18 @@ cli
     "Download a message's file of up to 2 GB through the ops bot's MTProto session",
   )
   .action(async (chatId: string, messageId: string, outPath: string) => {
-    const bytes = await downloadTelegramMessageFile(mtprotoBotClient(), chatId.trim(), messageId, outPath);
+    const bytes = await downloadTelegramMessageFile(
+      mtprotoBotClient(),
+      chatId.trim(),
+      messageId,
+      outPath,
+    );
     report(`telegram-send: downloaded ${bytes} bytes`);
   });
-cli.option("--json", "Return a structured receipt; transcribe returns {text, language, durationSeconds}");
+cli.option(
+  "--json",
+  "Return a structured receipt; transcribe returns {text, language, durationSeconds}",
+);
 cli.option("--support", "Send or react in the Awraq support group instead of the owner's chat");
 cli.help();
 cli.addEventListener("command:*", () => {

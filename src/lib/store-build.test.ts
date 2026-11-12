@@ -40,7 +40,10 @@ test("reads each variable's name and visibility from the long listing", () => {
 });
 
 test("requires only secret variables, which EAS keeps from local builds", () => {
-  expect(missingSecrets(parseEasVariables(listing), {}, noFiles)).toEqual(["GOOGLE_SERVICES_JSON", "HUGEICONS_TOKEN"]);
+  expect(missingSecrets(parseEasVariables(listing), {}, noFiles)).toEqual([
+    "GOOGLE_SERVICES_JSON",
+    "HUGEICONS_TOKEN",
+  ]);
 });
 
 test("a secret given as an absolute path must point at a file", () => {
@@ -49,7 +52,9 @@ test("a secret given as an absolute path must point at a file", () => {
   expect(missingSecrets(parseEasVariables(listing), env, noFiles)).toEqual([
     "GOOGLE_SERVICES_JSON (no file at /app/google-services.json)",
   ]);
-  expect(missingSecrets(parseEasVariables(listing), env, { ...noFiles, fileExists: () => true })).toEqual([]);
+  expect(
+    missingSecrets(parseEasVariables(listing), env, { ...noFiles, fileExists: () => true }),
+  ).toEqual([]);
 });
 
 test("allowed secrets and a saved Sentry login satisfy the check", () => {
@@ -58,7 +63,13 @@ test("allowed secrets and a saved Sentry login satisfy the check", () => {
     { name: "SENTRY_AUTH_TOKEN", visibility: "SECRET" },
   ];
 
-  expect(missingSecrets(variables, {}, { ...noFiles, allowMissing: ["NPM_TOKEN"], hasSentryLogin: true })).toEqual([]);
+  expect(
+    missingSecrets(
+      variables,
+      {},
+      { ...noFiles, allowMissing: ["NPM_TOKEN"], hasSentryLogin: true },
+    ),
+  ).toEqual([]);
   expect(missingSecrets(variables, {}, noFiles)).toEqual(["NPM_TOKEN", "SENTRY_AUTH_TOKEN"]);
 });
 
@@ -72,7 +83,9 @@ test("an image pinned to an older Xcode major keeps iOS off this Mac", () => {
 });
 
 test("drops shell EXPO_PUBLIC_ variables so the EAS environment supplies them", () => {
-  expect(storeBuildEnv({ EXPO_PUBLIC_API_URL: "http://localhost", HOME: "/h" })).toEqual({ HOME: "/h" });
+  expect(storeBuildEnv({ EXPO_PUBLIC_API_URL: "http://localhost", HOME: "/h" })).toEqual({
+    HOME: "/h",
+  });
 });
 
 const GROUP = "group.com.example.app.shared";
@@ -81,7 +94,10 @@ const groupsOf = (...groups: string[]) => ({ "com.apple.security.application-gro
 
 const config: IntrospectedConfig = {
   name: "Example",
-  ios: { bundleIdentifier: "com.example.app", entitlements: { ...groupsOf(GROUP), "aps-environment": "production" } },
+  ios: {
+    bundleIdentifier: "com.example.app",
+    entitlements: { ...groupsOf(GROUP), "aps-environment": "production" },
+  },
   extra: {
     eas: {
       projectId: "project-id",
@@ -105,8 +121,12 @@ const config: IntrospectedConfig = {
 
 // A profile is a signed DER blob around a plist, so the plist sits between binary bytes.
 function profile(groups: string[] | undefined): string {
-  const list = groups?.length ? `<array>${groups.map((group) => `<string>${group}</string>`).join("")}</array>` : "<array/>";
-  const entitlements = groups ? `<key>com.apple.security.application-groups</key>\n\t\t${list}` : "";
+  const list = groups?.length
+    ? `<array>${groups.map((group) => `<string>${group}</string>`).join("")}</array>`
+    : "<array/>";
+  const entitlements = groups
+    ? `<key>com.apple.security.application-groups</key>\n\t\t${list}`
+    : "";
   const plist =
     '<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Entitlements</key><dict>' +
     `${entitlements}<key>keychain-access-groups</key><array><string>TEAM.*</string></array></dict></dict></plist>`;
@@ -134,7 +154,9 @@ test("reads the App Groups a provisioning profile grants", () => {
 test("maps each bundle identifier to the first App Store profile EAS stores for it", () => {
   const credentials = (bundleIdentifier: string, profiles: (string | null)[]) => ({
     appleAppIdentifier: { bundleIdentifier },
-    iosAppBuildCredentialsList: profiles.map((provisioningProfile) => ({ provisioningProfile: { provisioningProfile } })),
+    iosAppBuildCredentialsList: profiles.map((provisioningProfile) => ({
+      provisioningProfile: { provisioningProfile },
+    })),
   });
   const iosAppCredentials = [
     credentials("com.example.app", ["first", "second"]),
@@ -143,7 +165,9 @@ test("maps each bundle identifier to the first App Store profile EAS stores for 
     credentials("com.example.app", ["another team"]),
   ];
 
-  expect(easProfiles({ data: { app: { byId: { iosAppCredentials } } } })).toEqual(new Map([["com.example.app", "first"]]));
+  expect(easProfiles({ data: { app: { byId: { iosAppCredentials } } } })).toEqual(
+    new Map([["com.example.app", "first"]]),
+  );
 });
 
 test("an App Group missing from a target's EAS profile names the target and the group", () => {
@@ -152,7 +176,9 @@ test("an App Group missing from a target's EAS profile names the target and the 
     ["com.example.app.widget", profile([GROUP])],
   ]);
 
-  expect(appGroupGaps(signingTargets(config), profiles)).toEqual([`Widget (com.example.app.widget) lacks ${OTHER_GROUP}`]);
+  expect(appGroupGaps(signingTargets(config), profiles)).toEqual([
+    `Widget (com.example.app.widget) lacks ${OTHER_GROUP}`,
+  ]);
 });
 
 test("an active profile with an empty group list lacks every configured group", () => {

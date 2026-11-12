@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { T3_CLIENT_SETTINGS, T3_SERVER_SETTINGS, T3_THEME_ID } from "../../config/t3";
+import { T3_CLIENT_SETTINGS, t3ServerSettings, T3_THEME_ID } from "../../config/t3";
 
 const THEME_SOURCE_PATH = join(import.meta.dir, "..", "..", "config", "t3-theme.json");
 
@@ -19,6 +19,7 @@ export type T3SettingsInstallResult =
 
 export async function installT3Settings(options: {
   home: string;
+  profile: "personal" | "work";
   env?: NodeJS.ProcessEnv;
   now?: () => Date;
 }): Promise<T3SettingsInstallResult> {
@@ -49,7 +50,7 @@ export async function installT3Settings(options: {
   await writeJsonIfChanged(
     settingsPath,
     settings,
-    mergeManaged(settings, { ...T3_SERVER_SETTINGS, ...themeSettings }),
+    mergeManaged(settings, { ...t3ServerSettings(options.profile), ...themeSettings }),
     2,
   );
 

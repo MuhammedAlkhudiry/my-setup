@@ -63,8 +63,13 @@ function fixture(dir: string): string {
 }
 
 test("mailbox URLs split into the account id and decoded folders", () => {
-  expect(parseMailboxUrl(GMAIL)).toEqual({ accountId: "GMAIL-ID", folders: ["[Gmail]", "All Mail"] });
-  expect(parseMailboxUrl("ews://HOTMAIL-ID/%D8%A7%D9%84%D9%85%D9%81%D8%B6%D9%84%D8%A9").folders).toEqual(["المفضلة"]);
+  expect(parseMailboxUrl(GMAIL)).toEqual({
+    accountId: "GMAIL-ID",
+    folders: ["[Gmail]", "All Mail"],
+  });
+  expect(
+    parseMailboxUrl("ews://HOTMAIL-ID/%D8%A7%D9%84%D9%85%D9%81%D8%B6%D9%84%D8%A9").folders,
+  ).toEqual(["المفضلة"]);
   expect(parseMailboxUrl("local://LOCAL-ID")).toEqual({ accountId: "LOCAL-ID", folders: [] });
 });
 
@@ -92,16 +97,20 @@ test("an .emlx file yields only the raw message, not the trailing property list"
 });
 
 test("HTML bodies become plain text with entities decoded", () => {
-  expect(htmlToText("<style>p{}</style><p>Total&nbsp;<b>SAR 50</b></p><br>&#x645;&#1585;&amp;")).toBe(
-    "Total SAR 50\n\nمر&",
-  );
+  expect(
+    htmlToText("<style>p{}</style><p>Total&nbsp;<b>SAR 50</b></p><br>&#x645;&#1585;&amp;"),
+  ).toBe("Total SAR 50\n\nمر&");
 });
 
 test("accounts and searches skip deleted mail and show Gmail labels as folders", () => {
   const dir = mkdtempSync(join(tmpdir(), "apple-mail-test-"));
   try {
     const db = openMailIndex(fixture(dir));
-    expect(listAccounts(db, names).map(({ name, messages }) => [name, messages]).sort()).toEqual([
+    expect(
+      listAccounts(db, names)
+        .map(({ name, messages }) => [name, messages])
+        .sort(),
+    ).toEqual([
       ["owner@gmail.com", 1],
       ["owner@hotmail.com", 1],
     ]);
@@ -115,8 +124,12 @@ test("accounts and searches skip deleted mail and show Gmail labels as folders",
       preview: "Enter the code",
       unread: true,
     });
-    expect(searchMessages(db, { account: "hotmail" }, names).map((message) => message.id)).toEqual([154]);
-    expect(searchMessages(db, { from: "shop", since: "2024-05-01", until: "2024-05-10" }, names)).toHaveLength(1);
+    expect(searchMessages(db, { account: "hotmail" }, names).map((message) => message.id)).toEqual([
+      154,
+    ]);
+    expect(
+      searchMessages(db, { from: "shop", since: "2024-05-01", until: "2024-05-10" }, names),
+    ).toHaveLength(1);
     expect(searchMessages(db, { query: "100%_" }, names)).toEqual([]);
     expect(searchMessages(db, { unread: true, mailbox: "inbox" }, names)).toHaveLength(1);
     expect(() => searchMessages(db, { since: "May 1" }, names)).toThrow("YYYY-MM-DD");

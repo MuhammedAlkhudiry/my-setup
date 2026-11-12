@@ -27,6 +27,13 @@ layout, style, and interaction. Only these hold:
 - Keep it self-contained: inline CSS and scripts, relative or inline assets, and no `localhost`, `.test`, or `file://` links. Use
   `dir="rtl"` for Arabic.
 
+## Reports
+
+Recurring reports live on the Housekeeper's dashboard site, never as pages: write the report type's data and push it with that site's
+CLI, per keeper-core (owner, 2026-11-12). One-off reports and analyses stay pages and match the site's report UI: the same neutral dark
+style, each project marked by its color and logo, Awraq green with its tree and Harium orange with its mark, RATINGS emojis kept for
+judgement only, and the verdict as the first screen.
+
 ## Publish
 
 - `share-html <folder>` publishes every non-dot file in the folder, up to 20 MB. For a living page, add `--name <words> --stable` to keep

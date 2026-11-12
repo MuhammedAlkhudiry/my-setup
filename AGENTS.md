@@ -40,7 +40,9 @@
 - **MY-SETUP-CLI** — `my-setup` provides only `install` and help. Use `doctor` for health and `system-tools status` or `system-tools update-plan`
   for external tools.
 - **NO-BLOCKING-GUARDS** — Never add hooks or guards that block or restrict agents; fighting them costs turns and hides the real problem.
-  Fix the cause instead: put the fact where agents look first, or make the tool clearer or more forgiving.
+  Fix the cause instead: put the fact where agents look first, or make the tool clearer or more forgiving. Three exceptions stay in
+  `config/hooks.ts` because their mistakes cannot be undone: creating or cloning a simulator outside the device pool, sending a Telegram
+  draft as the owner before approval, and writing into a spare Mac's read-only setup copy (owner, 2026-11-12).
 - **WORDING-QUALITY** — Preserve user intent; rewrite rough wording clearly in the repo's voice.
 
 ## Project Glossaries

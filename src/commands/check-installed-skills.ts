@@ -6,7 +6,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, relative } from "node:path";
 
-import { OPTIONAL_EXTERNAL_SKILL_NAMES, REMOTE_SKILL_SOURCES } from "../../config/skills";
+import { REMOTE_SKILL_SOURCES } from "../../config/skills";
 import { readDeviceProfile, selectRemoteSkillSources } from "../lib/device";
 import { renderManagedMarkdown } from "../lib/models";
 import { discoverLocalSkills } from "../lib/skills";
@@ -106,7 +106,7 @@ const remoteSkillNames = selectRemoteSkillSources(REMOTE_SKILL_SOURCES, PROFILE)
   .sort();
 const excludedSkills = new Set(PROFILE.excludedSkills);
 const localSkills = discoverLocalSkills(LOCAL_SKILLS_ROOT, {
-  additionalSkillNames: [...declaredRemoteSkillNames, ...OPTIONAL_EXTERNAL_SKILL_NAMES],
+  additionalSkillNames: declaredRemoteSkillNames,
 }).filter((skill) => !excludedSkills.has(skill.name));
 const localSkillNames = localSkills.map((skill) => skill.name).sort();
 const remoteSkillNameSet = new Set(remoteSkillNames);

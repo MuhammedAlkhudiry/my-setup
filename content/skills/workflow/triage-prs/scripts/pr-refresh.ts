@@ -20,8 +20,9 @@ import { command, finish, options, prTarget, remoteRepo, Stop } from "../../prs/
 
 const HELP = `Usage: bun pr-refresh.ts <pr-url> --repo <checkout> --expected-head <sha> [--json] [--verbose] [--dry-run]
 
-Refresh an owned, clean PR branch: fetch its actual base, merge, mise run check,
-normal push, then mise run signoff. Retry a behind-main refusal twice. Never merges the PR.
+Refresh an owned, clean PR branch: fetch its actual base, merge, mise run check, normal push,
+then sign off: verify signoff when installed (a spare Mac, else here), otherwise mise run signoff.
+Retry a behind-main refusal twice. Never merges the PR.
 --repo and --expected-head assert ownership of this checkout and its pinned PR head.
 Coordinate checkout ownership before calling; a Git-directory lock excludes other refreshes.
 Requires same-repository GitHub branches, configured origin, and local check/signoff mise tasks.
@@ -50,6 +51,28 @@ interface State {
   baseSha: string;
   remoteHead?: string;
   phase: "merge" | "conflict" | "checks" | "push" | "signoff";
+}
+
+// `verify signoff` runs the project's sign-off on the least-loaded spare Mac and falls back to this Mac itself.
+const SIGNOFF = Bun.which("verify")
+  ? ["verify", "signoff", "--json"]
+  : ["mise", "run", "signoff", "--json"];
+
+/** A refusal because main moved: the project's `--json` receipt, or its `FAIL` line inside verify signoff's output. */
+export function behindMain(output: string): boolean {
+  return output.split("\n").some((line) => {
+    try {
+      const result = JSON.parse(line);
+
+      return (
+        (result.command === "signoff" &&
+          result.errors?.some((error: { item: string }) => error.item === "signoff-behind-main")) ||
+        (typeof result.output === "string" && /^FAIL signoff-behind-main\b/m.test(result.output))
+      );
+    } catch {
+      return false;
+    }
+  });
 }
 
 export function refresh(argv: string[]): { code: number; receipt: Record<string, unknown> } {
@@ -160,6 +183,14 @@ export function refresh(argv: string[]): { code: number; receipt: Record<string,
           "Rerun this command with the original --expected-head after resolving and committing any conflict",
       };
     };
+    const conflictResume = () => ({
+      conflicts: git(["diff", "--name-only", "--diff-filter=U"])
+        .out.trim()
+        .split("\n")
+        .filter(Boolean),
+      action:
+        "Resolve and commit the merge, then rerun with the original --expected-head; or git merge --abort and rerun",
+    });
     const ancestor = (parent: string, head: string) =>
       git(["merge-base", "--is-ancestor", parent, head], [0, 1]).ok;
 
@@ -170,18 +201,7 @@ export function refresh(argv: string[]): { code: number; receipt: Record<string,
       existsSync(join(gitDir, "rebase-apply")) ||
       existsSync(join(gitDir, "CHERRY_PICK_HEAD"))
     ) {
-      receipt.resume = saved
-        ? {
-            statePath,
-            ...saved,
-            conflicts: git(["diff", "--name-only", "--diff-filter=U"])
-              .out.trim()
-              .split("\n")
-              .filter(Boolean),
-            action:
-              "Resolve and commit the merge, then rerun with the original --expected-head; or git merge --abort and rerun",
-          }
-        : null;
+      receipt.resume = saved ? { statePath, ...saved, ...conflictResume() } : null;
       throw new Stop(3, "Checkout is dirty or has an operation in progress");
     }
     const local = sha();
@@ -256,7 +276,7 @@ export function refresh(argv: string[]): { code: number; receipt: Record<string,
         "merge base",
         "mise run check",
         "normal push",
-        "mise run signoff",
+        SIGNOFF.join(" "),
       ];
 
       return { code: 0, receipt };
@@ -337,15 +357,7 @@ export function refresh(argv: string[]): { code: number; receipt: Record<string,
         if (!merged.ok) {
           state.phase = "conflict";
           persist();
-          receipt.resume = {
-            ...(receipt.resume as object),
-            conflicts: git(["diff", "--name-only", "--diff-filter=U"])
-              .out.trim()
-              .split("\n")
-              .filter(Boolean),
-            action:
-              "Resolve and commit the merge, then rerun with the original --expected-head; or git merge --abort and rerun",
-          };
+          receipt.resume = { ...(receipt.resume as object), ...conflictResume() };
           throw new Stop(3, "Merge stopped; conflict state is preserved");
         }
         state.newHead = sha();
@@ -380,24 +392,14 @@ export function refresh(argv: string[]): { code: number; receipt: Record<string,
       }
 
       unchanged();
-      const signed = stage("signoff", ["mise", "run", "signoff", "--json"], true);
+      const signed = stage("signoff", SIGNOFF, true);
       if (signed.result.error || signed.result.status !== 0) {
-        // Only the structured receipt can cause a retry; an unstructured failure never does.
-        const behindMain = signed.output.split("\n").some((line) => {
-          try {
-            const result = JSON.parse(line);
-            return (
-              result.command === "signoff" &&
-              result.errors?.some((error: { item: string }) => error.item === "signoff-behind-main")
-            );
-          } catch {
-            return false;
-          }
-        });
-        if (!behindMain || attempt === 2)
+        // Only a structured result can cause a retry; an unstructured failure never does.
+        const behind = behindMain(signed.output);
+        if (!behind || attempt === 2)
           throw new Stop(
             1,
-            behindMain ? "Main kept moving; sign-off retry limit reached" : "signoff failed",
+            behind ? "Main kept moving; sign-off retry limit reached" : "signoff failed",
           );
 
         // Refuse remote head movement, but accept the base movement sign-off identified.
@@ -431,7 +433,7 @@ export function refresh(argv: string[]): { code: number; receipt: Record<string,
         head: state.newHead,
         base: state.baseSha,
         checks: "mise run check",
-        signoff: "mise run signoff",
+        signoff: SIGNOFF.slice(0, -1).join(" "),
         passed: true,
       },
     });
