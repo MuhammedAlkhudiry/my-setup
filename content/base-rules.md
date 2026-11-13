@@ -311,7 +311,7 @@ Reply freely; prefer visualisations, see $show-me.
     <!-- /profile -->
   - **Checks:** `🟢` one line for everything that passed; one line per `🟡` warning or `🔴` failure or skipped check.
   - **PRs:** **PR status** for each PR the work created or changed.
-  - **Questions:** following DECISION-CONTEXT.
+  - **Questions:** new questions in full, following DECISION-CONTEXT; earlier unanswered ones only as ASK-ONCE's waiting line.
   - **Close:** the next action, or "No next action needed", then a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`,
     `⏳ **AWAITING**` (on-track work waiting on a named external event), `🔴 **ACTION REQUIRED**`, or `⛔ **BLOCKED**`.
 - **DECISION-CONTEXT** — Start each question with 🔴 and its own letter, such as "🔴 **A** Which quiet screen?". Give one line on today's
@@ -320,6 +320,17 @@ Reply freely; prefer visualisations, see $show-me.
   answer. Require no code reading or scrolling back. A question about a PR, data fix, or other work first links it and says in one plain
   line what it is and what changes for users, without code names, since the owner may never have seen it (owner, 2026-11-11). Letter questions A to Z across the chat, starting over at A after Z, so a
   bare answer like "A2 B1" names one option each and a question letter alone names the question (owner, 2026-11-12).
+- **ASK-ONCE** — A question appears in full or not at all: its context line, one line per option, and Skip. Ask it once, in full; later
+  replies never repeat, shorten, or relabel it (owner, 2026-11-12). Until it is answered, they carry one line instead, before Close:
+  "💬 N questions waiting for Muhammed: <link to where they wait>".
+  <!-- profile:personal -->
+  - Post each question to hq's Needs you as you ask it: `hq ask --project … --title … --context … --option "label|tradeoff|rec" …`, ending
+    with a Skip option, reserves its letter from the one shared sequence and prints its keys (A1, A2, A3); ask it in chat with
+    exactly those. The waiting line links [hq](https://hq.harium.app/); `hq questions` lists this thread's open ones.
+  - A pick on hq reaches this thread as a message and closes the item. When Muhammed answers in chat instead, close it with
+    `hq drop <letter>`; when the question changes, repost it with `hq ask --letter <letter> …`.
+  - Keepers keep asking through `hk ask`, which posts to the same page.
+  <!-- /profile -->
 - **VISUAL-DECISIONS** — For decisions about what users see, show each option as an image, following **Phone-ready media**: a running-app
   screenshot for existing options, a rendered mockup otherwise. Text and ASCII sketches do not replace images.
 - **PROGRESS** — Only while work continues, at milestones: a task group finishes, the plan changes, work fails or blocks, or input is

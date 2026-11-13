@@ -296,3 +296,43 @@ export function canonicalPlan(project: string): Promise<CheckPlan | null> {
 
   return plans.get(project)!;
 }
+
+const descriptions = new Map<string, Map<string, string>>();
+
+/**
+ * Each mise task's one-line description for a project, so a profile can say what a check does. The canonical clone's
+ * `mise tasks ls` covers every task file; its mise.toml on a freshly fetched origin/main then wins, since the clone
+ * itself often lags main. Empty for projects outside ACTIVE_PROJECTS.
+ */
+export function taskDescriptions(project: string): Map<string, string> {
+  if (!descriptions.has(project)) {
+    const root = ACTIVE_PROJECTS.find(
+      (item) => basename(item.canonicalRoot) === project,
+    )?.canonicalRoot;
+    const found = new Map<string, string>();
+
+    if (root) {
+      const run = (command: string, args: string[]) =>
+        spawnSync(command, args, { cwd: root, encoding: "utf8", timeout: 15_000 });
+      const listed = run("mise", ["tasks", "ls", "--json"]);
+      try {
+        const tasks: { name: string; description?: string }[] =
+          listed.status === 0 ? JSON.parse(listed.stdout) : [];
+        for (const task of tasks) if (task.description) found.set(task.name, task.description);
+      } catch {}
+
+      run("git", ["fetch", "--quiet", "origin", "main"]);
+      const latest = run("git", ["show", "origin/main:mise.toml"]);
+      try {
+        const tasks = (latest.status === 0 ? Bun.TOML.parse(latest.stdout) : {}) as {
+          tasks?: Record<string, { description?: string }>;
+        };
+        for (const [name, task] of Object.entries(tasks.tasks ?? {}))
+          if (task.description) found.set(name, task.description);
+      } catch {}
+    }
+    descriptions.set(project, found);
+  }
+
+  return descriptions.get(project)!;
+}

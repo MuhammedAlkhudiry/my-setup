@@ -20,13 +20,13 @@ description: Use before UI changes, design reviews, or visual option comparisons
 ## Requested options
 
 - Default to five substantially different options plus several **Wild** options beyond the brief's design constraints.
-- Use a new HTML preview or visualization with $html-artifacts, unless options were requested in the app/site. Include an option switcher,
-  fixed on screen so it never scrolls away, and allow multiple selections both on the page and in chat. Loop animations when useful for comparison.
+- Show them as an `options` block on an hq page per $html-artifacts, each option's mockup as its preview, unless options were requested in
+  the app/site; its fixed pick bar switches options and takes several picks. Accept picks in chat too. Loop animations when useful for comparison.
 - For a single selection without an implementation request, acknowledge it and ask whether to integrate. For multiple selections or selected
   parts, combine them into new options.
 - Keep the page focused on options. Give each two plain sentences: what users see and why to pick it. Use short labels only for secondary detail.
   For feature proposals, summarize options in the proposal and link the full page.
-- For requested revisions, create a new HTML file; preserve the previous one.
+- For requested revisions, push a new page with a new slug; preserve the previous one.
 - When the owner rejects a design, rethink it with different approaches instead of patching it.
 
 ## Building a picked option

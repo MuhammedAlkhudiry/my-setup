@@ -3,7 +3,13 @@ agent_command() {
   local name="$1" script="$2"
   shift 2
 
-  if [[ ! -f "$script" ]] || ! command -v bun >/dev/null 2>&1; then
+  # A spare Mac's mise shim can lack a global bun version, so fall back to Bun's own install.
+  local bun_bin="bun"
+  if ! bun --version >/dev/null 2>&1 && [[ -x "$HOME/.bun/bin/bun" ]]; then
+    bun_bin="$HOME/.bun/bin/bun"
+  fi
+
+  if [[ ! -f "$script" ]] || ! "$bun_bin" --version >/dev/null 2>&1; then
     local log_dir="$(mktemp -d "${TMPDIR:-/tmp}/${name}-log.XXXXXX")"
     local log="$log_dir/full.log"
     { printf 'Script: %s\n' "$script"; printf 'Bun must be available in PATH. Run mise run install from %s.\n' "$MY_SETUP_ROOT"; } > "$log"
@@ -13,5 +19,5 @@ agent_command() {
   fi
 
   # Bun would otherwise load the caller's .env, and every child (tests, builds) would inherit that project's dev settings.
-  exec bun --no-env-file "$script" "$@"
+  exec "$bun_bin" --no-env-file "$script" "$@"
 }

@@ -365,12 +365,7 @@ if (remotePoolUrl) {
       !config.includes(`port: ${CLAUDE_POOL.port}`) ||
       !config.includes("allow-remote: false") ||
       !config.includes("disable-control-panel: false") ||
-      !config.includes("session-affinity-subagents: false") ||
-      Object.values(MODELS.claudePool).some(
-        ({ id, alias }) =>
-          !config.includes(`name: ${JSON.stringify(id)}`) ||
-          !config.includes(`alias: ${JSON.stringify(alias)}`),
-      )
+      !config.includes("session-affinity-subagents: false")
     ) {
       findings.push({
         level: "required",

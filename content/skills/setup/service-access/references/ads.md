@@ -13,9 +13,9 @@ Pause for login, OAuth, 2FA, CAPTCHA, or missing permissions. Get approval befor
 ## Apple Ads
 
 - Confirm the account, currency, timezone, and role in [Apple Ads](https://app-ads.apple.com/cm/app/).
-- Harium has no Apple Ads API user: Apple blocks creating its Apple Account from the home network, and the owner chose not to
-  deal with it (2026-11-04). Read and export reports from the signed-in Apple Ads web dashboard in the shared browser instead,
-  and never ask the owner to set up API access.
+- A project without Apple Ads API credentials has no API user on purpose: Apple blocks creating its Apple Account from the home
+  network, and the owner chose not to deal with it (2026-11-04). Read and export its reports from the signed-in Apple Ads web
+  dashboard in the shared browser instead, and never ask the owner to set up API access.
 - Prefer `asc ads` where it covers the task. Read `asc ads --help`; the default is Platform API v1, while `asc ads v5` is deprecated.
   Verify credentials with `asc ads auth discover`; use `asc ads auth login` to register keys rather than implementing custom OAuth.
 - Platform API `--ad-account` IDs are distinct from legacy v5 `--org` IDs. Discover each; never substitute one for the other.

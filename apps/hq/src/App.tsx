@@ -13,6 +13,7 @@ import AdsPage from "@/pages/ads"
 import ProductHealthPage from "@/pages/product-health"
 import FinancePage from "@/pages/finance"
 import RecapPage from "@/pages/recap"
+import PageView from "@/pages/page"
 
 const useRoute = () => {
   const [hash, setHash] = React.useState(location.hash || "#/")
@@ -32,7 +33,26 @@ const REPORTS = [
 ] as const
 
 export default function App() {
+  const page = location.pathname.match(/^\/p\/([a-z0-9-]+)\/?$/)?.[1]
+  if (page) return <PageShell slug={page} />
   return <StatusProvider><Shell /></StatusProvider>
+}
+
+/** A one-off page at /p/<slug>: hq's look without the desk's sidebar, so a shared link opens straight to the content. */
+function PageShell({ slug }: { slug: string }) {
+  return (
+    <TooltipProvider>
+      <div className="min-h-svh bg-background">
+        <header className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b bg-background/80 px-4 backdrop-blur md:px-6">
+          <a href="/" className="flex items-center gap-2 text-sm font-medium">
+            <span className="grid size-7 place-items-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground">H</span>
+            Housekeeper
+          </a>
+        </header>
+        <PageView slug={slug} />
+      </div>
+    </TooltipProvider>
+  )
 }
 
 function Shell() {

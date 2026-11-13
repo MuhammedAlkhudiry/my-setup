@@ -19,7 +19,6 @@ fewer, excluding generated and lock files; above either, it is mid or large.
   checklist item 4's gate and a published demo page; prose such as "screenshots go to the Housekeeper" is not one.
 - A PR whose work has its own thread, including spare-Mac threads, gets its merge approval in that thread; the Housekeeper and Ops never
   relay its ready report or ask for it (owner, 2026-11-05).
-- my-setup has no PRs: its changes stay uncommitted for the owner's review.
 - Label PRs awaiting the owner `needs-approval`; drop it on approval. They never go on the Housekeeper status page.
 
 Enqueue as PR-CHECKS describes; never merge directly.

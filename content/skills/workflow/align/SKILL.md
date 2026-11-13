@@ -1,6 +1,6 @@
 ---
 name: align
-description: Use only when the user asks for a status recap of the goal, problem, and progress; not for discussing or agreeing on an idea.
+description: Use only when the user asks for a recap of a thread's goal, open decisions, and progress; not for discussing or agreeing on an idea.
 ---
 
 The owner asks for this after losing track of a thread, so the recap must be quick to take in at the top and detailed one tap down.

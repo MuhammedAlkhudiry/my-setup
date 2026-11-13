@@ -1,7 +1,9 @@
 // The Housekeeper HQ Worker. Cloudflare Access guards hq.harium.app; static assets serve the site, and /api reads the data
 // keepers push to R2 and saves the owner's picks. Every /api request must carry a valid Access token for the HQ application,
 // so the API stays private even if the Worker were reached some other way.
-import { Answer, AnswerInput, REPORT_TYPES, Status, type ReportType } from "../contract";
+import {
+  Answer, AnswerInput, HQ_HOST, Question, REPORT_TYPES, Status, pageKey, pagePickKey, questionKey, type Page, type ReportType,
+} from "../contract";
 
 interface Env {
   DATA: R2Bucket;
@@ -73,19 +75,24 @@ async function listKeys(env: Env, prefix: string): Promise<string[]> {
   return keys;
 }
 
-/** Status items with the owner's pending picks, so a pick shows as sent until the Housekeeper applies it. */
+async function questions(env: Env): Promise<Question[]> {
+  const keys = await listKeys(env, "questions/");
+  return (await Promise.all(keys.map((key) => readJson<Question>(env, key)))).filter((q): q is Question => !!q);
+}
+
+/** Status items and thread questions with the owner's pending picks, so a pick shows as sent until it is applied. */
 async function status(env: Env) {
-  const saved = await readJson<Status>(env, "status.json");
-  if (!saved) return { updatedAt: null, items: [], answers: {} };
+  const [saved, asked] = await Promise.all([readJson<Status>(env, "status.json"), questions(env)]);
+  const items = [...(saved?.items ?? []), ...asked];
   const keys = await listKeys(env, "answers/");
   const all = await Promise.all(keys.map((key) => readJson<Answer>(env, key)));
-  const byId = new Map(saved.items.map((item) => [item.id, item]));
+  const byId = new Map(items.map((item) => [item.id, item]));
   const answers: Record<string, Answer> = {};
   for (const answer of all) {
     const item = answer && byId.get(answer.id);
     if (item && (!item.appliedAt || answer.at > item.appliedAt)) answers[answer.id] = answer;
   }
-  return { ...saved, answers };
+  return { updatedAt: saved?.updatedAt ?? null, items, answers };
 }
 
 async function reportDates(env: Env, type: ReportType) {
@@ -136,6 +143,60 @@ async function api(request: Request, env: Env, path: string[]): Promise<Response
     const answer: Answer = { id, choice, note, at: new Date().toISOString(), by };
     await env.DATA.put(answerKey(id), JSON.stringify(answer), { httpMetadata: { contentType: "application/json" } });
     return json({ ok: true, answer });
+  }
+
+  // Thread questions: any thread posts, updates, and drops its own; main-mac's `hq deliver` reads them with their picks.
+  if (route === "questions") {
+    const id = type;
+    if (request.method === "GET" && !id) {
+      const [asked, keys] = await Promise.all([questions(env), listKeys(env, "answers/")]);
+      const answers = await Promise.all(keys.map((key) => readJson<Answer>(env, key)));
+      const byId = new Map(answers.filter((a): a is Answer => !!a).map((a) => [a.id, a]));
+      return json({ questions: asked.map((question) => ({ question, answer: byId.get(question.id) ?? null })) });
+    }
+    if (request.method === "PUT" && id) {
+      const parsed = Question.safeParse(await request.json().catch(() => null));
+      if (!parsed.success) return fail(400, parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; "));
+      if (parsed.data.id !== id) return fail(400, "id does not match the path");
+      const old = await readJson<Question>(env, questionKey(id));
+      const question = { ...parsed.data, createdAt: old?.createdAt ?? parsed.data.createdAt, updatedAt: new Date().toISOString() };
+      await env.DATA.put(questionKey(id), JSON.stringify(question), { httpMetadata: { contentType: "application/json" } });
+      return json({ ok: true, question });
+    }
+    // `hq deliver` clears a note-only answer it passed on, leaving the question open.
+    if (request.method === "DELETE" && id && date === "answer") {
+      await env.DATA.delete(answerKey(id));
+      return json({ ok: true });
+    }
+    if (request.method === "DELETE" && id) {
+      // A page question keeps its pick, so the page still shows what Muhammed chose after the item closes.
+      const [question, answer] = await Promise.all([readJson<Question>(env, questionKey(id)), readJson<Answer>(env, answerKey(id))]);
+      if (answer?.choice && question?.report?.startsWith(`https://${HQ_HOST}/p/`))
+        await env.DATA.put(pagePickKey(id), JSON.stringify(answer), { httpMetadata: { contentType: "application/json" } });
+      await Promise.all([env.DATA.delete(questionKey(id)), env.DATA.delete(answerKey(id))]);
+      return json({ ok: true });
+    }
+  }
+
+  // A page with the state of each of its questions: open, the pick waiting for delivery, or the pick already delivered.
+  if (request.method === "GET" && route === "pages" && type) {
+    if (!/^[a-z0-9-]+$/.test(type)) return fail(404, "no such page");
+    const page = await readJson<Page>(env, pageKey(type));
+    if (!page) return fail(404, "no such page");
+    const ids = page.blocks.flatMap((b) => (b.type === "options" && b.question ? [b.question] : []));
+    const picks = Object.fromEntries(
+      await Promise.all(
+        ids.map(async (id) => {
+          const [open, answer, kept] = await Promise.all([
+            env.DATA.head(questionKey(id)),
+            readJson<Answer>(env, answerKey(id)),
+            readJson<Answer>(env, pagePickKey(id)),
+          ]);
+          return [id, { open: !!open, answer: answer ?? kept ?? null }] as const;
+        }),
+      ),
+    );
+    return json({ page, picks });
   }
 
   if (request.method === "POST" && route === "notify") {

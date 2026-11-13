@@ -123,6 +123,8 @@ export interface PoolMember {
   name: string;
   /** Members with a locale change the app's language, so they are handed out only when their kind is requested. */
   locale?: string;
+  /** Members kept for one job, such as store screenshots, are handed out only when their kind is requested. */
+  requestOnly?: boolean;
 }
 
 export interface Lease {
@@ -199,7 +201,7 @@ export const emptyQueueState = (): QueueState => ({
   unleasedSince: {},
 });
 
-/** The members a request may receive: the named kind, or every member that keeps the app's own language. */
+/** The members a request may receive: the named kind, or every everyday member that keeps the app's own language. */
 export function poolMembers<T extends PoolMember>(
   pool: T[],
   project: string,
@@ -210,7 +212,7 @@ export function poolMembers<T extends PoolMember>(
     (member) =>
       member.project === project &&
       member.platform === platform &&
-      (kind ? member.kind === kind : !member.locale),
+      (kind ? member.kind === kind : !member.locale && !member.requestOnly),
   );
 }
 

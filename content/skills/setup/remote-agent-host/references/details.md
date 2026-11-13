@@ -92,8 +92,8 @@ including uncommitted changes, its Herd PHP, and its Typesense config to each mi
 `~/Library/Logs/my-setup-mirror.log`).
 Also add it to `mergeQueue.signoffHosts` there, so `verify signoff` and the merge queue can sign off on it; a new name must first join
 that list's allowed names in this setup's device schema.
-Mirrors are read-only: the copy is non-writable except during the sync, and a Claude hook blocks writes to it off the main Mac with
-the inbox command to send the change instead. As a backstop for anything that still changed it, the mirror saves those edits as a
+Mirrors are read-only: the copy is non-writable except during the sync, and a Claude hook, the setup-readonly exception to the
+no-blocking-guards rule, blocks writes to it off the main Mac with the inbox command to send the change instead. As a backstop for anything that still changed it, the mirror saves those edits as a
 patch in the spare Mac's `~/.local/state/my-setup/mirror-edits/`, sends them to the Housekeeper through the inbox, and notes them
 in the mirror log before overwriting.
 

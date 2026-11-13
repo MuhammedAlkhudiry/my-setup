@@ -734,7 +734,10 @@ cli
     "acquire [project] [platform]",
     "Lease a ready, slimmed pool device for a project, waiting in the queue when every slot is taken",
   )
-  .option("--kind <kind>", "Pool device kind, such as main, small, or rtl")
+  .option(
+    "--kind <kind>",
+    "Pool device kind: main, small, rtl, or standard (store screenshots; only when requested)",
+  )
   .option("--owner <title>", "Thread title of the session taking the lease")
   .option(
     "--wait-seconds <seconds>",

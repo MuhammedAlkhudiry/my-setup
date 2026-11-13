@@ -18,7 +18,6 @@ import { dirname, join } from "node:path";
 import { execa } from "execa";
 
 import { CLAUDE_POOL } from "../../config/claude-pool";
-import { MODELS } from "../../config/models";
 import { readRemoteClaudePoolUrl } from "./device";
 
 export function claudePoolPaths(home: string) {
@@ -160,13 +159,6 @@ export function renderClaudePoolConfig(
     "    request-log: false",
     "  usage:",
     "    usage-statistics-enabled: true",
-    "oauth-model-alias:",
-    "  claude:",
-    ...Object.values(MODELS.claudePool).flatMap(({ id, alias }) => [
-      `    - name: ${JSON.stringify(id)}`,
-      `      alias: ${JSON.stringify(alias)}`,
-      "      fork: true",
-    ]),
     "",
   ].join("\n");
 }

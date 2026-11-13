@@ -1,7 +1,8 @@
 #!/bin/zsh
 # Forced SSH command for spare Macs' inbox keys: such a key can only post the message on stdin to a keeper thread on
 # this Mac (ssh main-mac-inbox send [housekeeper|ops|business] <<< "message"; the Housekeeper by default), or reach this Mac's merge queue with `merge-queue add`,
-# `merge-queue status`, or `merge-queue wait`, which spare Macs' merge-queue command does for them. The CLI validates forwarded arguments.
+# `merge-queue status`, or `merge-queue wait`, which spare Macs' merge-queue command does for them, or reserve the next question
+# letter with `letters`, which spare Macs' `hq ask` does. The CLI validates forwarded arguments.
 # authorized_keys: restrict,command="<this file> <mac name>" ssh-ed25519 ...
 
 set -euo pipefail
@@ -17,11 +18,16 @@ if [[ ${SSH_ORIGINAL_COMMAND:-} == "merge-queue "* ]]; then
     "$setup/shell/merge-queue.zsh" "${(@)words[2,-1]}" </dev/null
 fi
 
+# One shared question-letter sequence lives in the Housekeeper's state on this Mac.
+if [[ ${SSH_ORIGINAL_COMMAND:-} == letters ]]; then
+  exec /bin/zsh -lc 'exec "$HOME/.local/bin/hk" letters 1' </dev/null
+fi
+
 case ${SSH_ORIGINAL_COMMAND:-} in
   send) keeper=housekeeper ;;
   "send housekeeper" | "send ops" | "send business") keeper=${SSH_ORIGINAL_COMMAND#send } ;;
   *)
-    print -u2 "t3-inbox: only 'send [housekeeper|ops|business]' (message on stdin) and 'merge-queue add|status|wait' are allowed"
+    print -u2 "t3-inbox: only 'send [housekeeper|ops|business]' (message on stdin), 'letters', and 'merge-queue add|status|wait' are allowed"
     exit 64
     ;;
 esac

@@ -13,14 +13,15 @@ export interface PoolDevice extends PoolMember {
 const IPHONE = "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro";
 const SMALL_IPHONE = "com.apple.CoreSimulator.SimDeviceType.iPhone-SE-3rd-generation";
 /**
- * A plain iPhone for store and announcement screenshots. A runtime that supports only iPhone Duo would give the other
+ * A plain iPhone for store and announcement screenshots, leased only with `--kind standard`. A runtime that supports only iPhone Duo would give the other
  * kinds a Duo, whose status pill spoils marketing shots; the queue then picks the newest runtime that still has it.
  */
 const STANDARD_IPHONE = "com.apple.CoreSimulator.SimDeviceType.iPhone-17";
 
 /**
- * Each project has as many simulators as iOS slots, so five concurrent leases never run out. Extra devices repeat a kind
- * rather than adding per-task ones; the queue creates each on its first lease.
+ * Each project has five everyday simulators, one per iOS slot, so five concurrent leases never run out; its request-only
+ * `standard` simulator is extra and still takes one of the five slots while leased. Extra devices repeat a kind rather
+ * than adding per-task ones; the queue creates each on its first lease.
  */
 export const DEVICE_POOL: PoolDevice[] = [
   { project: "harium", platform: "ios", kind: "main", name: "Harium Main", deviceType: IPHONE },
@@ -47,6 +48,7 @@ export const DEVICE_POOL: PoolDevice[] = [
     kind: "standard",
     name: "Harium Standard",
     deviceType: STANDARD_IPHONE,
+    requestOnly: true,
   },
   { project: "harium", platform: "android", kind: "main", name: "Harium_Main" },
   { project: "awraq", platform: "ios", kind: "main", name: "Awraq Main", deviceType: IPHONE },
@@ -72,6 +74,7 @@ export const DEVICE_POOL: PoolDevice[] = [
     kind: "standard",
     name: "Awraq Standard",
     deviceType: STANDARD_IPHONE,
+    requestOnly: true,
   },
   { project: "awraq", platform: "android", kind: "main", name: "Awraq_Main" },
 ];

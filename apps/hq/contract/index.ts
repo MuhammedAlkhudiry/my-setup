@@ -8,6 +8,7 @@ export const KEEPERS = ["housekeeper", "ops", "business"] as const;
 export const RATINGS = ["very bad", "bad", "normal", "good", "very good"] as const;
 export const GROUPS = ["Needs you", "To read", "Scheduled", "Watching"] as const;
 export const REPORT_TYPES = ["ads", "product-health", "finance", "recap"] as const;
+export const HOSTS = ["main-mac", "small-mac", "big-mac"] as const;
 
 const Project = z.enum(PROJECTS);
 const Keeper = z.enum(KEEPERS);
@@ -21,6 +22,7 @@ export type Project = z.infer<typeof Project>;
 export type Keeper = z.infer<typeof Keeper>;
 export type Rating = z.infer<typeof Rating>;
 export type ReportType = (typeof REPORT_TYPES)[number];
+export type Host = (typeof HOSTS)[number];
 
 export const RATING_EMOJI: Record<Rating, string> = {
   "very bad": "🔴",
@@ -34,6 +36,10 @@ export const RATING_EMOJI: Record<Rating, string> = {
 
 const Option = z.object({ key: Text, label: Text, tradeoff: z.string().optional(), recommended: z.boolean().optional() });
 const Link = z.object({ label: Text, url: Url });
+
+// The thread that asked a question from outside the keepers; picks go straight back to it.
+const ThreadRef = z.object({ id: Text.max(200).regex(/^[\w:.-]+$/), host: z.enum(HOSTS), title: Text.max(120), link: Url });
+export type ThreadRef = z.infer<typeof ThreadRef>;
 
 export const StatusItem = z.object({
   id: Text,
@@ -55,12 +61,28 @@ export const StatusItem = z.object({
   updatedAt: When,
   // When the Housekeeper last applied an answer; picks sent before it are already handled.
   appliedAt: When.optional(),
+  // Set on questions any thread posts with `hq ask`; Needs you groups them by thread.
+  thread: ThreadRef.optional(),
 });
 export type StatusItem = z.infer<typeof StatusItem>;
 export type Option = z.infer<typeof Option>;
 
 export const Status = z.object({ updatedAt: When, items: z.array(StatusItem) });
 export type Status = z.infer<typeof Status>;
+
+// ---- questions: questions/<id>.json, posted by any thread with `hq ask` ------------------------------------------------
+
+// One question with one letter; its options are keyed by that letter, A1, A2, A3, and the last one leaves today's behavior.
+export const Question = StatusItem.extend({
+  id: Text.max(200).regex(/^q-[a-z0-9-]+$/, "question ids look like q-<letter>-<slug>"),
+  group: z.literal("Needs you"),
+  options: z.array(Option).min(2),
+  letters: z.array(Text).length(1),
+  thread: ThreadRef,
+}).refine((q) => q.options.every((o) => new RegExp(`^${q.letters[0]}\\d+$`).test(o.key)), "option keys must be the letter plus a number, such as A1");
+export type Question = z.infer<typeof Question>;
+
+export const questionKey = (id: string) => `questions/${encodeURIComponent(id)}.json`;
 
 // ---- answers: what the owner picked on the site, saved by the Worker ---------------------------------------------------
 
@@ -235,3 +257,143 @@ export type Report = z.infer<typeof Report>;
 export const reportKey = (type: ReportType, date: string) => `reports/${type}/${date}.json`;
 export const HQ_HOST = "hq.harium.app";
 export const reportUrl = (type: ReportType, date: string) => `https://${HQ_HOST}/#/reports/${type}/${date}`;
+
+// ---- pages: pages/<slug>.json, one-off reports, analyses, and option pages any thread pushes with `hq push page` ----------
+// A page is a list of blocks that the site draws with its own components at hq.harium.app/p/<slug>, behind the same sign-in,
+// with no expiry. An options block is a thread question: `hq push page` gives it a letter and posts it to Needs you, and the
+// pick reaches the asking thread through `hq deliver`, whether Muhammed picks on the page or on the Status page.
+
+export const RISKS = ["very low", "low", "medium", "high", "very high"] as const;
+export const RISK_EMOJI: Record<(typeof RISKS)[number], string> = {
+  "very low": "🌟",
+  low: "🟢",
+  medium: "⚪",
+  high: "🟠",
+  "very high": "🔴",
+};
+export const PR_STATES = [
+  "merged",
+  "closed",
+  "draft",
+  "conflicts",
+  "checks failing",
+  "merging now",
+  "checks running",
+  "needs you",
+  "ready to merge",
+] as const;
+
+const Cell = z.union([z.string(), z.object({ text: z.string().default(""), rating: Rating.optional() })]);
+export type Cell = z.infer<typeof Cell>;
+// Sandboxed HTML: scripts run, but the frame cannot reach hq's data or sign-in.
+const Html = z.string().min(1).max(2_000_000);
+const Image = z.string().regex(/^(https:|data:image\/)/, "must be an https: or data:image/ URL");
+
+const PageOption = z.object({
+  key: z.string().optional(),
+  label: Text,
+  tradeoff: z.string().optional(),
+  recommended: z.boolean().optional(),
+  // A mockup or diagram of the option, drawn in a sandboxed frame, or a screenshot.
+  html: Html.optional(),
+  image: Image.optional(),
+});
+export type PageOption = z.infer<typeof PageOption>;
+
+export const Block = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("verdict"), rating: Rating, headline: Text, findings: z.array(Finding.partial({ project: true })).max(3).default([]) }),
+  z.object({ type: z.literal("section"), title: Text, caption: z.string().optional() }),
+  z.object({ type: z.literal("text"), text: Text }),
+  z.object({
+    type: z.literal("stats"),
+    items: z
+      .array(
+        z.object({
+          label: Text,
+          value: Text,
+          before: z.string().optional(),
+          rating: Rating.optional(),
+          // What the rating judges against, such as "of the SAR 5 stop line".
+          reference: z.string().optional(),
+          project: Project.optional(),
+        }),
+      )
+      .min(1),
+  }),
+  z.object({
+    type: z.literal("table"),
+    title: z.string().optional(),
+    caption: z.string().optional(),
+    columns: z.array(Text).min(1),
+    // Each row starts with its emoji, such as a platform or a day.
+    rows: z.array(z.object({ emoji: z.string().optional(), cells: z.array(Cell) })).min(1),
+  }),
+  z.object({
+    type: z.literal("chart"),
+    kind: z.enum(["line", "bar", "area"]).default("line"),
+    title: z.string().optional(),
+    caption: z.string().optional(),
+    x: z.array(z.string()).min(1),
+    series: z.array(z.object({ label: Text, values: z.array(z.number().nullable()), project: Project.optional() })).min(1),
+    unit: z.string().optional(),
+  }),
+  z.object({
+    type: z.literal("prs"),
+    title: z.string().optional(),
+    items: z
+      .array(
+        z.object({
+          state: z.enum(PR_STATES),
+          number: z.number().int().positive(),
+          title: Text,
+          url: Url,
+          context: Text,
+          risk: z.enum(RISKS),
+          riskReason: Text,
+          opinion: Text,
+        }),
+      )
+      .min(1),
+  }),
+  z.object({
+    type: z.literal("options"),
+    // Stable across pushes, so a re-pushed page keeps its letter and question.
+    id: z.string().regex(/^[a-z0-9-]+$/).default("options"),
+    title: Text,
+    context: z.string().optional(),
+    // Muhammed may pick several options, which the thread combines.
+    multiple: z.boolean().default(true),
+    options: z.array(PageOption).min(2),
+    // Set by `hq push page`.
+    letter: z.string().regex(/^[A-Z]$/).optional(),
+    question: z.string().optional(),
+  }),
+  z.object({ type: z.literal("html"), title: z.string().optional(), caption: z.string().optional(), html: Html, height: z.number().int().min(80).max(4000).optional() }),
+  z.object({ type: z.literal("details"), title: Text, items: z.array(Text).min(1) }),
+]);
+export type Block = z.infer<typeof Block>;
+export type OptionsBlock = Extract<Block, { type: "options" }>;
+
+export const Page = z
+  .object({
+    slug: z.string().regex(/^[a-z0-9][a-z0-9-]{2,79}$/, "slugs are 3-80 lowercase letters, digits, and dashes"),
+    title: Text.max(120),
+    // One line under the title on what the page is for.
+    description: z.string().optional(),
+    projects: z.array(Project).min(1),
+    // The thread that pushed it; options picks go back to it.
+    thread: ThreadRef.optional(),
+    blocks: z.array(Block).min(1),
+    createdAt: When.optional(),
+    updatedAt: When.optional(),
+  })
+  .refine(
+    (p) => new Set(p.blocks.flatMap((b) => (b.type === "options" ? [b.id] : []))).size === p.blocks.filter((b) => b.type === "options").length,
+    "each options block needs its own id",
+  );
+export type Page = z.infer<typeof Page>;
+
+export const pageKey = (slug: string) => `pages/${slug}.json`;
+export const pageUrl = (slug: string) => `https://${HQ_HOST}/p/${slug}`;
+// A page question's pick, kept after `hq deliver` closes the question so the page still shows what Muhammed picked.
+export const pagePickKey = (id: string) => `page-picks/${encodeURIComponent(id)}.json`;

@@ -16,6 +16,9 @@ export const PROJECT: Record<Project, { name: string; logo?: string; text: strin
 }
 export const KEEPER: Record<Keeper, string> = { housekeeper: "Housekeeper", ops: "Ops", business: "Business" }
 
+/** Who asked: the thread's title for thread questions, else the keeper. */
+export const askerOf = (item: StatusItem) => item.thread?.title ?? KEEPER[item.owner]
+
 export function Logo({ project, size = 18, className }: { project: Project; size?: number; className?: string }) {
   const p = PROJECT[project]
   if (!p.logo)
@@ -120,7 +123,7 @@ export function DecisionCard({ item, compact = false }: { item: StatusItem; comp
     setBusy(clear ? "undo" : choice)
     setError(null)
     try {
-      setAnswer(await sendAnswer(item.id, choice, clear ? "" : note.trim()))
+      setAnswer(await sendAnswer(item.id, choice, clear ? "" : note.trim(), !item.thread))
       if (clear) setNote("")
     } catch (e) {
       setError((e as Error).message)
@@ -137,7 +140,7 @@ export function DecisionCard({ item, compact = false }: { item: StatusItem; comp
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{item.title}</p>
             <p className="truncate text-sm text-muted-foreground">
-              {choiceLabel(item, current.choice)}{current.note ? ` · “${current.note}”` : ""} · sent to {KEEPER[item.owner]}
+              {choiceLabel(item, current.choice)}{current.note ? ` · “${current.note}”` : ""} · sent to {askerOf(item)}
             </p>
           </div>
           <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => send("", true)}>
@@ -157,7 +160,7 @@ export function DecisionCard({ item, compact = false }: { item: StatusItem; comp
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
           <ProjectMark projects={item.projects} />
           <span>·</span>
-          <span>{KEEPER[item.owner]}</span>
+          <span className="truncate">{askerOf(item)}</span>
           <span>·</span>
           <span>{age(item.updatedAt)}</span>
         </div>
@@ -221,9 +224,14 @@ export function DecisionCard({ item, compact = false }: { item: StatusItem; comp
         {noteOpen && note.trim() && (
           <Button variant="secondary" size="sm" disabled={!!busy} onClick={() => send("")}>Send note only</Button>
         )}
-        <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={!!busy} onClick={() => send("later")}>Later</Button>
-        <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={!!busy} onClick={() => send("handled")}>I took care of it</Button>
-        <Button variant="ghost" size="sm" className="ms-auto text-muted-foreground" disabled={!!busy} onClick={() => send("skip")}>Skip</Button>
+        {/* A thread question carries its own Skip option, and its thread asks again itself when it needs to. */}
+        {!item.thread && (
+          <>
+            <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={!!busy} onClick={() => send("later")}>Later</Button>
+            <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={!!busy} onClick={() => send("handled")}>I took care of it</Button>
+            <Button variant="ghost" size="sm" className="ms-auto text-muted-foreground" disabled={!!busy} onClick={() => send("skip")}>Skip</Button>
+          </>
+        )}
       </CardFooter>
     </Card>
   )

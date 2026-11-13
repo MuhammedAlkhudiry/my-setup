@@ -48,6 +48,7 @@ import {
   readRemoteClaudePoolUrl,
   selectRemoteSkillSources,
 } from "../lib/device";
+import { installHqDeliver } from "../lib/hq-install";
 import { installMergeQueue, uninstallMergeQueue } from "../lib/merge-queue-install";
 import { installMacWatcher } from "../lib/mac-watcher";
 import { installRaycastProvider, raycastProvidersPath } from "../lib/raycast";
@@ -143,8 +144,9 @@ const SHARED_BIN_COMMANDS = [
   "telegram-send",
   "merge-queue",
   "verify",
+  "hq",
 ];
-const MAIN_MAC_BIN_COMMANDS = ["telegram-me", "mail-read", "hq"];
+const MAIN_MAC_BIN_COMMANDS = ["telegram-me", "mail-read"];
 /** Commands my-setup used to link into ~/bin; installs remove their links. */
 const RETIRED_BIN_COMMANDS = ["wait-for", "ci-runner", "heavy-run", "html-artifact"];
 
@@ -997,7 +999,10 @@ export async function install(): Promise<DeviceProfile> {
             (removed) =>
               removed && print.success("Removed the merge queue worker; main-mac runs the queue"),
           )
-        : installMergeQueue({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath })),
+        : Promise.all([
+            installMergeQueue({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }),
+            installHqDeliver({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }),
+          ])),
     profile.macWatcher &&
       installMacWatcher({ home: HOME, rootDir: ROOT_DIR, bun: process.execPath }).then(
         ({ memcapInstalled }) => {

@@ -23,8 +23,8 @@ shape.
 
 ## HTML
 
-For a visual UI, layout, state comparison, or concept too dense for text and Mermaid, build one focused page with $html-artifacts: a diagram, an
-infographic, or a short slide deck. Match the product's colors, type, spacing, and components, and use real labels and data.
+For a visual UI, layout, state comparison, or concept too dense for text and Mermaid, build one focused page with $html-artifacts: an hq page whose
+`html` blocks hold a diagram or infographic, or a share-html page for a short slide deck. Match the product's colors, type, spacing, and components, and use real labels and data.
 
 ## Guidance
 

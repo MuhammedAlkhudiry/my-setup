@@ -8,6 +8,7 @@ import pc from "picocolors";
 import { readRemoteClaudePoolUrl, readSetupMirrors } from "../lib/device";
 import {
   canonicalPlan,
+  taskDescriptions,
   type CheckPlan,
   type CheckReport,
   historyPath,
@@ -26,6 +27,7 @@ import {
   passed,
   type Profile,
   pestProfile,
+  areaProfile,
   phaseProfile,
   profile,
   type Rating,
@@ -46,7 +48,7 @@ const help = `Usage: verify [command] [--project <name>] [--days <n>] [--tier <t
 Your verification history at a glance: sign-offs, their speed, slow steps, and failures.
 
   verify                         the dashboard for this repo, or every project outside one
-  verify profile [<n>|<sha>]     each project's last run by phase (first, parallel, alone, last) with each phase's time,
+  verify profile [<n>|<sha>]     each project's last run by area (mobile, frontend, backend, shared) with phase times,
                                  share, and the critical path; or the nth from \`verify runs\`, or one by commit
   verify signoff [--local] [--full]
                                  sign off the pushed branch head on the least-loaded spare Mac, posting the
@@ -67,9 +69,10 @@ Ratings: 🌟 very good · 🟢 good · ⚪ normal · 🟠 bad · 🔴 very bad.
   A step's time:   under 1s 🌟 · under 5s 🟢 · 5–30s ⚪ · 30s–2m 🟠 · over 2m 🔴
   A run's time:    under 1m 🌟 · under 2m 🟢 · 2–4m ⚪ · 4–8m 🟠 · over 8m 🔴
   "+40% vs usual" marks a time clearly slower than the median of the last ${USUAL_DAYS} days (15% and 2s or more).
-Profile: "took" is a phase's wall time, host-queue wait included; a step's excludes it. "slots N% used" is the parallel
-  steps' run time over slots × the phase's time ("N* at once" when an older report leaves N to the most steps seen at
-  once). The critical path is every one-by-one step plus the slowest parallel one: the run's floor with unlimited slots.
+Profile: steps grouped by area (📱 mobile, 💻 frontend, ⚙️ backend, 🧰 shared), each under its mise task description.
+  An area's "work" is its steps' summed run time. "phases" gives each phase's wall time, host-queue wait included; a
+  step's time excludes it. "N% used" is the parallel steps' run time over slots × the phase's time ("N* at once" when
+  an older report leaves N to the most steps seen at once). The critical path is every one-by-one step plus the slowest parallel one: the run's floor with unlimited slots.
   --verbose also lists the reused steps.
 History: ${historyPath().replace(homedir(), "~")} (check.ts records every run; spare Macs are pulled over SSH).`;
 
@@ -416,11 +419,13 @@ function jsonProfile(item: Profile) {
   return { ...item, run: { ...item.run, report: { ...item.run.report, checks: undefined } } };
 }
 
-const PHASE_LABELS = {
-  first: "① first, in order",
-  parallel: "② parallel",
-  isolated: "③ alone, one by one",
-  last: "④ last",
+const PHASE_MARKS = { first: "①", parallel: "②", isolated: "③", last: "④" } as const;
+/** Area headings; padded by display width, since their emoji take two columns. */
+const AREA_LABELS = {
+  mobile: "📱 Mobile",
+  frontend: "💻 Frontend",
+  backend: "⚙️ Backend",
+  shared: "🧰 Shared",
 } as const;
 /** Profiles stay this narrow, so they fit a split terminal and a phone screenshot. */
 const LINE = 80;
@@ -428,6 +433,15 @@ const LINE = 80;
 /** The run's schedule from its report, or from the project's current config for reports that predate it. */
 async function planOf(run: RunRecord): Promise<CheckPlan | null> {
   return run.report.plan ?? (await canonicalPlan(run.project));
+}
+
+/** Text cut at a word to one line of `width` columns, ending in "…" when cut. */
+function oneLine(text: string, width: number) {
+  if (Bun.stringWidth(text) <= width) return text;
+
+  const cut = text.slice(0, width - 1);
+
+  return `${cut.slice(0, cut.lastIndexOf(" ") > 0 ? cut.lastIndexOf(" ") : cut.length).replace(/[,;:]$/, "")}…`;
 }
 
 /** Words joined with a dim dot, empty ones dropped. */
@@ -464,7 +478,7 @@ const tableRow = (took: string, share: string, count: string, notes: string) =>
 
 async function showProfile(item: Profile) {
   const view = phaseProfile(item, await planOf(item.run));
-  if (flags.json) return { ...jsonProfile(item), phases: view };
+  if (flags.json) return { ...jsonProfile(item), phases: view, areas: areaProfile(view.phases) };
 
   const { run, usual, rating, steps } = item;
   const tier = runTier(run);
@@ -497,49 +511,54 @@ async function showProfile(item: Profile) {
   if (skipped.length) field("skipped", skipped.join(", "));
   if (run.report.areas.length) field("areas", run.report.areas.join(", "));
   if (!view.plan) field("note", "no check config found, so every step shows as parallel");
+  field(
+    "phases",
+    dotted(
+      ...view.phases
+        .filter((phase) => phase.steps.length)
+        .map((phase) =>
+          phase.phase === "parallel"
+            ? dotted(
+                `${PHASE_MARKS.parallel} ${duration(phase.seconds)}, ${view.slots}${view.jobs === null ? "*" : ""} at once`,
+                view.efficiency !== null && `${Math.round(view.efficiency * 100)}% used`,
+              )
+            : `${PHASE_MARKS[phase.phase]} ${duration(phase.seconds)}`,
+        ),
+    ),
+  );
 
-  // Parallel steps slowest first; the others in the order they ran.
-  const phases = view.phases
-    .filter((phase) => phase.steps.length)
-    .map((phase) =>
-      phase.phase === "parallel"
-        ? { ...phase, steps: [...phase.steps].sort((a, b) => b.ranSeconds - a.ranSeconds) }
-        : phase,
-    );
+  // Each area's steps slowest first; its time is the steps' summed work, since parallel steps overlap.
+  const areas = areaProfile(view.phases);
+  const described = taskDescriptions(run.project);
   const nameWidth = Math.max(
     22,
-    ...phases.flatMap((phase) => phase.steps.map((step) => step.task.length)),
+    ...areas.flatMap((area) => area.steps.map((step) => step.task.length)),
   );
-  // Step rows start 6 columns further in ("     🟠 " against "  "), so phase times line up with step times.
-  const labelWidth = nameWidth + 6;
+  // Step rows start 8 columns further in ("     ③ 🟠 " against "  "), so area times line up with step times.
+  const labelWidth = nameWidth + 8;
   out("");
-  out(dim(`  ${pad("", labelWidth)} ${tableRow("took", "of run", "steps", "")}`));
-  for (const phase of phases) {
-    const label =
-      phase.phase === "parallel"
-        ? `${PHASE_LABELS.parallel}, ${view.slots}${view.jobs === null ? "*" : ""} at once`
-        : PHASE_LABELS[phase.phase];
-    const used =
-      phase.phase === "parallel" && view.efficiency !== null
-        ? `slots ${Math.round(view.efficiency * 100)}% used`
-        : "";
+  out(dim(`  ${pad("", labelWidth)} ${tableRow("work", "share", "steps", "")}`));
+  for (const area of areas) {
     out(
-      `  ${pc.bold(pad(label, labelWidth))} ${tableRow(duration(phase.seconds), `${Math.round(phase.share * 100)}%`, String(phase.steps.length), used)}`,
+      `  ${pc.bold(AREA_LABELS[area.area] + " ".repeat(labelWidth - Bun.stringWidth(AREA_LABELS[area.area])))} ${tableRow(duration(area.seconds), `${Math.round(area.share * 100)}%`, String(area.steps.length), "")}`,
     );
 
-    for (const step of phase.steps) {
+    for (const step of area.steps) {
       const notes = dotted(
         step.status === "failed" && pc.red("FAILED"),
         step.tier === "full" && "full sign-off only",
         plain(changeText(step.change, step.usual.seconds)),
       );
       out(
-        `     ${step.rating} ${pad(step.task, nameWidth)} ${tableRow(duration(step.ranSeconds), "", "", notes)}`,
+        `     ${dim(PHASE_MARKS[step.phase])} ${step.rating} ${pad(step.task, nameWidth)} ${tableRow(duration(step.ranSeconds), "", "", notes)}`,
       );
-      if (step.status === "failed" && step.log) out(dim(`        log ${step.log}`));
+      const about = described.get(step.task);
+      if (about) out(dim(`          ${oneLine(about, LINE - 10)}`));
+      if (step.status === "failed" && step.log) out(dim(`          log ${step.log}`));
     }
     out("");
   }
+  out(dim(`  ① first, in order · ② parallel · ③ alone, one by one · ④ last`));
 
   return undefined;
 }

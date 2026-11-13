@@ -14,6 +14,8 @@ import {
   trimHistory,
 } from "./verify-history";
 import {
+  areaOf,
+  areaProfile,
   changeVsUsual,
   phaseProfile,
   profile,
@@ -258,6 +260,70 @@ describe("stats", () => {
     expect(view.otherSeconds).toBe(5);
     // Without a schedule's jobs, the slots are the most steps that ran at once.
     expect(phaseProfile(item, { first: ["lint"], isolated: [], last: [], full: [] }).slots).toBe(2);
+  });
+
+  test("sorts checks into product areas by app prefix, then by the check's words", () => {
+    const areas = {
+      "mobile:test": "mobile",
+      "native:format-check": "mobile",
+      "backend:mago-lint": "backend",
+      "api:check": "backend",
+      "family-tree:pest": "backend",
+      "family-tree:unused-php": "backend",
+      "family-tree:arch": "backend",
+      "family-tree:tsc": "frontend",
+      "family-tree:vite-build": "frontend",
+      "tree-studio:contract:check": "frontend",
+      "desktop:build": "frontend",
+      "marketing:lint": "frontend",
+      "scripts:typecheck": "shared",
+      "core:lint": "shared",
+      "docs:check": "shared",
+      "arabic:msa": "shared",
+      "living-art:check": "shared",
+    } as const;
+
+    expect(Object.fromEntries(Object.keys(areas).map((task) => [task, areaOf(task)]))).toEqual({
+      ...areas,
+    });
+  });
+
+  test("groups a profile's steps by area, slowest first, keeping each step's phase", () => {
+    const view = phaseProfile(
+      profile(
+        [],
+        run("now", 0, {
+          seconds: 60,
+          checks: ["mobile:lint", "backend:test", "mobile:test"].map((task, index) => ({
+            task,
+            status: "passed" as const,
+            seconds: 10 * (index + 1),
+            reused: false,
+            log: null,
+            startedSeconds: 0,
+          })),
+        }),
+      ),
+      { first: ["mobile:lint"], isolated: [], last: [], full: [] },
+    );
+
+    expect(
+      areaProfile(view.phases).map((area) => [
+        area.area,
+        area.seconds,
+        area.steps.map((step) => [step.task, step.phase]),
+      ]),
+    ).toEqual([
+      [
+        "mobile",
+        40,
+        [
+          ["mobile:test", "parallel"],
+          ["mobile:lint", "first"],
+        ],
+      ],
+      ["backend", 20, [["backend:test", "parallel"]]],
+    ]);
   });
 
   test("builds one trend row per day", () => {

@@ -28,7 +28,7 @@ export async function installMergeQueue(options: { home: string; rootDir: string
 const escape = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-async function installAgent(
+export async function installAgent(
   home: string,
   rootDir: string,
   label: string,

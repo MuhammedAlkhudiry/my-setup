@@ -71,6 +71,22 @@ export default function StatusPage({ filter, setFilter }: { filter: Filter; setF
   const needs = group("Needs you"), read = group("To read"), scheduled = group("Scheduled"), watching = group("Watching")
   const waiting = needs.filter((i) => !status.data!.answers[i.id]).length
 
+  // Keeper groups first, then one group per thread that asked through `hq ask`.
+  const groups = [
+    ...KEEPER_ORDER.map((keeper) => ({
+      key: keeper,
+      title: KEEPER[keeper],
+      link: keeperThread(keeper),
+      items: needs.filter((i) => !i.thread && i.owner === keeper),
+    })),
+    ...[...new Map(needs.flatMap((i) => (i.thread ? [[i.thread.id, i.thread] as const] : []))).values()].map((thread) => ({
+      key: thread.id,
+      title: thread.title,
+      link: thread.link,
+      items: needs.filter((i) => i.thread?.id === thread.id),
+    })),
+  ].filter((g) => g.items.length)
+
   return (
     <div className="flex flex-col gap-6 p-4 md:p-6">
       {status.error && <ErrorCard message={status.error} onRetry={status.reload} />}
@@ -93,22 +109,18 @@ export default function StatusPage({ filter, setFilter }: { filter: Filter; setF
 
       <div className="grid items-start gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
         <div className="flex flex-col gap-6">
-          {KEEPER_ORDER.map((keeper) => {
-            const list = needs.filter((i) => i.owner === keeper)
-            if (!list.length) return null
-            return (
-              <section key={keeper} className="flex flex-col gap-3">
-                <h3 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
-                  {KEEPER[keeper]}
-                  <span className="rounded-full bg-secondary px-1.5 text-xs text-foreground tnum">{list.length}</span>
-                  <a href={keeperThread(keeper)} className="ms-auto inline-flex items-center gap-1 text-xs hover:text-foreground">
-                    Open thread<ArrowUpRight className="size-3.5" />
-                  </a>
-                </h3>
-                {list.map((item) => <DecisionCard key={item.id} item={item} />)}
-              </section>
-            )
-          })}
+          {groups.map((g) => (
+            <section key={g.key} className="flex flex-col gap-3">
+              <h3 className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                <span className="truncate">{g.title}</span>
+                <span className="rounded-full bg-secondary px-1.5 text-xs text-foreground tnum">{g.items.length}</span>
+                <a href={g.link} className="ms-auto inline-flex shrink-0 items-center gap-1 text-xs hover:text-foreground">
+                  Open thread<ArrowUpRight className="size-3.5" />
+                </a>
+              </h3>
+              {g.items.map((item) => <DecisionCard key={item.id} item={item} />)}
+            </section>
+          ))}
           {!needs.length && <Empty>Nothing needs you here.</Empty>}
         </div>
 
@@ -163,7 +175,7 @@ export default function StatusPage({ filter, setFilter }: { filter: Filter; setF
           {!watching.length && <p className="px-6 text-sm text-muted-foreground">Nothing watched.</p>}
         </CardContent>
       </Card>
-      <p className="pb-4 text-center text-xs text-muted-foreground">Picks save the moment you tap and reach the Housekeeper a few seconds later.</p>
+      <p className="pb-4 text-center text-xs text-muted-foreground">Picks save the moment you tap and reach the thread that asked within a minute.</p>
     </div>
   )
 }

@@ -218,16 +218,26 @@ test("a pool request waits while every matching device is leased, without blocki
   });
 });
 
-test("only a requested kind hands out a device that changes the app's language", () => {
+test("only a requested kind hands out a language-changing or request-only device", () => {
   const pool = [
     { project: "app", platform: "ios" as const, kind: "main", name: "Main" },
     { project: "app", platform: "ios" as const, kind: "rtl", name: "RTL", locale: "ar_SA" },
+    {
+      project: "app",
+      platform: "ios" as const,
+      kind: "standard",
+      name: "Standard",
+      requestOnly: true,
+    },
     { project: "app", platform: "android" as const, kind: "main", name: "Main_AVD" },
     { project: "other", platform: "ios" as const, kind: "main", name: "Other" },
   ];
 
   expect(poolMembers(pool, "app", "ios").map((member) => member.name)).toEqual(["Main"]);
   expect(poolMembers(pool, "app", "ios", "rtl").map((member) => member.name)).toEqual(["RTL"]);
+  expect(poolMembers(pool, "app", "ios", "standard").map((member) => member.name)).toEqual([
+    "Standard",
+  ]);
   expect(poolMembers(pool, "app", "ios", "small")).toEqual([]);
 });
 

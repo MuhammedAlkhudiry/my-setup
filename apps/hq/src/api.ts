@@ -12,7 +12,7 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 /** Fetches a path, refreshes it when the tab comes back into view and every minute while it is visible. */
-function useLive<T>(path: string | null): Loaded<T> {
+export function useLive<T>(path: string | null): Loaded<T> {
   const [state, setState] = React.useState<{ data?: T; error?: string; loading: boolean }>({ loading: true })
   const [tick, setTick] = React.useState(0)
   const reload = React.useCallback(() => setTick((t) => t + 1), [])
@@ -70,7 +70,8 @@ function flushNotify(beacon = false) {
 addEventListener("pagehide", () => flushNotify(true))
 document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flushNotify(true))
 
-export async function sendAnswer(id: string, choice: string, note = ""): Promise<Answer | null> {
+// A thread question's pick goes straight to its thread through main-mac's `hq deliver`, so it never wakes the Housekeeper.
+export async function sendAnswer(id: string, choice: string, note = "", wakeHousekeeper = true): Promise<Answer | null> {
   const response = await fetch("/api/answers", {
     method: "POST",
     credentials: "same-origin",
@@ -79,6 +80,6 @@ export async function sendAnswer(id: string, choice: string, note = ""): Promise
   })
   const body = await response.json().catch(() => null)
   if (!response.ok) throw new Error(body?.error ?? `Could not save (${response.status})`)
-  if (choice || note) notifySoon()
+  if ((choice || note) && wakeHousekeeper) notifySoon()
   return body.answer ?? null
 }

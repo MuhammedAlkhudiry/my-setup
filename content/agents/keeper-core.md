@@ -16,7 +16,7 @@ something may have it reply straight to that keeper's thread, or from a spare Ma
 
 - A keeper reports to the Housekeeper, never to the owner unprompted, with `~/.t3/bin/t3 thread send <housekeeper id> -` (message on
   stdin). Every message wakes a large thread and costs the owner's usage (owner, 2026-11-11), so:
-  - Send one message per pass, batching every outcome, owner decision, and blocker; send at once only production down, security, data
+  - Send one message per pass, batching every outcome and blocker; send at once only production down, security, data
     loss, or a decision the owner is waiting on.
   - Never send acknowledgements ("noted", "done as asked") or FYIs that need nothing from anyone; put them on the status page or leave
     them for the recap.
@@ -25,7 +25,10 @@ something may have it reply straight to that keeper's thread, or from a spare Ma
 - Work that belongs to another keeper goes straight to that keeper's thread, never through the Housekeeper, with the context it needs;
   never do it yourself.
 - Take question letters only from `hk letters [N]`, which reserves the next free ones (A to Z, then A again); never pick, reuse, or
-  invent letters. Number options after their question: `--option "A1|…"`, `--option "A2|…"`.
+  invent letters. Number options after their question: `--option "A1|…"`, `--option "A2|…"`. The same sequence serves every other
+  thread's `hq ask` (spare Macs reserve through `ssh main-mac-inbox letters`), and `hk letters` skips letters their open hq questions hold.
+- Other threads' questions sit in hq's Needs you under their own thread, and main-mac's `hq deliver` (launchd, every 30 s) sends each
+  pick straight back to the asking thread and closes the item; they never pass through a keeper (ASK-ONCE).
 - The owner may talk to a keeper directly. Answer there in full; tell the Housekeeper in one line only when the answer changes what it
   tracks, such as a decision closed or a release go given.
 - Owner decisions on the status page carry `--owner <keeper>`. The Housekeeper forwards each answer to that keeper; the keeper applies it
@@ -39,8 +42,8 @@ something may have it reply straight to that keeper's thread, or from a spare Ma
 2. Run only due duties from your role file. Do small tasks yourself, such as a few commands, a state or page update, enqueueing a PR, or
    one quick read-only check (owner, 2026-10-25), and delegate larger work to Codex while Claude usage is low: new subagents,
    delegated tasks, and spare-Mac threads all run on Codex until the owner says otherwise (owner, 2026-10-30, overriding CODEX-WORK),
-   except UI work and report subagents (product health, ads, finance, digests, recaps), which go to Claude (owner, 2026-11-05,
-   2026-11-11). Fixes go in their own worktrees of the target repository from
+   except UI work, $prs adversarial reviews, and report subagents (product health, ads, finance, digests, recaps), which go to
+   Claude (owner, 2026-11-05, 2026-11-11). Fixes go in their own worktrees of the target repository from
    `origin/main`, created by the brief with WORKTREES, never in its canonical clone (delegated worktree isolation copies this thread's
    repository). Keep your thread to reading state, choosing work, reviewing results, and reporting, so its context stays small.
    Subagents lease simulators through the device queue up to its capacity and shut them down when done. Every brief says to stop
@@ -76,7 +79,7 @@ something may have it reply straight to that keeper's thread, or from a spare Ma
   replacing share-html report pages). Push only when something changed; a quiet run sets the item's `detail` to one line instead.
   List the ids of the decisions a report raises in its `decisions`, so they show beside it, answerable there. The report's To read item
   carries `report` (that URL), a one-line plain takeaway as `detail`, and a RATINGS `rating`. Wins go to Telegram only.
-- One-off analyses and option pages stay share-html pages per $html-artifacts; link them as the item's `report`.
+- One-off analyses and option pages are hq pages (`hq push page`) per $html-artifacts; link them as the item's `report`.
 - The owner's picks save on the site; `bun status-feedback.ts` (reading `hq answers --json`) prints the new ones, and the site wakes the
   Housekeeper thread a few seconds after the owner stops picking.
 

@@ -226,6 +226,64 @@ export interface PhaseProfile {
   share: number;
 }
 
+export type Area = "mobile" | "frontend" | "backend" | "shared";
+const AREAS: Area[] = ["mobile", "frontend", "backend", "shared"];
+
+/**
+ * Which part of the product a check covers, read from its mise task name ("<app>:<check>"): the app prefix first, then
+ * the check's own words for apps that hold both a backend and a web frontend. Docs, scripts, assets, and shared libraries
+ * land in "shared".
+ */
+export function areaOf(task: string): Area {
+  const [app = "", ...rest] = task.split(":");
+  const check = rest.join(":");
+
+  if (/mobile|native|ios|android|expo/.test(app)) return "mobile";
+  if (
+    /^(backend|api|server|contract)$/.test(app) ||
+    /pest|php|mago|rector|arch|composer/.test(check)
+  )
+    return "backend";
+  if (
+    /^(web|frontend|desktop|marketing|promo|tutorials|tree-studio|react)$/.test(app) ||
+    (rest.length > 0 &&
+      !/^(scripts|docs|tests|ci-tools|core)$/.test(app) &&
+      /tsc|typecheck|vite|knip|web-test|e2e|lint|format|react|unused-exports|wayfinder/.test(check))
+  )
+    return "frontend";
+
+  return "shared";
+}
+
+export interface AreaProfile {
+  area: Area;
+  steps: (PhaseStep & { phase: Phase })[];
+  /** The area's steps' summed run time; parallel steps overlap, so this is work, not wall time. */
+  seconds: number;
+  /** The area's share of all steps' summed run time. */
+  share: number;
+}
+
+/** Regroups a phase profile's steps by product area, slowest first, keeping each step's phase. */
+export function areaProfile(phases: PhaseProfile[]): AreaProfile[] {
+  const steps = phases.flatMap((phase) =>
+    phase.steps.map((step) => ({ ...step, phase: phase.phase })),
+  );
+  const total = Math.max(
+    steps.reduce((sum, step) => sum + step.ranSeconds, 0),
+    1,
+  );
+
+  return AREAS.map((area) => {
+    const own = steps
+      .filter((step) => areaOf(step.task) === area)
+      .sort((a, b) => b.ranSeconds - a.ranSeconds);
+    const seconds = own.reduce((sum, step) => sum + step.ranSeconds, 0);
+
+    return { area, steps: own, seconds, share: seconds / total };
+  }).filter((area) => area.steps.length);
+}
+
 /** The most steps that ran at the same moment, for runs whose report predates `plan.jobs`. */
 function peakConcurrency(steps: StepProfile[]): number {
   const edges = steps

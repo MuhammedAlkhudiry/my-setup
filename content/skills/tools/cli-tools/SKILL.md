@@ -5,7 +5,7 @@ description: Use for Hugeicons, Cloudflare, Laravel Forge, or PostHog CLI work.
 
 Read live command help; do not guess commands or flags.
 
-- **Cloudflare:** use `cf` instead of wrangler, raw API calls, or the dashboard. Discover commands with `cf cli search "<task>"`; describe only the
+- **Cloudflare:** use `cf`. Discover commands with `cf cli search "<task>"`; describe only the
   action and resource type, never names, domains, or IDs.
   - Deploy static sites from a staging folder outside the repository; dry-run first. Use `cf docs search` for current configuration and asset limits.
   - First Worker deployment needs a `workers.dev` subdomain. If `cf` still lacks a command, ask for the name and set it through

@@ -8,16 +8,6 @@ export const MODELS = {
     smart: "opencode-go/glm-5.3-flash",
     fast: "opencode-go/deepseek-v4.1-flash",
   },
-  claudePool: {
-    haiku: {
-      id: "claude-haiku-4-5-20251001",
-      alias: "claude-haiku-4-5",
-    },
-    opus: {
-      id: "claude-opus-4-5-20251101",
-      alias: "claude-opus-4-5",
-    },
-  },
   // Claude subagent models that skills name, such as $improve-agent-setup's episode readers.
   claudeSubagents: {
     reader: "claude-haiku-5-5",
