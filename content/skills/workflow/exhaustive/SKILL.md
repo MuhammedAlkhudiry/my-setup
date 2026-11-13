@@ -20,7 +20,8 @@ command and go in the report.
 
 Size the run before starting: cells are items × dimensions, at about 20 items per slice agent. Above about 2,000 cells, narrow the
 inventory to what the question needs, such as app code without tests, migrations or enums, or split it into batches tracked across runs.
-Never start a sweep that cannot finish, and never fill slices yourself in place of slice agents.
+Never start a sweep that cannot finish, and never fill slices yourself in place of slice agents. Count slice, re-inventory, and
+spot-check agents across every batch; above 25 in total, WORKFLOW-SIZE applies before the first batch.
 
 ## 3. Sweep
 

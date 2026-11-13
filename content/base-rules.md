@@ -119,8 +119,6 @@ Use these projects as references when the user mentions them.
 
 ## Behavior
 
-- **BUG-FIX-PREVENTION** — For each fixed bug, search the codebase for the same pattern and find how to prevent it automatically. Prefer
-  types, lint rules, or CI checks; suggest tests only when those cannot catch it.
   <!-- profile:personal -->
 - **CROSS-PROJECT-PARITY** — Identify project-agnostic additions to one active project that belong in the others. Skip product-, domain-,
   or feature-specific work.
@@ -147,6 +145,9 @@ Use these projects as references when the user mentions them.
 - **EFFORT-SIZING** — Never estimate work in human time. Size it by blast radius, code touched, risk, QA effort, and product/UX decisions.
 - **RARE-EDGE-CASES** — Do not fix or report vanishingly rare defects; spend the effort on flows real users hit. Always report security
   problems, data loss, and corrupted or incorrect persisted data, however rare.
+- **WORKFLOW-SIZE** — Before starting a Workflow, or a batch of Workflow runs, expected to spawn more than 25 agents in total, give the
+  owner the agent count, the model per stage, and the expected share of the weekly Claude limit, then wait for their go, even in `auto`
+  and when the owner asked for exhaustive or repeat-until-clean work (owner, 2026-11-13).
 - **SPECULATIVE-ROBUSTNESS** — Before adding complexity for speculative or vanishingly unlikely race conditions or security edge cases,
   explain the concrete failure mode, likelihood, and complexity cost to the owner and get their buy-in. Do not silently expand scope for
   theoretical robustness.
@@ -213,7 +214,7 @@ All instructions for replies to the user live here.
 - **REPLY-HEADER** — Start every reply with one bold, all-caps line naming who triggered the turn: `🧑 **REPLY TO MUHAMMED**` for the
   owner's message, `🤖 **REPLY TO AGENT**` for a subagent result, another thread's message, or the Housekeeper, and
   `⚙️ **REPLY TO AUTOMATION**` for queue, hook, schedule, webhook, or background-task notifications. Put a `---` rule after the header
-  and another before the reply's Close table, so header, body, and Close read as three parts.
+  and another before the reply's Close, so header, body, and Close read as three parts.
 - **Language.** Write in English only.
 - **Audience calibration.** Mohammed is technically strong. Use plain language for management, business, marketing, sales, and product;
   briefly explain specialized terms without oversimplifying.
@@ -296,8 +297,8 @@ Reply freely; prefer visualisations, see $show-me.
   one extra line for its cause. Put each line in its own list item or paragraph; Markdown joins single line breaks.
   - **Changes:** one line each, starting with its label: `[✨ **FEAT**]`, `[🐛 **FIX**]`, `[♻️ **REFACTOR**]`, `[⚡ **PERF**]`,
     `[🔒 **SECURITY**]`, `[🧪 **TEST**]`, `[📝 **DOCS**]`, or `[🔧 **TOOLING**]`.
-  - **Reports:** one line each, only when present: similar bugs found and their prevention (BUG-FIX-PREVENTION), deliberately changed
-    decisions (SOFT-DECISIONS), and local environment changes (DEV-ENV-UNBLOCK).
+  - **Reports:** one line each, only when present: deliberately changed decisions (SOFT-DECISIONS) and local environment changes
+    (DEV-ENV-UNBLOCK).
     <!-- profile:personal -->
   - **Parity:** one line per addition worth copying to other active projects, and how (CROSS-PROJECT-PARITY).
     <!-- /profile -->
@@ -308,20 +309,19 @@ Reply freely; prefer visualisations, see $show-me.
   - **Checks:** `🟢` one line for everything that passed; one line per `🟡` warning or `🔴` failure or skipped check.
   - **PRs:** **PR status** for each PR the work created or changed.
   - **Questions:** new questions in full, following DECISION-CONTEXT; earlier unanswered ones only as ASK-ONCE's waiting line.
-  - **Close:** a two-column table, its first row serving as the header (owner, 2026-11-13):
+  - **Close:** two lines, each its own paragraph, never a table (owner, 2026-11-13):
 
     ```markdown
-    | ➡️ **NEXT** | Muhammed says go on the four scenes, then I push them to #1138. |
-    | --- | --- |
-    | 👀 **WAITING ON** | 🧑 **MUHAMMED** |
-    | 📍 **STATUS** | ⏳ **AWAITING** |
+    ⏳ **AWAITING** · 🧑 **MUHAMMED**
+
+    ➡️ Muhammed says go on the four scenes, then I push them to #1138.
     ```
 
-    NEXT is the next action. WAITING ON names whoever must act next, in the header's style: `🧑 **MUHAMMED**`,
-    `🤖 **<AGENT OR THREAD NAME>**`, or `⚙️ **<AUTOMATION>**` (such as sign-off or the merge queue). STATUS is one of
+    The first line is the status, then whoever must act next in the header's style: `🧑 **MUHAMMED**`,
+    `🤖 **<AGENT OR THREAD NAME>**`, or `⚙️ **<AUTOMATION>**` (such as sign-off or the merge queue). The status is one of
     `🟡 **ATTENTION NEEDED**`, `⏳ **AWAITING**` (on-track work waiting on a named external event), `🔴 **ACTION REQUIRED**`, or
-    `⛔ **BLOCKED**`. Omit a row with nothing to say: no next action, nobody to wait on, or all good. With no rows left, omit the
-    table and the `---` before it (owner, 2026-11-13).
+    `⛔ **BLOCKED**`. The second line is the next action. Omit what has nothing to say: no next action, nobody to wait on, or all
+    good. With nothing left, omit Close and the `---` before it.
 - **DECISION-CONTEXT** — Start each question with 🔴 and its own letter, such as "🔴 **A** Which quiet screen?". Give one line on today's
   behavior with a concrete example, then one line per option numbered after the question, **A1**, **A2**, **A3**, with its tradeoff, and
   mark your recommendation. End every non-blocking question with a numbered "Skip" option that leaves today's behavior; omit it only when work cannot continue without an
