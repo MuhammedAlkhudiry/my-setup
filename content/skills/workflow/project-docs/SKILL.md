@@ -20,7 +20,7 @@ Document only what code, tests, and git history cannot show. Give each fact one 
 | Evidence behind a change             | the pull request and commit       | never                                 |
 
 - Only `AGENTS.md`, `CLAUDE.md`, and READMEs stay at the repository root. Link each runbook from `AGENTS.md` with its read trigger.
-- $verification owns `docs/runbooks/checklist.md`; $service-access owns `docs/ads.md`.
+- $service-access owns `docs/ads.md`.
 - Formats: [decisions](references/decisions.md), [tech debt](references/tech-debt.md), [release](references/release.md),
   [product setup](references/product-setup.md), [plans](references/plans.md).
 

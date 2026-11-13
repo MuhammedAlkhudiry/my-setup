@@ -210,8 +210,6 @@ if (staleRules.length > 0) {
   });
 }
 
-const rtkPlugin = join(HOME, ".config/opencode/plugins/rtk.ts");
-let rtkPluginValid = false;
 if (PROFILE.opencode) {
   const version = execaSync("opencode", ["--version"], { reject: false, timeout: 10_000 });
   if (version.exitCode !== 0 || !/\bv2\./.test(version.stdout)) {
@@ -239,27 +237,6 @@ if (PROFILE.opencode) {
       detail: "managed server or CLI settings are missing or stale; run mise run install",
     });
   }
-}
-if (PROFILE.opencode && existsSync(rtkPlugin)) {
-  try {
-    const { default: plugin } = await import(rtkPlugin);
-    await plugin.setup({
-      tool: {
-        hook: async (name: string, callback: unknown) => {
-          rtkPluginValid = name === "execute.before" && typeof callback === "function";
-        },
-      },
-    });
-  } catch {
-    // A plugin that cannot load or register its hook is unusable.
-  }
-}
-if (PROFILE.opencode && !rtkPluginValid) {
-  findings.push({
-    level: "required",
-    label: "RTK OpenCode plugin",
-    detail: `${rtkPlugin} is missing or invalid; run mise run install`,
-  });
 }
 
 const pool = claudePoolPaths(HOME);

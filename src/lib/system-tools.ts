@@ -269,17 +269,6 @@ export const SYSTEM_TOOL_GROUPS = [
     title: "Shell and helper integrations",
     tools: [
       {
-        name: "rtk",
-        level: "required",
-        why: "Compresses OpenCode shell output through the RTK OpenCode plugin.",
-        versionArgs: ["--version"],
-        latest: { type: "homebrew", formula: "rtk" },
-        update: {
-          commands: ["brew upgrade rtk", "mise run install"],
-          note: "Run the sync in ~/PhpstormProjects/my-setup to refresh the bundled OpenCode plugin, then restart OpenCode.",
-        },
-      },
-      {
         name: "phpstorm",
         level: "optional",
         why: "Used by the synced zsh config as the editor command.",

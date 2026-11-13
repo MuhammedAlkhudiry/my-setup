@@ -11,7 +11,7 @@ stronger areas targeted actions.
 ## Rated areas
 
 - **Verification capability:** 0 means no useful checks; 10 means nearly every meaningful change is verifiable with suitable tools and coverage.
-- **Verification speed:** Profile tests and deterministic commands against [stage budgets](../CHECKLIST.md#stage-budgets).
+- **Verification speed:** Profile tests and deterministic commands against [stage budgets](../SKILL.md#stage-budgets).
 - **Test quality:** State the reviewed scope, estimate useful versus poor tests, and identify additions, improvements, and removals. Report recent
   test growth and the share of mock assertions as signals of low-value tests.
 - **CI quality and speed:** Profile CI independently of local checks. Creating a PR for measurements requires authorization.

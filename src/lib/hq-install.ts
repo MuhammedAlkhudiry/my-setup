@@ -5,7 +5,7 @@ import { installAgent } from "./merge-queue-install";
 
 export const HQ_DELIVER_LABEL = "com.muhammed.hq-deliver";
 
-/** main-mac sends each pick on a thread's hq question back to that thread (`hq deliver`), every half minute. */
+/** main-mac sends each Send on an hq page to the thread that pushed the page (`hq deliver`), every half minute. */
 export async function installHqDeliver(options: { home: string; rootDir: string; bun: string }) {
   if (process.platform !== "darwin") return;
   const { home, rootDir, bun } = options;

@@ -17,7 +17,9 @@ First confirm the exact merge commit's main CI pipeline passed; docs, tests, too
 <!-- /profile -->
 
 1. **Deploy:** when the merge deploys a server, website, or over-the-air update, confirm the deploy of the exact merge commit finished,
-   production serves it, and its health check passes.
+   production serves it, and its health check passes. Read the live commit from the deploy's own record, as the project runbook says
+   (such as the release folder the `current` link points to), never from `git rev-parse` on the server: a release folder's Git metadata
+   can be stale.
    <!-- profile:personal -->
    The merge queue deploys each batch; a skipped deploy needs no further check. After fixing a failed one, run `merge-queue retry-deploy <owner/repo>`.
    <!-- /profile -->

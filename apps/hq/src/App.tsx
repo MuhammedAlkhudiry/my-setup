@@ -6,7 +6,7 @@ import {
 } from "@/components/ui/sidebar"
 import { Separator } from "@/components/ui/separator"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { Logo, riyadh } from "@/shared"
+import { Logo, SendBar, riyadh } from "@/shared"
 import { StatusProvider, useStatus } from "@/api"
 import StatusPage, { type Filter } from "@/pages/status"
 import AdsPage from "@/pages/ads"
@@ -140,6 +140,7 @@ function Shell() {
             <h1 className="text-sm font-medium">{title}</h1>
           </header>
           {report ? <report.page key={route} date={date} /> : <StatusPage filter={filter} setFilter={setFilter} />}
+          <SendBar />
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

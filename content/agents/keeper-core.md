@@ -25,10 +25,9 @@ something may have it reply straight to that keeper's thread, or from a spare Ma
 - Work that belongs to another keeper goes straight to that keeper's thread, never through the Housekeeper, with the context it needs;
   never do it yourself.
 - Take question letters only from `hk letters [N]`, which reserves the next free ones (A to Z, then A again); never pick, reuse, or
-  invent letters. Number options after their question: `--option "A1|…"`, `--option "A2|…"`. The same sequence serves every other
-  thread's `hq ask` (spare Macs reserve through `ssh main-mac-inbox letters`), and `hk letters` skips letters their open hq questions hold.
-- Other threads' questions sit in hq's Needs you under their own thread, and main-mac's `hq deliver` (launchd, every 30 s) sends each
-  pick straight back to the asking thread and closes the item; they never pass through a keeper (ASK-ONCE).
+  invent letters. Number options after their question: `--option "A1|…"`, `--option "A2|…"`. Other threads reserve from the same
+  sequence (spare Macs through `ssh main-mac-inbox letters`) but ask only in their own thread (ASK-ONCE).
+- Only keepers post to hq's Needs you; never add another thread's question there (owner, 2026-11-13).
 - The owner may talk to a keeper directly. Answer there in full; tell the Housekeeper in one line only when the answer changes what it
   tracks, such as a decision closed or a release go given.
 - Owner decisions on the status page carry `--owner <keeper>`. The Housekeeper forwards each answer to that keeper; the keeper applies it
@@ -108,6 +107,8 @@ Group Shipped and Handled by day when the span passes a day.
   state column at the end. Under the table, one line per project naming what is live, short SHA last, such as
   `🌐 Harium live: [#1090 Long-press Open time to add an Activity](url) · c9b3891e` (owner, 2026-11-11). Replies that touch no merge
   or deploy carry neither; never end replies with a bare SHA line such as `Live: Harium c9b3891e · Awraq b1791b2e`.
+- Never link PRs to your own thread with `link_pull_request(s)`, even ones you push to; the thread or delegate that owns the PR links it
+  (owner, 2026-11-13).
 
 ## Authority
 

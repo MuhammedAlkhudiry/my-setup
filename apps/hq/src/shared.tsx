@@ -6,7 +6,7 @@ import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader,
 import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-import { sendAnswer, useStatus } from "@/api"
+import { sendAnswer, sendDrafts, setDraft, useDrafts, useStatus } from "@/api"
 import { RATING_EMOJI, type Answer, type Keeper, type Money, type Project, type Rating, type Report, type StatusItem } from "@contract"
 
 export const PROJECT: Record<Project, { name: string; logo?: string; text: string }> = {
@@ -16,8 +16,6 @@ export const PROJECT: Record<Project, { name: string; logo?: string; text: strin
 }
 export const KEEPER: Record<Keeper, string> = { housekeeper: "Housekeeper", ops: "Ops", business: "Business" }
 
-/** Who asked: the thread's title for thread questions, else the keeper. */
-export const askerOf = (item: StatusItem) => item.thread?.title ?? KEEPER[item.owner]
 
 export function Logo({ project, size = 18, className }: { project: Project; size?: number; className?: string }) {
   const p = PROJECT[project]
@@ -110,25 +108,26 @@ const choiceLabel = (item: StatusItem, choice: string) =>
 /** One owner decision. The same card renders on the status page and inside the report that raised it. */
 export function DecisionCard({ item, compact = false }: { item: StatusItem; compact?: boolean }) {
   const status = useStatus()
-  const saved = status.data?.answers[item.id]
-  const [answer, setAnswer] = React.useState<Answer | null | undefined>(undefined)
-  const [noteOpen, setNoteOpen] = React.useState(false)
-  const [note, setNote] = React.useState("")
-  const [busy, setBusy] = React.useState<string | null>(null)
+  const draft = useDrafts()[item.id]
+  const [sent, setSent] = React.useState<Answer | null | undefined>(undefined)
+  const [noteOpen, setNoteOpen] = React.useState(!!draft?.note)
+  const [busy, setBusy] = React.useState(false)
   const [error, setError] = React.useState<string | null>(null)
-  const current = answer === undefined ? saved : answer
+  const current = sent === undefined ? status.data?.answers[item.id] : sent
+  const choice = draft?.choice ?? ""
+  const note = draft?.note ?? ""
+  const pick = (key: string) => setDraft(item.id, { choice: choice === key ? "" : key, note })
 
-  // `clear` undoes a pick; a note with no choice is sent on its own.
-  const send = async (choice: string, clear = false) => {
-    setBusy(clear ? "undo" : choice)
+  // Undo takes back an answer already sent; the keeper reads the cleared answer on its next look.
+  const undo = async () => {
+    setBusy(true)
     setError(null)
     try {
-      setAnswer(await sendAnswer(item.id, choice, clear ? "" : note.trim(), !item.thread))
-      if (clear) setNote("")
+      setSent(await sendAnswer(item.id, ""))
     } catch (e) {
       setError((e as Error).message)
     } finally {
-      setBusy(null)
+      setBusy(false)
     }
   }
 
@@ -140,11 +139,12 @@ export function DecisionCard({ item, compact = false }: { item: StatusItem; comp
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{item.title}</p>
             <p className="truncate text-sm text-muted-foreground">
-              {choiceLabel(item, current.choice)}{current.note ? ` · “${current.note}”` : ""} · sent to {askerOf(item)}
+              {choiceLabel(item, current.choice)}{current.note ? ` · “${current.note}”` : ""} · sent to {KEEPER[item.owner]}
             </p>
+            {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
-          <Button variant="ghost" size="sm" disabled={!!busy} onClick={() => send("", true)}>
-            {busy === "undo" ? <Loader2 className="animate-spin" /> : <Undo2 />}Undo
+          <Button variant="ghost" size="sm" disabled={busy} onClick={undo}>
+            {busy ? <Loader2 className="animate-spin" /> : <Undo2 />}Undo
           </Button>
         </CardContent>
       </Card>
@@ -153,14 +153,25 @@ export function DecisionCard({ item, compact = false }: { item: StatusItem; comp
   // The question's own letter, such as "A" for options A1, A2, A3; older items only have lettered options.
   const keys = new Set(item.options?.map((o) => o.key))
   const letters = (item.letters.filter((l) => !keys.has(l)).join(" ") || [...keys].join(" "))
+  const special = (key: string, label: string, className?: string) => (
+    <Button
+      variant={choice === key ? "secondary" : "ghost"}
+      size="sm"
+      className={cn(choice !== key && "text-muted-foreground", className)}
+      aria-pressed={choice === key}
+      onClick={() => pick(key)}
+    >
+      {choice === key && <Check />}{label}
+    </Button>
+  )
 
   return (
-    <Card className="gap-4">
+    <Card className={cn("gap-4 transition-colors", draft && "border-foreground/40")}>
       <CardHeader>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground">
           <ProjectMark projects={item.projects} />
           <span>·</span>
-          <span className="truncate">{askerOf(item)}</span>
+          <span className="truncate">{KEEPER[item.owner]}</span>
           <span>·</span>
           <span>{age(item.updatedAt)}</span>
         </div>
@@ -186,54 +197,93 @@ export function DecisionCard({ item, compact = false }: { item: StatusItem; comp
           </div>
         )}
         <div className={cn("grid gap-2", !compact && "sm:grid-cols-2")}>
-          {item.options?.map((o) => (
-            <button
-              key={o.key}
-              type="button"
-              disabled={!!busy}
-              onClick={() => send(o.key)}
-              className={cn(
-                "group flex min-h-16 flex-col items-start gap-1 rounded-lg border bg-background/40 p-3 text-start transition-colors",
-                "hover:border-foreground/30 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none disabled:opacity-60",
-                o.recommended && "border-foreground/25",
-              )}
-            >
-              <span className="flex w-full items-center gap-2">
-                <span className="font-mono text-xs text-muted-foreground">{o.key}</span>
-                <span className="text-sm font-medium">{o.label}</span>
-                {busy === o.key && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
-                {o.recommended && <Badge variant="secondary" className="ms-auto">Recommended</Badge>}
-              </span>
-              {o.tradeoff && <span className="text-xs leading-relaxed text-muted-foreground">{o.tradeoff}</span>}
-            </button>
-          ))}
+          {item.options?.map((o) => {
+            const on = choice === o.key
+            return (
+              <button
+                key={o.key}
+                type="button"
+                aria-pressed={on}
+                onClick={() => pick(o.key)}
+                className={cn(
+                  "group flex min-h-16 flex-col items-start gap-1 rounded-lg border bg-background/40 p-3 text-start transition-colors",
+                  "hover:border-foreground/30 hover:bg-accent focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none",
+                  o.recommended && "border-foreground/25",
+                  on && "border-foreground bg-accent",
+                )}
+              >
+                <span className="flex w-full items-center gap-2">
+                  <span className="font-mono text-xs text-muted-foreground">{o.key}</span>
+                  <span className="text-sm font-medium">{o.label}</span>
+                  {on && <Check className="size-4" />}
+                  {o.recommended && <Badge variant="secondary" className="ms-auto">Recommended</Badge>}
+                </span>
+                {o.tradeoff && <span className="text-xs leading-relaxed text-muted-foreground">{o.tradeoff}</span>}
+              </button>
+            )
+          })}
         </div>
         {noteOpen && (
           <Textarea
-            autoFocus
+            autoFocus={!note}
             value={note}
-            onChange={(e) => setNote(e.target.value)}
-            placeholder="A note, sent with your pick"
+            onChange={(e) => setDraft(item.id, { choice, note: e.target.value })}
+            placeholder="A note, sent with your pick or on its own"
             className="min-h-16 animate-in fade-in-0"
           />
         )}
-        {error && <p className="text-sm text-destructive">{error}</p>}
       </CardContent>
       <CardFooter className="flex-wrap gap-1 border-t pt-3! [.border-t]:pt-3">
         <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => setNoteOpen((v) => !v)}>Add a note</Button>
-        {noteOpen && note.trim() && (
-          <Button variant="secondary" size="sm" disabled={!!busy} onClick={() => send("")}>Send note only</Button>
+        {special("later", "Later")}
+        {special("handled", "I took care of it")}
+        {draft && (
+          <Button variant="ghost" size="sm" className="text-muted-foreground" onClick={() => { setDraft(item.id, null); setNoteOpen(false) }}>
+            Clear
+          </Button>
         )}
-        {/* A thread question carries its own Skip option, and its thread asks again itself when it needs to. */}
-        {!item.thread && (
-          <>
-            <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={!!busy} onClick={() => send("later")}>Later</Button>
-            <Button variant="ghost" size="sm" className="text-muted-foreground" disabled={!!busy} onClick={() => send("handled")}>I took care of it</Button>
-            <Button variant="ghost" size="sm" className="ms-auto text-muted-foreground" disabled={!!busy} onClick={() => send("skip")}>Skip</Button>
-          </>
-        )}
+        {special("skip", "Skip", "ms-auto")}
       </CardFooter>
     </Card>
+  )
+}
+
+/** The fixed bar that sends every drafted pick at once and wakes the Housekeeper a single time. */
+export function SendBar() {
+  const status = useStatus()
+  const drafts = useDrafts()
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  // Drafts for items a keeper has since closed or answered elsewhere are dropped quietly.
+  const live = new Set(status.data?.items.filter((i) => !status.data!.answers[i.id]).map((i) => i.id) ?? [])
+  const ids = Object.keys(drafts).filter((id) => live.has(id))
+  if (!ids.length) return null
+
+  const send = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await sendDrafts(ids)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+      status.reload()
+    }
+  }
+
+  return (
+    <div className="pointer-events-none sticky bottom-0 z-20 flex justify-center px-4 pb-4 md:px-6">
+      <div className="pointer-events-auto flex w-full max-w-xl items-center gap-3 rounded-xl border bg-card/95 p-2 ps-4 shadow-lg backdrop-blur animate-in fade-in-0 slide-in-from-bottom-2">
+        <span className="min-w-0 flex-1 text-sm">
+          <span className="font-medium tnum">{ids.length} picked</span>
+          <span className="text-muted-foreground">{error ? ` · ${error}` : " · not sent yet"}</span>
+        </span>
+        <Button disabled={busy} onClick={send}>
+          {busy && <Loader2 className="animate-spin" />}Send
+        </Button>
+      </div>
+    </div>
   )
 }
 

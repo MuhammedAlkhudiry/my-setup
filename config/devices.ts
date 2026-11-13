@@ -21,8 +21,6 @@ export interface DeviceProfile {
   mcpServers: Record<string, McpServer>;
   // PhpStorm shortcuts in VS Code: the IntelliJ keymap extension plus `config/vscode.ts` (Windows keys).
   vscodeKeymap: boolean;
-  // The RTK OpenCode plugin is installed whenever OpenCode is enabled and RTK is present; `required` fails the install without RTK.
-  rtk: "required" | "optional";
   requiredSecrets: readonly string[];
   // Local and remote skill names that this device never installs.
   excludedSkills: readonly string[];
@@ -45,7 +43,6 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
     macWatcher: true,
     mcpServers: MCP_SERVERS,
     vscodeKeymap: false,
-    rtk: "required",
     requiredSecrets: ["POSTHOG_CLI_API_KEY", "HUGEICONS_TOKEN"],
     excludedSkills: [],
     allowedCommands: [
@@ -75,7 +72,6 @@ export const DEVICE_PROFILES: Record<DeviceProfileName, DeviceProfile> = {
     macWatcher: false,
     mcpServers: WORK_MCP_SERVERS,
     vscodeKeymap: true,
-    rtk: "optional",
     requiredSecrets: [],
     excludedSkills: [
       "project-docs",

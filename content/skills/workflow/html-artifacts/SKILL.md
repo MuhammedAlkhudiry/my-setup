@@ -37,10 +37,11 @@ phone-width column centered on a wide screen; self-contained, with inline CSS an
 
 ## Choices
 
-Put choices in an `options` block on an hq page. `hq push page` gives each block a letter from the shared sequence and posts it to hq's
-Needs you as this thread's question, so it must run from a T3 thread. The owner picks on the page or on the card; the pick reaches this
-thread as a message, like any `hq ask` question, with several keys joined, such as `F1 F3`. Ask it in chat per ASK-ONCE with the printed
-keys. Re-push the same slug to revise a page; blocks keep their letters by `id`, and an answered block stays closed.
+Put choices in an `options` block on an hq page, pushed from a T3 thread. `hq push page` gives each block a letter from the shared
+sequence and prints its keys. Page choices never go to hq's Needs you; only keepers post there, with `hk ask`. The owner picks across
+every block on the page, and one Send reaches this thread as one message with the keys joined, such as `F1 G2 H3`. Ask the same choices
+in chat per ASK-ONCE with the printed keys. Re-push the same slug to revise a page; blocks keep their letters by `id`, and a sent block
+stays picked.
 
 ## share-html
 

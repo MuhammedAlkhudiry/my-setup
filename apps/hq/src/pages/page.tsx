@@ -1,6 +1,6 @@
 import * as React from "react"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Line, LineChart, XAxis, YAxis } from "recharts"
-import { ArrowUpRight, Check, Loader2, MessageSquare, Undo2 } from "lucide-react"
+import { ArrowUpRight, Check, Loader2, MessageSquare } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -8,12 +8,11 @@ import { ChartContainer, ChartLegend, ChartLegendContent, ChartTooltip, ChartToo
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { ErrorCard, Logo, PageSkeleton, ProjectMark, Rate, age, isExternal } from "@/shared"
-import { sendAnswer, useLive } from "@/api"
+import { pageDraftId, sendPageDrafts, setDraft, useDrafts, useLive } from "@/api"
 import { cn } from "@/lib/utils"
 import { RISK_EMOJI, type Answer, type Block, type Cell, type OptionsBlock, type Page } from "@contract"
 
-type Pick = { open: boolean; answer: Answer | null }
-type PageData = { page: Page; picks: Record<string, Pick> }
+type PageData = { page: Page; picks: Record<string, Answer | null>; delivering: boolean }
 
 // ---- sandboxed HTML ----------------------------------------------------------------------------------------------------
 
@@ -209,42 +208,25 @@ function Prs({ block }: { block: Extract<Block, { type: "prs" }> }) {
 
 // ---- options -----------------------------------------------------------------------------------------------------------
 
-function Options({ block, pick, asker, onSent }: { block: OptionsBlock; pick?: Pick; asker: string; onSent: () => void }) {
+function Options({ block, slug, sent, raised }: { block: OptionsBlock; slug: string; sent: Answer | null; raised: boolean }) {
   const previews = block.options.some((o) => o.html || o.image)
   const [view, setView] = React.useState(0)
-  const [picked, setPicked] = React.useState<string[]>([])
-  const [noteOpen, setNoteOpen] = React.useState(false)
-  const [note, setNote] = React.useState("")
-  const [busy, setBusy] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-  const [sent, setSent] = React.useState<Answer | null | undefined>(undefined)
-  const answer = sent === undefined ? pick?.answer ?? null : sent
-  const open = pick?.open ?? false
+  const id = pageDraftId(slug, block.id)
+  const draft = useDrafts()[id]
+  const [noteOpen, setNoteOpen] = React.useState(!!draft?.note)
+  const picked = (draft?.choice ?? "").split(" ").filter(Boolean)
+  const note = draft?.note ?? ""
   const label = (key: string) => block.options.find((o) => o.key === key)?.label ?? key
+  const chosen = new Set((sent?.choice ?? "").split(" ").filter(Boolean))
 
-  const toggle = (key: string) =>
-    setPicked((p) => (p.includes(key) ? p.filter((k) => k !== key) : block.multiple ? [...p, key].sort() : [key]))
-
-  const send = async (choice: string, text: string) => {
-    if (!block.question) return
-    setBusy(true)
-    setError(null)
-    try {
-      setSent(await sendAnswer(block.question, choice, text, false))
-      if (!choice) { setPicked([]); setNote("") }
-      onSent()
-    } catch (e) {
-      setError((e as Error).message)
-    } finally {
-      setBusy(false)
-    }
+  const toggle = (key: string) => {
+    const next = picked.includes(key) ? picked.filter((k) => k !== key) : block.multiple ? [...picked, key].sort() : [key]
+    setDraft(id, { choice: next.join(" "), note })
   }
-
   const current = block.options[view]
-  const chosen = new Set((answer?.choice ?? "").split(" ").filter(Boolean))
 
   return (
-    <Card className="gap-4 pb-0">
+    <Card className={cn("gap-4 pb-0 transition-colors", draft && "border-foreground/40")}>
       <CardHeader>
         <CardTitle className="text-lg leading-snug">{block.title}</CardTitle>
         {block.context && <CardDescription className="leading-relaxed">{block.context}</CardDescription>}
@@ -272,7 +254,7 @@ function Options({ block, pick, asker, onSent }: { block: OptionsBlock; pick?: P
                 <button
                   key={o.key}
                   type="button"
-                  disabled={!!answer || !open || busy}
+                  disabled={!!sent}
                   onClick={() => toggle(o.key!)}
                   aria-pressed={on}
                   className={cn(
@@ -294,29 +276,21 @@ function Options({ block, pick, asker, onSent }: { block: OptionsBlock; pick?: P
             })}
           </div>
         )}
-        {noteOpen && !answer && (
-          <Textarea autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="A note, sent with your pick" className="min-h-16 animate-in fade-in-0" />
+        {noteOpen && !sent && (
+          <Textarea autoFocus={!note} value={note} onChange={(e) => setDraft(id, { choice: picked.join(" "), note: e.target.value })} placeholder="A note, sent with your picks" className="min-h-16 animate-in fade-in-0" />
         )}
-        {error && <p className="text-sm text-destructive">{error}</p>}
       </CardContent>
 
-      {/* The pick bar stays on screen while the block is in view, so switching and picking never needs scrolling. */}
-      <div className="sticky bottom-0 z-10 rounded-b-xl border-t bg-card/95 px-4 py-3 backdrop-blur md:px-6">
-        {answer?.choice ? (
+      {/* The block's bar stays on screen while it is in view, above the page's Send bar, so switching never needs scrolling. */}
+      <div className={cn("sticky z-10 rounded-b-xl border-t bg-card/95 px-4 py-3 backdrop-blur transition-[bottom] md:px-6", raised ? "bottom-[76px]" : "bottom-0")}>
+        {sent ? (
           <div className="flex flex-wrap items-center gap-3 text-sm">
             <span className="grid size-7 shrink-0 place-items-center rounded-full bg-secondary"><Check className="size-4" /></span>
             <span className="min-w-0 flex-1">
-              {[...chosen].map((k) => `${k} ${label(k)}`).join(" + ")}{answer.note ? ` · “${answer.note}”` : ""}
-              <span className="text-muted-foreground"> · {open ? `sending to ${asker}` : `sent to ${asker} ${age(answer.at)} ago`}</span>
+              {[...chosen].map((k) => `${k} ${label(k)}`).join(" + ") || "Note"}{sent.note ? ` · “${sent.note}”` : ""}
+              <span className="text-muted-foreground"> · sent {age(sent.at)} ago</span>
             </span>
-            {open && (
-              <Button variant="ghost" size="sm" disabled={busy} onClick={() => send("", "")}>
-                {busy ? <Loader2 className="animate-spin" /> : <Undo2 />}Undo
-              </Button>
-            )}
           </div>
-        ) : !open ? (
-          <p className="text-sm text-muted-foreground">{block.question ? "Closed; answered in the thread." : "Not posted yet; push it with hq push page."}</p>
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             {previews &&
@@ -338,18 +312,48 @@ function Options({ block, pick, asker, onSent }: { block: OptionsBlock; pick?: P
               </Button>
             )}
             {!previews && <span className="text-sm text-muted-foreground">{picked.length ? `Picked ${picked.join(" + ")}` : block.multiple ? "Pick one or more" : "Pick one"}</span>}
-            <span className="ms-auto flex items-center gap-1">
-              <Button variant="ghost" size="icon" className="size-8 text-muted-foreground" aria-label="Add a note" onClick={() => setNoteOpen((v) => !v)}>
-                <MessageSquare />
-              </Button>
-              <Button size="sm" disabled={busy || !picked.length} onClick={() => send(picked.join(" "), note.trim())}>
-                {busy && <Loader2 className="animate-spin" />}Send{picked.length ? ` ${picked.join(" + ")}` : ""}
-              </Button>
-            </span>
+            <Button variant="ghost" size="icon" className="ms-auto size-8 text-muted-foreground" aria-label="Add a note" onClick={() => setNoteOpen((v) => !v)}>
+              <MessageSquare />
+            </Button>
           </div>
         )}
       </div>
     </Card>
+  )
+}
+
+/** One Send for every block on the page, so the thread that pushed it gets all the picks in one message. */
+function PageSendBar({ slug, blocks, asker, onSent }: { slug: string; blocks: string[]; asker: string; onSent: () => void }) {
+  const drafts = useDrafts()
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+  const keys = blocks.flatMap((b) => drafts[pageDraftId(slug, b)]?.choice.split(" ").filter(Boolean) ?? [])
+  const count = blocks.filter((b) => drafts[pageDraftId(slug, b)]).length
+  if (!count) return null
+
+  const send = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      await sendPageDrafts(slug, blocks)
+      onSent()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="pointer-events-none sticky bottom-0 z-20 -mt-2 flex justify-center pb-4">
+      <div className="pointer-events-auto flex h-14 w-full max-w-xl items-center gap-3 rounded-xl border bg-card/95 p-2 ps-4 shadow-lg backdrop-blur animate-in fade-in-0 slide-in-from-bottom-2">
+        <span className="min-w-0 flex-1 truncate text-sm">
+          <span className="font-medium tnum">{keys.length ? keys.join(" ") : `${count} note${count === 1 ? "" : "s"}`}</span>
+          <span className="text-muted-foreground">{error ? ` · ${error}` : ` · to ${asker}`}</span>
+        </span>
+        <Button disabled={busy} onClick={send}>{busy && <Loader2 className="animate-spin" />}Send</Button>
+      </div>
+    </div>
   )
 }
 
@@ -368,7 +372,7 @@ function rowsOf(blocks: Block[]): Block[][] {
   return rows
 }
 
-function BlockView({ block, data, onSent }: { block: Block; data: PageData; onSent: () => void }) {
+function BlockView({ block, data, raised }: { block: Block; data: PageData; raised: boolean }) {
   switch (block.type) {
     case "verdict": return <Verdict block={block} />
     case "section":
@@ -384,7 +388,7 @@ function BlockView({ block, data, onSent }: { block: Block; data: PageData; onSe
     case "chart": return <DataChart block={block} />
     case "prs": return <Prs block={block} />
     case "options":
-      return <Options block={block} pick={block.question ? data.picks[block.question] : undefined} asker={data.page.thread?.title ?? "the thread"} onSent={onSent} />
+      return <Options block={block} slug={data.page.slug} sent={data.picks[block.id] ?? null} raised={raised} />
     case "html":
       return <Titled title={block.title} caption={block.caption}><Sandbox html={block.html} height={block.height} title={block.title ?? "Custom view"} /></Titled>
     case "details":
@@ -399,6 +403,7 @@ function BlockView({ block, data, onSent }: { block: Block; data: PageData; onSe
 
 export default function PageView({ slug }: { slug: string }) {
   const { data, error, reload } = useLive<PageData>(`/api/pages/${slug}`)
+  const drafts = useDrafts()
 
   React.useEffect(() => {
     if (data) document.title = `${data.page.title} · hq`
@@ -406,6 +411,9 @@ export default function PageView({ slug }: { slug: string }) {
 
   if (!data) return error ? <div className="p-4 md:p-6"><ErrorCard message={error} onRetry={reload} /></div> : <PageSkeleton />
   const { page } = data
+  // Blocks already sent take no new picks; drafts left on them from before are ignored.
+  const open = page.blocks.flatMap((b) => (b.type === "options" && !data.picks[b.id] ? [b.id] : []))
+  const raised = open.some((b) => drafts[pageDraftId(slug, b)])
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6 p-4 md:p-6">
@@ -427,11 +435,12 @@ export default function PageView({ slug }: { slug: string }) {
       </div>
       {rowsOf(page.blocks).map((row, i) =>
         row.length > 1 ? (
-          <div key={i} className="grid items-start gap-6 lg:grid-cols-2">{row.map((b, j) => <BlockView key={j} block={b} data={data} onSent={reload} />)}</div>
+          <div key={i} className="grid items-start gap-6 lg:grid-cols-2">{row.map((b, j) => <BlockView key={j} block={b} data={data} raised={raised} />)}</div>
         ) : (
-          <BlockView key={i} block={row[0]} data={data} onSent={reload} />
+          <BlockView key={i} block={row[0]} data={data} raised={raised} />
         ),
       )}
+      <PageSendBar slug={slug} blocks={open} asker={page.thread?.title ?? "the thread"} onSent={reload} />
     </div>
   )
 }

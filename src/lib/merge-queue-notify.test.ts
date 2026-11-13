@@ -98,6 +98,28 @@ test.skipIf(process.platform === "win32")(
   },
 );
 
+test.skipIf(process.platform === "win32")(
+  "an owner id missing its mcp: prefix is retried with the id t3 suggests",
+  async () => {
+    const home = mkdtempSync(join(tmpdir(), "merge-queue-notify-"));
+    directories.push(home);
+    mkdirSync(join(home, ".t3/bin"), { recursive: true });
+    const t3 = join(home, ".t3/bin/t3");
+    writeFileSync(
+      t3,
+      `#!/bin/sh\nif [ "$3" = "owner-thread" ]; then echo "Thread owner-thread was not found. Did you mean \\\`mcp:owner-thread\\\`?" >&2; exit 1; fi\nprintf '%s\\n' "$*" > "${home}/args"\ncat > "${home}/stdin"\n`,
+    );
+    chmodSync(t3, 0o755);
+
+    await queueNotifier(rootWith({ housekeeper: "front-desk", ops: "ops-thread" }), home)(
+      "merge-queue: owner/repo#1 merged",
+      { thread: "owner-thread" },
+    );
+    expect(readFileSync(join(home, "args"), "utf8")).toBe("thread send mcp:owner-thread -\n");
+    expect(readFileSync(join(home, "stdin"), "utf8")).toBe("merge-queue: owner/repo#1 merged");
+  },
+);
+
 test("shorten keeps both ends so a trailing log path survives", () => {
   expect(shorten("a\n  b")).toBe("a b");
   const long = `${"x".repeat(1000)}; /tmp/run.log`;

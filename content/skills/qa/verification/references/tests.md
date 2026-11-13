@@ -41,7 +41,7 @@ Reject these; remove existing ones using [Pruning](#pruning):
 - Keep a unit test to milliseconds and an integration test under about half a second.
 - Never sleep or call a real network; use fake timers and fakes. Seed only data the test reads.
 - Keep tests independent so they run in parallel. Time each new or changed test file before reporting.
-- If a suite exceeds [its stage budget](../CHECKLIST.md#stage-budgets), speed up or prune slow tests, or record a follow-up with $project-docs.
+- If a suite exceeds [its stage budget](../SKILL.md#stage-budgets), speed up or prune slow tests, or record a follow-up with $project-docs.
   Never raise the budget.
 - Run end-to-end journeys, device flows, mutation testing, and coverage only as manual commands, when requested.
 

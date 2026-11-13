@@ -41,6 +41,18 @@ export function queueNotifier(rootDir: string, home = homedir()) {
         })
       : execa(t3, ["thread", "send", thread, "-"], { input: message, timeout: 30_000 });
 
+  // Threads launched over MCP carry an `mcp:` prefix that `merge-queue add --thread` callers often drop; t3 names the
+  // full id it meant, so retry once with it.
+  const sendResolving = async (thread: string, message: string, host?: string) => {
+    try {
+      await send(thread, message, host);
+    } catch (error) {
+      const meant = /Did you mean `([^`]+)`\?/.exec(error instanceof Error ? error.message : "")?.[1];
+      if (!meant) throw error;
+      await send(meant, message, host);
+    }
+  };
+
   return async (message: string, owner?: QueueOwner) => {
     const ops = keeperThread(rootDir, "ops");
     if (!owner?.thread || owner.thread === ops) {
@@ -49,7 +61,7 @@ export function queueNotifier(rootDir: string, home = homedir()) {
     }
 
     try {
-      await send(owner.thread, message, owner.host);
+      await sendResolving(owner.thread, message, owner.host);
     } catch (error) {
       const reason = shorten(error instanceof Error ? error.message : String(error), 200);
       await send(

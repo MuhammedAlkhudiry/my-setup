@@ -37,7 +37,7 @@ export const RATING_EMOJI: Record<Rating, string> = {
 const Option = z.object({ key: Text, label: Text, tradeoff: z.string().optional(), recommended: z.boolean().optional() });
 const Link = z.object({ label: Text, url: Url });
 
-// The thread that asked a question from outside the keepers; picks go straight back to it.
+// The thread that pushed a page; its Send reaches that thread as one message.
 const ThreadRef = z.object({ id: Text.max(200).regex(/^[\w:.-]+$/), host: z.enum(HOSTS), title: Text.max(120), link: Url });
 export type ThreadRef = z.infer<typeof ThreadRef>;
 
@@ -61,28 +61,12 @@ export const StatusItem = z.object({
   updatedAt: When,
   // When the Housekeeper last applied an answer; picks sent before it are already handled.
   appliedAt: When.optional(),
-  // Set on questions any thread posts with `hq ask`; Needs you groups them by thread.
-  thread: ThreadRef.optional(),
 });
 export type StatusItem = z.infer<typeof StatusItem>;
 export type Option = z.infer<typeof Option>;
 
 export const Status = z.object({ updatedAt: When, items: z.array(StatusItem) });
 export type Status = z.infer<typeof Status>;
-
-// ---- questions: questions/<id>.json, posted by any thread with `hq ask` ------------------------------------------------
-
-// One question with one letter; its options are keyed by that letter, A1, A2, A3, and the last one leaves today's behavior.
-export const Question = StatusItem.extend({
-  id: Text.max(200).regex(/^q-[a-z0-9-]+$/, "question ids look like q-<letter>-<slug>"),
-  group: z.literal("Needs you"),
-  options: z.array(Option).min(2),
-  letters: z.array(Text).length(1),
-  thread: ThreadRef,
-}).refine((q) => q.options.every((o) => new RegExp(`^${q.letters[0]}\\d+$`).test(o.key)), "option keys must be the letter plus a number, such as A1");
-export type Question = z.infer<typeof Question>;
-
-export const questionKey = (id: string) => `questions/${encodeURIComponent(id)}.json`;
 
 // ---- answers: what the owner picked on the site, saved by the Worker ---------------------------------------------------
 
@@ -260,8 +244,9 @@ export const reportUrl = (type: ReportType, date: string) => `https://${HQ_HOST}
 
 // ---- pages: pages/<slug>.json, one-off reports, analyses, and option pages any thread pushes with `hq push page` ----------
 // A page is a list of blocks that the site draws with its own components at hq.harium.app/p/<slug>, behind the same sign-in,
-// with no expiry. An options block is a thread question: `hq push page` gives it a letter and posts it to Needs you, and the
-// pick reaches the asking thread through `hq deliver`, whether Muhammed picks on the page or on the Status page.
+// with no expiry. An options block takes a letter from the shared sequence, so Muhammed can pick on the page or answer in the
+// pushing thread's chat. Page picks never go to Needs you: one Send posts every block's pick, and main-mac's `hq deliver` sends
+// them to the pushing thread as one message.
 
 export const RISKS = ["very low", "low", "medium", "high", "very high"] as const;
 export const RISK_EMOJI: Record<(typeof RISKS)[number], string> = {
@@ -357,7 +342,7 @@ export const Block = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("options"),
-    // Stable across pushes, so a re-pushed page keeps its letter and question.
+    // Stable across pushes, so a re-pushed page keeps its letter and its pick.
     id: z.string().regex(/^[a-z0-9-]+$/).default("options"),
     title: Text,
     context: z.string().optional(),
@@ -366,7 +351,6 @@ export const Block = z.discriminatedUnion("type", [
     options: z.array(PageOption).min(2),
     // Set by `hq push page`.
     letter: z.string().regex(/^[A-Z]$/).optional(),
-    question: z.string().optional(),
   }),
   z.object({ type: z.literal("html"), title: z.string().optional(), caption: z.string().optional(), html: Html, height: z.number().int().min(80).max(4000).optional() }),
   z.object({ type: z.literal("details"), title: Text, items: z.array(Text).min(1) }),
@@ -395,5 +379,10 @@ export type Page = z.infer<typeof Page>;
 
 export const pageKey = (slug: string) => `pages/${slug}.json`;
 export const pageUrl = (slug: string) => `https://${HQ_HOST}/p/${slug}`;
-// A page question's pick, kept after `hq deliver` closes the question so the page still shows what Muhammed picked.
-export const pagePickKey = (id: string) => `page-picks/${encodeURIComponent(id)}.json`;
+// Muhammed's pick on one options block of a page.
+export const pagePickKey = (slug: string, block: string) => `page-picks/${slug}/${block}.json`;
+
+// One Send on a page: every block's pick, waiting at page-sends/<slug>.json until `hq deliver` passes it to the page's thread.
+export const PageSendInput = z.object({ picks: z.record(z.string(), AnswerInput.omit({ id: true })) });
+export type PageSend = { slug: string; picks: Record<string, Answer>; at: string };
+export const pageSendKey = (slug: string) => `page-sends/${slug}.json`;

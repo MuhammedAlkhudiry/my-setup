@@ -13,7 +13,7 @@ the URL and, for options blocks, their letters and keys (`--json` for both). Pus
 }
 ```
 
-`projects` takes the project names `hq ask --project` takes. A `rating` is a RATINGS level in words: `very bad`, `bad`, `normal`, `good`, or `very good`; hq draws its emoji.
+`projects` takes `awraq`, `harium`, or `setup`. A `rating` is a RATINGS level in words: `very bad`, `bad`, `normal`, `good`, or `very good`; hq draws its emoji.
 
 ## Blocks
 
@@ -40,7 +40,8 @@ Consecutive `chart` and `table` blocks sit side by side on a laptop and stack on
 Each option takes `label`, optional `tradeoff` (two plain sentences: what users see and why to pick it), `recommended`, and a preview:
 `html` for a mockup drawn in the frame, or `image` as an `https:` or `data:image/` URL. With previews, the fixed pick bar switches between
 them; without, the options show as a grid of cards. End with the Skip option that keeps today's behavior. Leave `key` out; the push sets
-the keys from the block's letter. Give each options block its own `id` when a page has several.
+the keys from the block's letter. Give each options block its own `id` when a page has several. Picks on
+every block stay drafts until the owner presses the page's one Send.
 
 ## html
 

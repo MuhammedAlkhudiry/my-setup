@@ -48,30 +48,8 @@ export const useReport = <R extends Report>(type: ReportType, date = "latest") =
 
 // ---- picks ------------------------------------------------------------------------------------------------------------
 
-// Picks save at once; the Housekeeper is woken once the owner stops picking for a moment, or when the page closes.
-const NOTIFY_AFTER_MS = 15_000
-let notifyTimer: ReturnType<typeof setTimeout> | undefined
-let notifyDue = false
-
-function notifySoon() {
-  notifyDue = true
-  clearTimeout(notifyTimer)
-  notifyTimer = setTimeout(flushNotify, NOTIFY_AFTER_MS)
-}
-
-function flushNotify(beacon = false) {
-  if (!notifyDue) return
-  notifyDue = false
-  clearTimeout(notifyTimer)
-  if (beacon && navigator.sendBeacon("/api/notify")) return
-  fetch("/api/notify", { method: "POST", credentials: "same-origin", keepalive: true }).catch(() => { notifyDue = true })
-}
-
-addEventListener("pagehide", () => flushNotify(true))
-document.addEventListener("visibilitychange", () => document.visibilityState === "hidden" && flushNotify(true))
-
-// A thread question's pick goes straight to its thread through main-mac's `hq deliver`, so it never wakes the Housekeeper.
-export async function sendAnswer(id: string, choice: string, note = "", wakeHousekeeper = true): Promise<Answer | null> {
+/** Saves one answer at once; an empty choice with no note clears it. Decisions go through drafts and `sendDrafts` instead. */
+export async function sendAnswer(id: string, choice: string, note = ""): Promise<Answer | null> {
   const response = await fetch("/api/answers", {
     method: "POST",
     credentials: "same-origin",
@@ -80,6 +58,80 @@ export async function sendAnswer(id: string, choice: string, note = "", wakeHous
   })
   const body = await response.json().catch(() => null)
   if (!response.ok) throw new Error(body?.error ?? `Could not save (${response.status})`)
-  if ((choice || note) && wakeHousekeeper) notifySoon()
   return body.answer ?? null
+}
+
+// Picks, notes, Later, Skip, and handled stay drafts in this browser until Muhammed sends them all at once.
+export type Draft = { choice: string; note: string }
+const DRAFTS_KEY = "hq-drafts"
+const listeners = new Set<() => void>()
+let drafts: Record<string, Draft> = (() => {
+  try {
+    return JSON.parse(localStorage.getItem(DRAFTS_KEY) ?? "{}")
+  } catch {
+    return {}
+  }
+})()
+
+function saveDrafts(next: Record<string, Draft>) {
+  drafts = next
+  try {
+    localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts))
+  } catch {
+    // Drafts still work for this visit without storage.
+  }
+  listeners.forEach((l) => l())
+}
+
+const subscribe = (listener: () => void) => {
+  listeners.add(listener)
+  return () => listeners.delete(listener)
+}
+
+export const useDrafts = () => React.useSyncExternalStore(subscribe, () => drafts)
+
+/** Sets or clears one item's draft; a draft with no choice and no note is cleared, locally only. */
+export function setDraft(id: string, draft: Draft | null) {
+  const { [id]: _, ...rest } = drafts
+  saveDrafts(draft && (draft.choice || draft.note.trim()) ? { ...rest, [id]: draft } : rest)
+}
+
+/** Posts every draft for the given items, then wakes the Housekeeper once. Drafts that failed stay for another try. */
+export async function sendDrafts(ids: string[]): Promise<void> {
+  const failed: string[] = []
+  for (const id of ids) {
+    const draft = drafts[id]
+    if (!draft) continue
+    try {
+      await sendAnswer(id, draft.choice, draft.note.trim())
+      setDraft(id, null)
+    } catch {
+      failed.push(id)
+    }
+  }
+  if (failed.length < ids.length)
+    await fetch("/api/notify", { method: "POST", credentials: "same-origin" }).catch(() => undefined)
+  if (failed.length) throw new Error(`${failed.length} could not be sent; try again`)
+}
+
+/** The draft id of one options block on a page. */
+export const pageDraftId = (slug: string, block: string) => `page:${slug}:${block}`
+
+/** Sends every drafted pick on a page at once, so its thread gets them in one message. */
+export async function sendPageDrafts(slug: string, blocks: string[]): Promise<void> {
+  const picks = Object.fromEntries(
+    blocks.flatMap((block) => {
+      const draft = drafts[pageDraftId(slug, block)]
+      return draft ? [[block, { choice: draft.choice, note: draft.note.trim() }]] : []
+    }),
+  )
+  const response = await fetch(`/api/pages/${slug}/picks`, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ picks }),
+  })
+  const body = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(body?.error ?? `Could not send (${response.status})`)
+  for (const block of Object.keys(picks)) setDraft(pageDraftId(slug, block), null)
 }

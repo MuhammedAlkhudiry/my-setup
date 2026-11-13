@@ -170,8 +170,10 @@ Use these projects as references when the user mentions them.
   usual level, judge by its normal range, not one median, and leave a single day's small count unrated (owner, 2026-11-11). Never use
   two-color red/green for these ratings; keep pass/warn/fail markers for check results and statuses. App and admin UI are out of scope.
 - **ONE-PR** — Keep each task in one PR for one review/check/merge cycle. Split only for a stated reason, such as independent shipping or rollback.
-- **PR-CHECKS** — Finish work, pass local checks, and complete $prs before reporting a PR ready. Run project sign-off on the pushed head
-  after every push. Never bypass required checks; only the owner may bypass them on GitHub.
+- **PR-CHECKS** — Finish work, pass local checks, and complete $prs before reporting a PR ready. Run project sign-off once, on the final
+  pushed head, when the work is done: before reporting the PR ready, handing back, or enqueuing. While iterating, pushes run only
+  changed-file checks; sign off again only when a push lands after that. Before rerunning a failed sign-off on the same head, fix the
+  cause or show the failure is flaky (owner, 2026-11-13). Never bypass required checks; only the owner may bypass them on GitHub.
     <!-- profile:work -->
   Do not dispatch/rerun CI for work in progress. Merge only on green sign-off of a head containing current base; rebase and rerun when base moves. Complete $prs post-merge steps
   for the exact merge commit before other work.
@@ -211,7 +213,7 @@ All instructions for replies to the user live here.
 - **REPLY-HEADER** — Start every reply with one bold, all-caps line naming who triggered the turn: `🧑 **REPLY TO MUHAMMED**` for the
   owner's message, `🤖 **REPLY TO AGENT**` for a subagent result, another thread's message, or the Housekeeper, and
   `⚙️ **REPLY TO AUTOMATION**` for queue, hook, schedule, webhook, or background-task notifications. Put a `---` rule after the header
-  and another before the reply's bottom line, so header, body, and bottom line read as three parts.
+  and another before the reply's Close table, so header, body, and Close read as three parts.
 - **Language.** Write in English only.
 - **Audience calibration.** Mohammed is technically strong. Use plain language for management, business, marketing, sales, and product;
   briefly explain specialized terms without oversimplifying.
@@ -250,14 +252,8 @@ All instructions for replies to the user live here.
 - **Phone-ready media.** Share every image, video, page, and file so it opens on a phone: inline when supported, otherwise publish with
   $html-artifacts and link it. Never share only a local path. Stack options vertically for phone width.
 - **Other sessions.** Use thread titles, or describe the work if unknown; never use generated IDs alone.
-- **ACTOR-NAMES** — Name each actor instead of "you", "me", or "it" when a reply involves more than one: "Muhammed" for the owner,
-    <!-- profile:personal -->
-  "Housekeeper" (or "Main Agent" in another thread) for the agent writing, and "subagent" or its name, such as "Awraq X Ads subagent",
-  for delegated agents.
-    <!-- /profile -->
-    <!-- profile:work -->
-  "Main Agent" for the agent writing, and "subagent" or its name, such as "CADJ-5688 subagent", for delegated agents.
-    <!-- /profile -->
+- **ACTOR-NAMES** — Name each other actor instead of "you" or "it" when a reply involves more than one: "Muhammed" for the owner, and
+  "subagent" or its name, such as "Awraq X Ads subagent", for delegated agents.
 - **BEFORE-AFTER** — When reporting, explaining, proposing, or recapping a change, show before → after (value, behavior, or state) rather
   than only the present, such as "SAR 150 → 75/day". A change means little without its starting point, and the arrow shows its size
   without the reader recalling the old state. Show only a before you know; skip it when nothing existed before or the question is only
@@ -312,8 +308,20 @@ Reply freely; prefer visualisations, see $show-me.
   - **Checks:** `🟢` one line for everything that passed; one line per `🟡` warning or `🔴` failure or skipped check.
   - **PRs:** **PR status** for each PR the work created or changed.
   - **Questions:** new questions in full, following DECISION-CONTEXT; earlier unanswered ones only as ASK-ONCE's waiting line.
-  - **Close:** the next action, or "No next action needed", then a standalone status: `🟢 **ALL GOOD**`, `🟡 **ATTENTION NEEDED**`,
-    `⏳ **AWAITING**` (on-track work waiting on a named external event), `🔴 **ACTION REQUIRED**`, or `⛔ **BLOCKED**`.
+  - **Close:** a two-column table, its first row serving as the header (owner, 2026-11-13):
+
+    ```markdown
+    | ➡️ **NEXT** | Muhammed says go on the four scenes, then I push them to #1138. |
+    | --- | --- |
+    | 👀 **WAITING ON** | 🧑 **MUHAMMED** |
+    | 📍 **STATUS** | ⏳ **AWAITING** |
+    ```
+
+    NEXT is the next action. WAITING ON names whoever must act next, in the header's style: `🧑 **MUHAMMED**`,
+    `🤖 **<AGENT OR THREAD NAME>**`, or `⚙️ **<AUTOMATION>**` (such as sign-off or the merge queue). STATUS is one of
+    `🟡 **ATTENTION NEEDED**`, `⏳ **AWAITING**` (on-track work waiting on a named external event), `🔴 **ACTION REQUIRED**`, or
+    `⛔ **BLOCKED**`. Omit a row with nothing to say: no next action, nobody to wait on, or all good. With no rows left, omit the
+    table and the `---` before it (owner, 2026-11-13).
 - **DECISION-CONTEXT** — Start each question with 🔴 and its own letter, such as "🔴 **A** Which quiet screen?". Give one line on today's
   behavior with a concrete example, then one line per option numbered after the question, **A1**, **A2**, **A3**, with its tradeoff, and
   mark your recommendation. End every non-blocking question with a numbered "Skip" option that leaves today's behavior; omit it only when work cannot continue without an
@@ -324,12 +332,8 @@ Reply freely; prefer visualisations, see $show-me.
   replies never repeat, shorten, or relabel it (owner, 2026-11-12). Until it is answered, they carry one line instead, before Close:
   "💬 N questions waiting for Muhammed: <link to where they wait>".
   <!-- profile:personal -->
-  - Post each question to hq's Needs you as you ask it: `hq ask --project … --title … --context … --option "label|tradeoff|rec" …`, ending
-    with a Skip option, reserves its letter from the one shared sequence and prints its keys (A1, A2, A3); ask it in chat with
-    exactly those. The waiting line links [hq](https://hq.harium.app/); `hq questions` lists this thread's open ones.
-  - A pick on hq reaches this thread as a message and closes the item. When Muhammed answers in chat instead, close it with
-    `hq drop <letter>`; when the question changes, repost it with `hq ask --letter <letter> …`.
-  - Keepers keep asking through `hk ask`, which posts to the same page.
+  - Ask thread-specific questions only in this thread, never on hq; only keepers post to hq's Needs you, through `hk ask`
+  (owner, 2026-11-13). Take letters with `hk letters` (spare Macs: `ssh main-mac-inbox letters`) so they stay unique across threads.
   <!-- /profile -->
 - **VISUAL-DECISIONS** — For decisions about what users see, show each option as an image, following **Phone-ready media**: a running-app
   screenshot for existing options, a rendered mockup otherwise. Text and ASCII sketches do not replace images.

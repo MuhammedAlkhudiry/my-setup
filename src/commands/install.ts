@@ -315,15 +315,9 @@ async function installSharedSkills(profile: DeviceProfile): Promise<void> {
   });
 }
 
-async function installOpencode(profile: DeviceProfile, rtk: boolean): Promise<void> {
+async function installOpencode(profile: DeviceProfile): Promise<void> {
   copyRules(OPENCODE_PATHS.rules, "OpenCode", profile);
   await mergeOpencodeConfigAsync(profile);
-  if (!rtk) return;
-  // Use the plugin bundled with the installed RTK binary; leave agent rules alone.
-  await execa("rtk", ["init", "--global", "--opencode", "--hook-only", "--no-trust-filters"], {
-    stdio: "pipe",
-  });
-  print.success("RTK OpenCode plugin installed");
 }
 
 async function mergeOpencodeConfigAsync(profile: DeviceProfile): Promise<void> {
@@ -968,14 +962,13 @@ export async function install(): Promise<DeviceProfile> {
 
   const profile = readDeviceProfile(HOME);
   const claude = claudePaths(profile);
-  const rtk = profile.opencode && (await detectRtk(profile));
 
   if (profile.shell) await assertThinUserZshrc();
   await configureRepoGitHooks();
 
   await Promise.all([
     installSharedSkills(profile),
-    profile.opencode && installOpencode(profile, rtk),
+    profile.opencode && installOpencode(profile),
     installCodex(profile),
     profile.shell && installShared(profile),
     profile.claude === "pool"
@@ -1085,16 +1078,6 @@ async function installRaycastPoolProvider(): Promise<void> {
   } else {
     print.success("Raycast Claude pool provider is current");
   }
-}
-
-// Returns whether the RTK OpenCode plugin can be installed; a profile that requires RTK fails without it.
-async function detectRtk(profile: DeviceProfile): Promise<boolean> {
-  if (Bun.which("rtk")) return true;
-  if (profile.rtk === "required") {
-    throw new Error("RTK is required. Run brew install rtk, then rerun mise run install.");
-  }
-  print.warning("RTK not found; skipped the RTK OpenCode plugin");
-  return false;
 }
 
 if (import.meta.main) {

@@ -2,7 +2,7 @@
 # Forced SSH command for spare Macs' inbox keys: such a key can only post the message on stdin to a keeper thread on
 # this Mac (ssh main-mac-inbox send [housekeeper|ops|business] <<< "message"; the Housekeeper by default), or reach this Mac's merge queue with `merge-queue add`,
 # `merge-queue status`, or `merge-queue wait`, which spare Macs' merge-queue command does for them, or reserve the next question
-# letter with `letters`, which spare Macs' `hq ask` does. The CLI validates forwarded arguments.
+# letter with `letters`, which spare Macs' `hq push page` does for options blocks. The CLI validates forwarded arguments.
 # authorized_keys: restrict,command="<this file> <mac name>" ssh-ed25519 ...
 
 set -euo pipefail

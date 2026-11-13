@@ -71,19 +71,13 @@ export default function StatusPage({ filter, setFilter }: { filter: Filter; setF
   const needs = group("Needs you"), read = group("To read"), scheduled = group("Scheduled"), watching = group("Watching")
   const waiting = needs.filter((i) => !status.data!.answers[i.id]).length
 
-  // Keeper groups first, then one group per thread that asked through `hq ask`.
+  // One group per keeper, each asking in its own thread.
   const groups = [
     ...KEEPER_ORDER.map((keeper) => ({
       key: keeper,
       title: KEEPER[keeper],
       link: keeperThread(keeper),
-      items: needs.filter((i) => !i.thread && i.owner === keeper),
-    })),
-    ...[...new Map(needs.flatMap((i) => (i.thread ? [[i.thread.id, i.thread] as const] : []))).values()].map((thread) => ({
-      key: thread.id,
-      title: thread.title,
-      link: thread.link,
-      items: needs.filter((i) => i.thread?.id === thread.id),
+      items: needs.filter((i) => i.owner === keeper),
     })),
   ].filter((g) => g.items.length)
 
@@ -175,7 +169,7 @@ export default function StatusPage({ filter, setFilter }: { filter: Filter; setF
           {!watching.length && <p className="px-6 text-sm text-muted-foreground">Nothing watched.</p>}
         </CardContent>
       </Card>
-      <p className="pb-4 text-center text-xs text-muted-foreground">Picks save the moment you tap and reach the thread that asked within a minute.</p>
+      <p className="pb-4 text-center text-xs text-muted-foreground">Picks stay drafts in this browser until you press Send; one Send delivers them all to the Housekeeper.</p>
     </div>
   )
 }

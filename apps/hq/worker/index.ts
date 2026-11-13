@@ -2,7 +2,7 @@
 // keepers push to R2 and saves the owner's picks. Every /api request must carry a valid Access token for the HQ application,
 // so the API stays private even if the Worker were reached some other way.
 import {
-  Answer, AnswerInput, HQ_HOST, Question, REPORT_TYPES, Status, pageKey, pagePickKey, questionKey, type Page, type ReportType,
+  Answer, AnswerInput, PageSendInput, REPORT_TYPES, Status, pageKey, pagePickKey, pageSendKey, type Page, type PageSend, type ReportType,
 } from "../contract";
 
 interface Env {
@@ -75,15 +75,10 @@ async function listKeys(env: Env, prefix: string): Promise<string[]> {
   return keys;
 }
 
-async function questions(env: Env): Promise<Question[]> {
-  const keys = await listKeys(env, "questions/");
-  return (await Promise.all(keys.map((key) => readJson<Question>(env, key)))).filter((q): q is Question => !!q);
-}
-
-/** Status items and thread questions with the owner's pending picks, so a pick shows as sent until it is applied. */
+/** Status items with the owner's pending picks, so a pick shows as sent until it is applied. */
 async function status(env: Env) {
-  const [saved, asked] = await Promise.all([readJson<Status>(env, "status.json"), questions(env)]);
-  const items = [...(saved?.items ?? []), ...asked];
+  const saved = await readJson<Status>(env, "status.json");
+  const items = saved?.items ?? [];
   const keys = await listKeys(env, "answers/");
   const all = await Promise.all(keys.map((key) => readJson<Answer>(env, key)));
   const byId = new Map(items.map((item) => [item.id, item]));
@@ -145,58 +140,58 @@ async function api(request: Request, env: Env, path: string[]): Promise<Response
     return json({ ok: true, answer });
   }
 
-  // Thread questions: any thread posts, updates, and drops its own; main-mac's `hq deliver` reads them with their picks.
-  if (route === "questions") {
-    const id = type;
-    if (request.method === "GET" && !id) {
-      const [asked, keys] = await Promise.all([questions(env), listKeys(env, "answers/")]);
-      const answers = await Promise.all(keys.map((key) => readJson<Answer>(env, key)));
-      const byId = new Map(answers.filter((a): a is Answer => !!a).map((a) => [a.id, a]));
-      return json({ questions: asked.map((question) => ({ question, answer: byId.get(question.id) ?? null })) });
-    }
-    if (request.method === "PUT" && id) {
-      const parsed = Question.safeParse(await request.json().catch(() => null));
-      if (!parsed.success) return fail(400, parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; "));
-      if (parsed.data.id !== id) return fail(400, "id does not match the path");
-      const old = await readJson<Question>(env, questionKey(id));
-      const question = { ...parsed.data, createdAt: old?.createdAt ?? parsed.data.createdAt, updatedAt: new Date().toISOString() };
-      await env.DATA.put(questionKey(id), JSON.stringify(question), { httpMetadata: { contentType: "application/json" } });
-      return json({ ok: true, question });
-    }
-    // `hq deliver` clears a note-only answer it passed on, leaving the question open.
-    if (request.method === "DELETE" && id && date === "answer") {
-      await env.DATA.delete(answerKey(id));
-      return json({ ok: true });
-    }
-    if (request.method === "DELETE" && id) {
-      // A page question keeps its pick, so the page still shows what Muhammed chose after the item closes.
-      const [question, answer] = await Promise.all([readJson<Question>(env, questionKey(id)), readJson<Answer>(env, answerKey(id))]);
-      if (answer?.choice && question?.report?.startsWith(`https://${HQ_HOST}/p/`))
-        await env.DATA.put(pagePickKey(id), JSON.stringify(answer), { httpMetadata: { contentType: "application/json" } });
-      await Promise.all([env.DATA.delete(questionKey(id)), env.DATA.delete(answerKey(id))]);
-      return json({ ok: true });
-    }
-  }
+  if (route === "pages" && type && !/^[a-z0-9-]+$/.test(type)) return fail(404, "no such page");
 
-  // A page with the state of each of its questions: open, the pick waiting for delivery, or the pick already delivered.
+  // A page with each options block's pick, sent or waiting for delivery.
   if (request.method === "GET" && route === "pages" && type) {
-    if (!/^[a-z0-9-]+$/.test(type)) return fail(404, "no such page");
     const page = await readJson<Page>(env, pageKey(type));
     if (!page) return fail(404, "no such page");
-    const ids = page.blocks.flatMap((b) => (b.type === "options" && b.question ? [b.question] : []));
-    const picks = Object.fromEntries(
-      await Promise.all(
-        ids.map(async (id) => {
-          const [open, answer, kept] = await Promise.all([
-            env.DATA.head(questionKey(id)),
-            readJson<Answer>(env, answerKey(id)),
-            readJson<Answer>(env, pagePickKey(id)),
-          ]);
-          return [id, { open: !!open, answer: answer ?? kept ?? null }] as const;
-        }),
-      ),
-    );
-    return json({ page, picks });
+    const ids = page.blocks.flatMap((b) => (b.type === "options" ? [b.id] : []));
+    const [picks, pending] = await Promise.all([
+      Promise.all(ids.map(async (id) => [id, (await readJson<Answer>(env, pagePickKey(type, id))) ?? null] as const)),
+      env.DATA.head(pageSendKey(type)),
+    ]);
+    return json({ page, picks: Object.fromEntries(picks), delivering: !!pending });
+  }
+
+  // One Send: saves every block's pick and queues them as one message to the page's thread.
+  if (request.method === "POST" && route === "pages" && type && date === "picks") {
+    if (by.startsWith("service:")) return fail(403, "only the owner answers");
+    const page = await readJson<Page>(env, pageKey(type));
+    if (!page) return fail(404, "no such page");
+    const parsed = PageSendInput.safeParse(await request.json().catch(() => null));
+    if (!parsed.success) return fail(400, parsed.error.issues.map((i) => i.message).join("; "));
+    const blocks = new Set(page.blocks.flatMap((b) => (b.type === "options" ? [b.id] : [])));
+    const at = new Date().toISOString();
+    const picks: Record<string, Answer> = {};
+    for (const [id, pick] of Object.entries(parsed.data.picks))
+      if (blocks.has(id) && (pick.choice || pick.note.trim())) picks[id] = { id, ...pick, at, by };
+    if (!Object.keys(picks).length) return fail(400, "nothing to send");
+    const put = (key: string, body: unknown) => env.DATA.put(key, JSON.stringify(body), { httpMetadata: { contentType: "application/json" } });
+    // Picks sent before an earlier send was delivered join it, so the thread still gets one message.
+    const queued = await readJson<PageSend>(env, pageSendKey(type));
+    await Promise.all([
+      ...Object.values(picks).map((answer) => put(pagePickKey(type, answer.id), answer)),
+      put(pageSendKey(type), { slug: type, picks: { ...queued?.picks, ...picks }, at } satisfies PageSend),
+    ]);
+    return json({ ok: true, picks });
+  }
+
+  // main-mac's `hq deliver` reads queued page sends and clears each once its thread has it.
+  if (route === "page-sends") {
+    if (request.method === "GET" && !type) {
+      const sends = await Promise.all((await listKeys(env, "page-sends/")).map((key) => readJson<PageSend>(env, key)));
+      const withPages = await Promise.all(
+        sends.filter((s): s is PageSend => !!s).map(async (send) => ({ send, page: await readJson<Page>(env, pageKey(send.slug)) })),
+      );
+      return json({ sends: withPages });
+    }
+    if (request.method === "DELETE" && type && /^[a-z0-9-]+$/.test(type)) {
+      // Only the send that was delivered; picks queued since then stay for the next run.
+      const queued = await readJson<PageSend>(env, pageSendKey(type));
+      if (queued && queued.at === new URL(request.url).searchParams.get("at")) await env.DATA.delete(pageSendKey(type));
+      return json({ ok: true });
+    }
   }
 
   if (request.method === "POST" && route === "notify") {
